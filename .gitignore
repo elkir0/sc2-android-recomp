@@ -1,0 +1,3 @@
+.git/
+artifacts/
+*.iso *.mpq* *.exe *.dds *.m3

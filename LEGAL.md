@@ -1,0 +1,12 @@
+# Legal Policy / Politique légale
+
+**EN — Summary.** This repository distributes original tooling only: a differential-testing oracle, supervision tooling, and methodology documentation. It does not distribute, and will never distribute: (a) any game executable or binary, (b) any game asset (textures, models, sounds, maps, videos), (c) any decompiled, lifted or recompiled representation of the game's code, (d) any data file extracted from the game. All such derived artifacts are produced locally by each user, from their own legitimate copy, and remain on their machine. The project targets offline, single-player, personal use. It does not circumvent any online service, matchmaking, or technical protection measure governing access to online services. StarCraft and Blizzard Entertainment are trademarks of Blizzard Entertainment, Inc.; this project is independent, non-commercial, unaffiliated and unendorsed.
+
+**FR — Résumé.** Ce dépôt ne distribue que de l'outillage original : un oracle de test différentiel, des outils de supervision et de la documentation méthodologique. Il ne distribue pas et ne distribuera jamais : (a) aucun exécutable ou binaire du jeu, (b) aucun asset du jeu (textures, modèles, sons, cartes, vidéos), (c) aucune représentation décompilée, liftée ou recompilée du code du jeu, (d) aucun fichier de données extrait du jeu. Tous ces artefacts dérivés sont produits localement par chaque utilisateur, depuis sa propre copie légitime, et restent sur sa machine. Le projet cible l'usage hors-ligne, solo, personnel. Il ne contourne aucun service en ligne, aucun matchmaking, aucune mesure technique de protection régissant l'accès aux services en ligne. StarCraft et Blizzard Entertainment sont des marques de Blizzard Entertainment, Inc. ; ce projet est indépendant, non commercial, sans affiliation ni aval.
+
+## Enforcement / Application
+
+1. A CI workflow (`.github/workflows/legal-scan.yml`) inspects every commit and **fails** if it finds: game-binary hashes, asset formats (MPQ archives, DDS textures, M3 models, SC2 map/bank files), executables, or files above 20 MB.
+2. Commits violating this policy are reverted on sight.
+3. Takedown requests are honoured promptly: contact via GitHub issues on this repository.
+4. Contributors must confirm, in their PR, that every contributed file is original work or MIT-compatible tooling.

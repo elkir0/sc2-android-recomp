@@ -1,0 +1,26 @@
+name: legal-scan
+on: [push, pull_request]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No binaries, no assets, no game-derived content
+        run: |
+          set -e
+          FAIL=0
+          # 1) extensions interdites / forbidden extensions
+          BAD=$(find . -path ./.git -prune -o -type f \( -iname '*.exe' -o -iname '*.dll' -o -iname '*.mpq' -o -iname '*.mpqe' -o -iname '*.dds' -o -iname '*.m3' -o -iname '*.s2map' -o -iname '*.sc2map' -o -iname '*.bank' -o -iname '*.iso' -o -iname '*.w3x' \) -print)
+          if [ -n "$BAD" ]; then echo "::error::Forbidden files (game binaries/assets)::$BAD"; FAIL=1; fi
+          # 2) gros fichiers / oversized files
+          BIG=$(find . -path ./.git -prune -o -type f -size +20M -print)
+          if [ -n "$BIG" ]; then echo "::error::Oversized files (likely derived blobs)::$BIG"; FAIL=1; fi
+          # 3) magies MPQ/PE dans les fichiers committés / magic bytes
+          HIT=$(grep -rl $'MPQ\x1a' --include='*' . 2>/dev/null | grep -v '^\./\.git' | head -5 || true)
+          if [ -n "$HIT" ]; then echo "::error::MPQ archive magic found::$HIT"; FAIL=1; fi
+          # 4) secrets / tokens (garde de base)
+          SEC=$(grep -rEn '(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|xox[baprs]-)' --include='*.py' --include='*.sh' --include='*.md' --include='*.json' . 2>/dev/null | grep -v '^\./\.git' | head -3 || true)
+          if [ -n "$SEC" ]; then echo "::error::Possible secret::$SEC"; FAIL=1; fi
+          exit $FAIL
