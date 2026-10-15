@@ -2,7 +2,8 @@
 // Chantier SC2 Partout (Reverso-SC2). Usage : mpqlist <archive> [--tailles]
 // --tailles : chaque ligne devient « <taille du catalogue MPQ>\t<nom> » (SFileGetFileSize ; « - » si
 // l'entrée du listfile n'existe pas dans l'archive). Sans option : noms seuls, comme avant.
-// Lecture du (listfile) interne en accumulate borné (2 Mo max, règle streaming),
+// Lecture du (listfile) interne en accumulate borné (256 Mo max, règle streaming ;
+// troncature au plafond = exit 3 BRUYANT, jamais silencieuse),
 // fallback sur l'énumération SFileFind*.
 // Construction (binaire HORS git, dans tools/ — à refaire après toute modification de ce source :
 // le défaut du dernier bloc partiel a survécu une journée dans un tools/mpqlist jamais recompilé) :
@@ -28,10 +29,18 @@ int main(int argc, char** argv) {
         // Même défaut que l'ancien mpqget : « while (SFileReadFile(...) && nb > 0) » abandonnait le
         // dernier bloc PARTIEL (SFileReadFile rend FALSE + ERROR_HANDLE_EOF avec nb > 0) — un grand
         // listfile de 809 851 octets n'était lu que sur 786 432 (12 × 64 Kio) : entrées de la fin perdues.
-        while (acc.size() < 2u*1024*1024) {
+        const size_t PLAFOND_LISTFILE = 256u*1024*1024; // 256 Mo — le listfile d'un gros MPQ d'installer dépasse 4 Mio : l'ancien plafond 2 Mio tronquait le listing à MOITIÉ sans aucun signal.
+        bool eof_listfile = false;
+        while (acc.size() < PLAFOND_LISTFILE) {
             bool ok = SFileReadFile(hList, buf, sizeof(buf), &nb, NULL);
             acc.append(buf, nb);
-            if (!ok || nb == 0) break;
+            if (!ok || nb == 0) { eof_listfile = true; break; }
+        }
+        if (!eof_listfile) {
+            fprintf(stderr, "# ATTENTION : (listfile) TRONQUÉ — plafond %zu octets atteint sans EOF ; listing incomplet REFUSÉ (exit 3)\n", PLAFOND_LISTFILE);
+            SFileCloseFile(hList);
+            SFileCloseArchive(hMpq);
+            return 3;
         }
         SFileCloseFile(hList);
         printf("# (listfile) : %zu octets\n", acc.size());

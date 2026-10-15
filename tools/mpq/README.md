@@ -35,6 +35,19 @@ fatal, and requires the total to equal the catalog size (`rc 0` ⟺ complete ext
 `rc 1` with the output removed). `mpqlist` reads the whole `(listfile)` (same fix), strips CRLF,
 and adds `--tailles` (catalog size per entry — handy to prepare extraction control benches).
 
+**Second piège — le plafond de listfile silencieux (FR).** `mpqlist` lisait le `(listfile)`
+dans un accumulate plafonné à 2 Mio (« règle streaming »). Or le listfile d'un gros MPQ
+d'installer dépasse 4 Mio : le listing sortait **tronqué à moitié sans aucun signal** — des
+archives entières semblaient « absentes du média ». Le plafond est désormais 256 Mo et la
+troncature n'est plus jamais silencieuse : plafond atteint sans EOF ⇒ message sur stderr +
+exit 3, listing incomplet refusé.
+
+**EN:** `mpqlist` used to read the `(listfile)` into a 2 MiB-capped buffer ("streaming rule").
+A large installer MPQ's listfile exceeds 4 MiB, so listings came out **truncated to half,
+silently** — whole archives looked "absent from the media". The cap is now 256 MiB and
+truncation is never silent: cap reached before EOF ⇒ stderr message + exit 3, incomplete
+listing refused.
+
 ## Build (dependency: StormLib)
 
 ```sh
@@ -51,4 +64,5 @@ a survécu une journée dans un binaire périmé.
 ```sh
 mpqget  <archive> <internal-name> <destination>   # rc 0 ⟺ extracted bytes == catalog size
 mpqlist <archive> [--tailles]                     # names only, or "<size>\t<name>" lines
+                                                  # rc 3 ⟺ (listfile) truncated at the cap (refused)
 ```
