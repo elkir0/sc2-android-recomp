@@ -19,6 +19,8 @@ See / voir [LEGAL.md](LEGAL.md).
 | Path | Description (EN/FR) |
 |---|---|
 | `tools/difftest/` | **Per-function oracle**: runs any lifted function with an injected CPU/memory state on your host, replays the original bytes in Unicorn as the hardware reference, and diffs every register, flag and written byte. / **Oracle par fonction** : exécute toute fonction liftée avec un état CPU/mémoire injecté, rejoue les octets originaux dans Unicorn comme référence matérielle, et compare chaque registre, flag et octet écrit. |
+| `tools/d3d9-shaders/` | **D3D9 SM2/3 bytecode → SPIR-V offline translator**: decoder + translator + cache extractor + frame metric. 202/202 boot shaders validated by `spirv-val`. / **Traducteur hors-ligne bytecode D3D9 SM2/3 → SPIR-V** : décodeur, traducteur, extracteur de cache, métrique de frame. |
+| `tools/android-porting/` | **Bionic porting kit**: user-space fibers (ucontext for Android's libc, arm64 asm) + configure-time `cpu.h` atomics patch for delta-arena mode. / **Kit de portage bionic** : fibres user-space (ucontext pour la libc Android, asm arm64) + patch configure-time des atomiques `cpu.h` en mode arène delta. |
 | `docs/METHOD.md` | The end-to-end methodology: PE analysis → lift (CPU-struct model) → host runtime → headless Vulkan backend → per-function differential testing. / La méthodologie de bout en bout. |
 | `.github/workflows/legal-scan.yml` | CI guard: rejects any commit containing binaries, assets or game-derived blobs. / Garde CI : rejette tout commit contenant binaires, assets ou blobs dérivés du jeu. |
 
@@ -30,8 +32,8 @@ See / voir [LEGAL.md](LEGAL.md).
 - [x] Game data mounted (MPQ/StormLib), 194 real pixel shaders reachable / données du jeu montées
 - [x] First real pixels: D3D9→Vulkan headless backend (Lavapipe) / premiers pixels réels
 - [x] Per-function oracle: 42,000+ functions swept, 1,300+ certified byte-exact / oracle par fonction
-- [ ] Shaders SM2/3 → SPIR-V translation (in progress) / traduction des shaders
-- [ ] Android APK chain (NDK r28, NativeActivity) / chaîne APK Android
+- [x] Shaders SM2/3 → SPIR-V translation: 75,797 distinct bytecodes extracted, 202/202 boot shaders `spirv-val`-validated, 5,771 real draws — **title screen renders** (2,570 distinct 16×16 blocks on frame 10) / traduction des shaders : **l'écran-titre s'affiche**
+- [x] Android APK chain (NDK r28, NativeActivity, delta-arena, fibers for bionic): reproducible signed APK built locally, qemu bench (fake ART heap) reaches the game loop rc=0 / chaîne APK Android : APK signé reproductible, banc qemu jusqu'à la boucle du jeu
 - [ ] Playable on a Galaxy Z Fold 8 / jouable sur Galaxy Z Fold 8
 
 ## License
