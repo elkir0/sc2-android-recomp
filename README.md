@@ -23,10 +23,21 @@ See / voir [LEGAL.md](LEGAL.md).
 | `tools/android-porting/` | **Bionic porting kit**: user-space fibers (ucontext for Android's libc, arm64 asm) + configure-time `cpu.h` atomics patch for delta-arena mode. / **Kit de portage bionic** : fibres user-space (ucontext pour la libc Android, asm arm64) + patch configure-time des atomiques `cpu.h` en mode arène delta. |
 | `tools/audio/` | **Audio import decoder & WAV proof checker**: `decode-msvc-audio-imports.py` decodes MSVC-decorated C++ import names (e.g. a whole FMOD Ex API) from a PE import table into a C dispatch table — stdcall stack words to pop, nature of every arg (value / double / in-pointer / out-scalar / out-object / string / callback); `wav-dump-stats.py` checks an audio dump WAV (duration, non-zero samples, peak, saturation, Shannon entropy per sample and per byte, RMS per second — a real sound is neither a flat line nor uniform noise). / **Décodeur d'imports audio & vérificateur de preuve WAV** : décode les noms d'imports C++ décorés MSVC (ex. toute une API FMOD Ex) d'une table d'imports PE en table C de dispatch — mots dépilés stdcall, nature de chaque argument ; vérifie un WAV d'audio (durée, échantillons non nuls, crête, saturation, entropie de Shannon par échantillon et par octet, RMS par seconde — un son réel n'est ni un aplat ni un bruit uniforme). |
 | `tools/mpq/` | **MPQ extract & list (StormLib), hardened against the partial-block EOF trap**: `SFileReadFile` returns FALSE + `ERROR_HANDLE_EOF` *with bytes read* on a final partial read — the naive `while (SFileReadFile(...) && nb > 0)` loop silently truncates any non-multiple of the 64 KiB buffer and empties anything smaller. `mpqget` = size-checked extraction (rc 0 ⟺ total == catalog size), `mpqlist` = full `(listfile)` read + `--tailles` catalog sizes. / **Extraction & listing MPQ (StormLib), durcis contre le piège EOF de bloc partiel** : `SFileReadFile` rend FALSE + `ERROR_HANDLE_EOF` *avec des octets lus* sur la dernière lecture partielle — la boucle naïve `while (SFileReadFile(...) && nb > 0)` tronque silencieusement tout non-multiple du tampon 64 KiB et vide tout fichier plus petit. `mpqget` = extraction à taille vérifiée, `mpqlist` = lecture complète du `(listfile)` + `--tailles` (tailles du catalogue). |
+| `scripts/theora-android.sh` | **Ogg Theora decoder for Android aarch64**: downloads the official Xiph.Org libogg 1.3.5 + libtheora 1.1.1 sources (sha256-checked) and cross-compiles them with the NDK into deterministic static archives (`libtheoradec.a`, `libogg.a`) ready to link into a native `.so` — see *Bricks* below. / **Décodeur Ogg Theora pour Android aarch64** : télécharge les sources officielles Xiph.Org (sha256 vérifiés) et les compile avec le NDK en archives statiques déterministes, prêtes à lier dans une `.so` native — voir *Briques* plus bas. |
 | `docs/METHOD.md` | The end-to-end methodology: PE analysis → lift (CPU-struct model) → host runtime → headless Vulkan backend → per-function differential testing. / La méthodologie de bout en bout. |
 | `.github/workflows/legal-scan.yml` | CI guard: rejects any commit containing binaries, assets or game-derived blobs. / Garde CI : rejette tout commit contenant binaires, assets ou blobs dérivés du jeu. |
 
 ## Status / État (2026-10)
+
+| Building block / Brique | State / État |
+|---|---|
+| Static recompilation (lift x86-32 → portable C) / recompilation statique | ✅ done — 86,650 functions, boots to the main loop on x86-64 and ARM64 / fait |
+| Vulkan renderer (D3D9 → Vulkan, shaders SM2/3 → SPIR-V) / rendu Vulkan | ✅ title screen, campaign menu 3D scene, mission terrain + HUD, minimap, unit sprites; cast shadows (opt-in) / écran-titre, menu 3D, terrain + HUD de mission, minicarte, unités ; ombres portées (opt-in) |
+| Android APK (NDK r28, NativeActivity, Vulkan swapchain) / APK Android | ✅ reproducible signed APK; runs on an Android ARM64 emulator (title screen, first mission loads) / APK signé reproductible ; tourne sur émulateur |
+| Audio (engine sound API → software mixer → AAudio) / audio | ✅ menu and in-mission audio play / l'audio du menu et de mission joue |
+| Video (Ogg Theora cinematics) / vidéo | 🟡 the engine's own menu cinematic decodes on the x86 bench; the Theora decoder is now **built and linked into the APK** (`scripts/theora-android.sh`) — on-device check pending / la cinématique du menu se décode sur le banc x86 ; le décodeur Theora est **compilé et lié dans l'APK** — vérification sur appareil à venir |
+| Playable on a Galaxy Z Fold 8 / jouable sur Fold 8 | ⬜ not yet / pas encore |
+
 
 - [x] Full ISO inventory & extraction pipeline (over your own copy) / inventaire ISO complet
 - [x] 86,650 functions lifted to portable C (CPU-struct reentrant model) / fonctions liftées en C portable
@@ -53,7 +64,49 @@ See / voir [LEGAL.md](LEGAL.md).
 - [x] **Unit selection fills the command UI, button-issued orders move the group**: a selection rectangle picks 6 marines + the hero (green rings); the bottom panels fill in — command card 1.7→26.8 % non-blank (Move/Stop/Hold/Patrol/Attack buttons), hero portrait, selection panel 0.4→6.9 % (group icons, after translating 5 missing selection shaders, table 1,639) — and a button-issued Move order drives the group across the map (reproduced twice, base fingerprints unchanged) / **la sélection d'unités remplit l'interface de commandement, un ordre donné au bouton déplace le groupe** : un rectangle de sélection prend 6 marines + le héros (anneaux verts) ; les panneaux bas se remplissent — carte de commande 1,7→26,8 % non vide (boutons Move/Stop/Hold/Patrol/Attack), portrait du héros, panneau de sélection 0,4→6,9 % (icônes du groupe, après traduction de 5 shaders de sélection manquants, table 1 639) — et un ordre Move donné au bouton conduit le groupe à travers la carte (reproduit ×2, empreintes de base inchangées)
 - [x] **Full campaign flow plays in-engine — intro cinematic, mid-mission hologram call, live in-game HUD**: a 2,200-frame verification run on merged main drives the whole opening — the intro cinematic renders the full 3D terrain (canyon with multi-level cliffs, terran bridge, marked road, ~6 marines + a flying unit, no HUD), an in-engine hologram cutscene plays mid-mission, and the in-game HUD is fully live (hero selected with portrait + ~10-button command card, objectives panel 0/25 survive + 0/30 destroy, fog-of-war minimap); 1,877,334 real draws in one run — the "terrain missing" hypothesis is refuted / **le flux de campagne complet se joue en moteur — cinématique d'intro, hologramme en pleine mission, HUD de jeu vivant** : un run de vérification de 2 200 frames sur le main fusionné pilote toute l'ouverture — la cinématique d'intro rend le terrain 3D complet (canyon à falaises multi-niveaux, pont terran, route marquée, ~6 marines + une unité volante, sans HUD), un hologramme en moteur joue en pleine mission, et le HUD de jeu est pleinement vivant (héros sélectionné avec portrait + carte de commandement ~10 boutons, panneau d'objectifs 0/25 survivre + 0/30 détruire, minicarte sous brouillard de guerre) ; 1 877 334 draws réels en un run — l'hypothèse « terrain manquant » est infirmée
 - [x] **In-mission audio plays; minimap-issued orders; the shadow path mapped end-to-end**: the full in-mission audio scene plays through the translated engine (39 sounds created, zero failures, 666 game-file reads ≈ 42 MiB, reference music correlated 94–99 % on the active windows), scripted clicks ON the minimap now issue real move orders (camera and units travel across the map), and the shadow pipeline is fully diagnosed with measurements: the engine never samples its D32 depth surface (format-refusal path A proven insufficient), so the fix is specified — a per-sampler runtime flag + PCF comparison at Vulkan sampler creation (next pass) / **l'audio de mission joue ; ordres donnés depuis la minicarte ; la chaîne d'ombres cartographiée de bout en bout** : la scène audio de mission complète joue dans le moteur traduit (39 sons créés, zéro échec, 666 lectures de fichiers du jeu ≈ 42 Mio, musique de référence corrélée à 94–99 % sur les fenêtres actives), des clics scriptés SUR la minicarte donnent désormais de vrais ordres de déplacement (caméra et unités traversent la carte), et la chaîne d'ombres est entièrement diagnostiquée avec mesures : le moteur n'échantillonne jamais sa surface de profondeur D32 (voie A par refus de format prouvée insuffisante) — le correctif est spécifié : drapeau runtime par sampler + comparaison PCF à la création du sampler Vulkan (passe suivante)
+- [x] **Cast shadows rendered (opt-in)**: the shadow-map pixel shaders are translated with a depth-compare variant (`sampler2DShadow`, `textureProj` with reference) selected per sampler at runtime, and the D3D9 depth-bias states are carried over to Vulkan (no shadow acne); A/B-proven shadows under units, bridge, trees; default output byte-identical when off / **ombres portées rendues (opt-in)** : les PS de la carte d'ombres sont traduits avec une variante à comparaison de profondeur choisie par sampler à l'exécution, et les biais de profondeur D3D9 passent à Vulkan (pas d'acné) ; ombres prouvées A/B ; sortie par défaut identique à l'octet quand désactivé
+- [x] **Video path: engine cinematics decode; Theora decoder linked into the APK**: the two video shaders (YCbCr → RGB) are translated so the engine's video quad draws for real; a measured diagnosis showed the texture-upload path was sound and the decoder was starved by an unimplemented audio-DSP clock — implementing the engine's DSP callbacks makes the menu cinematic decode and play on the x86 bench. On the Android side, `scripts/theora-android.sh` cross-compiles libogg + libtheora (decoder) and the APK now links them (build verified, on-device run pending) / **voie vidéo : les cinématiques du moteur se décodent ; décodeur Theora lié dans l'APK** : les deux shaders vidéo (YCbCr → RGB) sont traduits, le quad vidéo du moteur est réellement dessiné ; un diagnostic mesuré a montré que le chemin de téléversement des textures était sain et que le décodeur était affamé par une horloge DSP audio non implémentée — implémenter les rappels DSP du moteur fait se décoder et jouer la cinématique du menu sur le banc x86. Côté Android, `scripts/theora-android.sh` compile libogg + libtheora (décodeur) et l'APK les lie (build vérifié, run sur appareil à venir)
 - [ ] Playable on a Galaxy Z Fold 8 / jouable sur Galaxy Z Fold 8
+
+## Bricks / Briques
+
+### `scripts/theora-android.sh` — Ogg Theora decoder for Android aarch64
+
+**EN:** Builds the Theora **decoder** and libogg as static aarch64 libraries with the Android NDK (no assembly,
+`-O2 -fPIC`), from the official Xiph.Org release tarballs, which every user downloads themselves (nothing third-party
+is vendored here). Two runs produce identical sha256 (deterministic `llvm-ar`, `-ffile-prefix-map`).
+**FR :** Compile le **décodeur** Theora et libogg en bibliothèques statiques aarch64 avec le NDK Android (sans
+assembleur, `-O2 -fPIC`), depuis les archives officielles Xiph.Org que chaque utilisateur télécharge lui-même (aucune
+source tierce embarquée ici). Deux exécutions donnent les mêmes sha256.
+
+```sh
+ANDROID_NDK_HOME=/path/to/android-ndk-r28c ./scripts/theora-android.sh
+# → $OUT/lib/libtheoradec.a, $OUT/lib/libogg.a, $OUT/include/{ogg,theora}/, $OUT/EMPREINTES.txt (sha256)
+```
+
+| Variable | Default / Défaut | Role / Rôle |
+|---|---|---|
+| `ANDROID_NDK_HOME` (or `ANDROID_NDK`) | — (required / requis) | NDK root; tested with r28c (28.2.13676358) |
+| `ANDROID_API` | `26` | API level of the `aarch64-linux-android<API>-clang` target |
+| `THEORA_SRC` | `${XDG_CACHE_HOME:-~/.cache}/theora-android` | downloads + unpacked sources / téléchargements + sources |
+| `OUT` | `$THEORA_SRC/android-arm64` | output prefix / préfixe de sortie |
+
+Official sources, checked before use / sources officielles, vérifiées avant usage:
+
+| Tarball | sha256 |
+|---|---|
+| `https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.xz` | `c4d91be36fc8e54deae7575241e03f4211eb102afb3fc0775fbbc1b740016705` |
+| `https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.xz` | `f36da409947aa2b3dcc6af0a8c2e3144bc19db2ed547d64e9171c59c66561c61` |
+
+Link order / ordre de lien : `libtheoradec.a` then `libogg.a` (the decoder calls the ogg bit-packer).
+In CMake: `target_include_directories(app PRIVATE $OUT/include)` +
+`target_link_libraries(app PRIVATE $OUT/lib/libtheoradec.a $OUT/lib/libogg.a)`.
+
+**Licences:** libogg and libtheora are © Xiph.Org Foundation under BSD-style (3-clause) licences — keep their
+copyright notices (`COPYING` in each tarball) when you redistribute a binary that links them. This repository only
+ships the build script (MIT). / libogg et libtheora sont © Xiph.Org Foundation sous licences de type BSD (3 clauses)
+— conservez leurs mentions (`COPYING` de chaque archive) si vous redistribuez un binaire qui les lie. Ce dépôt ne
+fournit que le script de build (MIT).
 
 ## License
 
