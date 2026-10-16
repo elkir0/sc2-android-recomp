@@ -12,6 +12,7 @@ content — it operates on data each user supplies from their own copy.
 | `d3d9-vers-spirv.py` | Full translator: bytecode → GLSL 450 → `glslangValidator` → `spirv-val` → embedded SPIR-V table indexed by FNV-1a 64 of the bytecode. |
 | `extraire-shaders.py` | Extractor for precompiled shader caches: scans any blob for `vs_/ps_` version tokens, validates instruction-by-instruction, dedupes by hash, emits an index TSV. |
 | `ppm-blocs.py` | PPM frame metric: 16×16 block averages, counts distinct blocks (render-regression detector). |
+| `ppm2png.py` | PPM (P6) → PNG in pure stdlib (`zlib` + `struct`, optional brightness gain) — dependency-free proof captures from bench runs. |
 
 ## Usage
 
