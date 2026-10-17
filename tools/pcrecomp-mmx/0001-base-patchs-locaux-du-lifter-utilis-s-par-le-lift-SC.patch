@@ -1,0 +1,272 @@
+From ba51190ebdfd19921efddb4d9bcb7676fc162ff7 Mon Sep 17 00:00:00 2001
+From: elkir0 <anthony.dhaene@gmail.com>
+Date: Sat, 17 Oct 2026 11:48:01 +0000
+Subject: [PATCH 1/2] =?UTF-8?q?base:=20patchs=20locaux=20du=20lifter=20uti?=
+ =?UTF-8?q?lis=C3=A9s=20par=20le=20lift=20SC2=201610=20(movhps/movhpd,=20F?=
+ =?UTF-8?q?PU=5FCW,=20etc.),=20tels=20que=20trouv=C3=A9s=20dans=20~/tools/?=
+ =?UTF-8?q?pcrecomp=20(non=20commit=C3=A9s=20sur=20main)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ runtime/recomp32_cpu/cpu.h | 56 ++++++++++++++++++++--
+ tools/lift/lift32_cpu.py   | 98 +++++++++++++++++++++++++++++++++++---
+ 2 files changed, 145 insertions(+), 9 deletions(-)
+
+diff --git a/runtime/recomp32_cpu/cpu.h b/runtime/recomp32_cpu/cpu.h
+index a234400..e3427d5 100644
+--- a/runtime/recomp32_cpu/cpu.h
++++ b/runtime/recomp32_cpu/cpu.h
+@@ -92,6 +92,10 @@ typedef struct {
+      * per thread, and fs:[off] reads ordinary memory at fs_base+off. Left 0 and
+      * unused on the MSVC default path, which reads the real segment. */
+     uint32_t fs_base;
++    /* x87 control word, stored XOR 0x027F so a zeroed CPU has the Windows default
++     * (53-bit precision, round to nearest, all exceptions masked). Read by
++     * fist/fistp/frndint when the lifter runs with PCRECOMP_FPU_CW=1. */
++    uint16_t fpu_cwx;
+ } CPU;
+ 
+ /* ---- partial register access (preserve unaffected bits, like x86) ---- */
+@@ -103,6 +107,13 @@ typedef struct {
+ #define SET16(r, v)   ((r) = ((r) & 0xFFFF0000u) | (uint16_t)(v))
+ 
+ /* ---- memory access: register holds a real 32-bit address ---- */
++/* GPTR: host pointer for a guest address. The lifter's atomic forms (xchg
++ * with memory, lock-prefixed read-modify-write, cmpxchg8b) take it to hand the
++ * __atomic builtins a real pointer. Identity here; a host that maps the guest
++ * at an offset defines its own before including this header. */
++#ifndef GPTR
++#define GPTR(va) ((void *)(uintptr_t)(uint32_t)(va))
++#endif
+ static inline uint8_t  rd8 (uint32_t a) { return *(uint8_t  *)(uintptr_t)a; }
+ static inline uint16_t rd16(uint32_t a) { return *(uint16_t *)(uintptr_t)a; }
+ static inline uint32_t rd32(uint32_t a) { return *(uint32_t *)(uintptr_t)a; }
+@@ -307,18 +318,24 @@ static inline uint32_t flags_sbb(CPU *c, uint32_t a, uint32_t b, int sz) {
+ static inline uint32_t op_shl(CPU *c, uint32_t v, uint32_t cnt, int sz) {
+     uint32_t m = mask_sz(sz); cnt &= 31; if (!cnt) return v & m;
+     c->cf = (v >> (sz * 8 - cnt)) & 1; uint32_t r = (v << cnt) & m;
+-    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r); return r;
++    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r);
++    c->of = c->sf ^ c->cf;   /* defined for a count of 1 (MSB(r) xor CF), undefined above */
++    return r;
+ }
+ static inline uint32_t op_shr(CPU *c, uint32_t v, uint32_t cnt, int sz) {
+     uint32_t m = mask_sz(sz); v &= m; cnt &= 31; if (!cnt) return v;
+     c->cf = (v >> (cnt - 1)) & 1; uint32_t r = v >> cnt;
+-    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r); return r;
++    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r);
++    c->of = (v & sign_sz(sz)) != 0;   /* count 1: MSB of the original operand */
++    return r;
+ }
+ static inline uint32_t op_sar(CPU *c, uint32_t v, uint32_t cnt, int sz) {
+     uint32_t m = mask_sz(sz), s = sign_sz(sz); v &= m; cnt &= 31; if (!cnt) return v;
+     uint32_t ext = (v & s) ? (m << (sz * 8 - cnt)) & m : 0;
+     c->cf = (v >> (cnt - 1)) & 1; uint32_t r = ((v >> cnt) | ext) & m;
+-    c->zf = (r == 0); c->sf = (r & s) != 0; c->pf = parity8((uint8_t)r); return r;
++    c->zf = (r == 0); c->sf = (r & s) != 0; c->pf = parity8((uint8_t)r);
++    c->of = 0;   /* count 1: cleared */
++    return r;
+ }
+ 
+ /* ---- rotates. Unlike the shifts these leave ZF/SF/PF alone, which is not an
+@@ -490,6 +507,39 @@ static inline void   wri32(uint32_t a, double v) { int32_t i = (int32_t)nearbyin
+ static inline void   wri16(uint32_t a, double v) { int16_t i = (int16_t)nearbyint(v); memcpy((void *)(uintptr_t)a, &i, 2); }
+ static inline void   wri64(uint32_t a, double v) { int64_t i = (int64_t)nearbyint(v); memcpy((void *)(uintptr_t)a, &i, 8); }
+ 
++/* ---- x87 control word (PCRECOMP_FPU_CW=1) ----
++ * `fnstcw; or ah, 0x0C; fldcw; fistp; fldcw` is how MSVC truncates a float to an
++ * int on x87. Ignoring fldcw rounds to nearest instead: 2.7 becomes 3. Out of
++ * range (and NaN) stores the "integer indefinite" - the C cast is undefined
++ * there and saturates on AArch64. */
++static inline uint32_t fpu_fnstcw(CPU *c) { return (uint16_t)(c->fpu_cwx ^ 0x027Fu); }
++static inline void fpu_fldcw(CPU *c, uint32_t cw) { c->fpu_cwx = (uint16_t)(cw ^ 0x027Fu); }
++static inline uint32_t fpu_fnstsw(CPU *c) {
++    return (c->fpu_sw & ~0x3800u & 0xFFFFu) | (((uint32_t)c->fpu_top & 7u) << 11);
++}
++static inline void fpu_fninit(CPU *c) { c->fpu_cwx = (uint16_t)(0x037Fu ^ 0x027Fu); c->fpu_sw = 0; c->fpu_top = 0; }
++static inline double fpu_rndint(CPU *c, double v) {
++    switch ((fpu_fnstcw(c) >> 10) & 3) {
++    case 1:  return floor(v);
++    case 2:  return ceil(v);
++    case 3:  return trunc(v);
++    default: return nearbyint(v);
++    }
++}
++static inline void wri32r(CPU *c, uint32_t a, double v) {
++    double r = fpu_rndint(c, v); int32_t i = (r >= -2147483648.0 && r < 2147483648.0) ? (int32_t)r : INT32_MIN;
++    memcpy((void *)(uintptr_t)a, &i, 4);
++}
++static inline void wri16r(CPU *c, uint32_t a, double v) {
++    double r = fpu_rndint(c, v); int16_t i = (r >= -32768.0 && r < 32768.0) ? (int16_t)r : INT16_MIN;
++    memcpy((void *)(uintptr_t)a, &i, 2);
++}
++static inline void wri64r(CPU *c, uint32_t a, double v) {
++    double r = fpu_rndint(c, v);
++    int64_t i = (r >= -9223372036854775808.0 && r < 9223372036854775808.0) ? (int64_t)r : INT64_MIN;
++    memcpy((void *)(uintptr_t)a, &i, 8);
++}
++
+ 
+ /* fcom/fcomp: set C3/C2/C0 (st0 vs v). Cleared C1. */
+ static inline void fcompare(CPU *c, double a, double b) {
+diff --git a/tools/lift/lift32_cpu.py b/tools/lift/lift32_cpu.py
+index b62b2d3..682a7e4 100644
+--- a/tools/lift/lift32_cpu.py
++++ b/tools/lift/lift32_cpu.py
+@@ -35,7 +35,12 @@ Usage:
+ funcs.txt lines: "0xADDR  size  name" (IDA/Ghidra export), used for bounds.
+ With no addresses given, lifts every function in funcs.txt.
+ """
+-import sys, re
++import sys, re, os
++
++# SC2 Partout passe 7k : mot de contrôle x87 modélisé (fldcw/fnstcw/fninit, arrondi RC de
++# fist/fistp/frndint, « integer indefinite » hors plage). Opt-in tant que tous les cpu.h
++# appariés n'ont pas fpu_fldcw/fpu_fnstcw/fpu_fninit/wriNr/fpu_rndint (voir NOTES-SC2.md).
++FPU_CW = os.environ.get("PCRECOMP_FPU_CW") == "1"
+ from capstone import *
+ from capstone.x86 import *
+ 
+@@ -408,9 +413,18 @@ class Lifter:
+         # underneath is the one to translate; the atomicity is in the helper
+         # the xadd/cmpxchg cases below reach for, and for everything else a
+         # `lock` on a single store is what the hardware does anyway.
+-        if m.startswith("lock "):
++        locked = m.startswith("lock ")
++        if locked:
+             m = m[5:]
+ 
++        # xchg with memory is atomic whether or not it carries `lock`, and the
++        # other locked forms are what a spinlock, an Interlocked* call or a
++        # reference count compiles to. A plain read then write is right until
++        # two threads meet on the same word - see _atomic.
++        atom = self._atomic(insn, m, ops, locked)
++        if atom is not None:
++            return atom
++
+         def two(): return ops[0], ops[1]
+         def sz0(): return ops[0].size
+ 
+@@ -840,6 +854,9 @@ class Lifter:
+         if m in ("fist", "fistp"):
+             pop = "; fpop(c);" if m == "fistp" else ";"
+             sz = memop.size; a = self.addr_expr(insn, memop)
++            if FPU_CW:   # arrondi selon RC du mot de contrôle, valeur indéfinie hors plage
++                st = {2: "wri16r", 4: "wri32r", 8: "wri64r"}[sz]
++                return [f"{st}(c, {a}, *fst(c, 0)){pop}"]
+             st = {2: "wri16", 4: "wri32", 8: "wri64"}[sz]
+             return [f"{st}({a}, *fst(c, 0)){pop}"]
+         if m in ("fprem", "fprem1"):
+@@ -862,7 +879,9 @@ class Lifter:
+         if m in ("fcos",):  return ["*fst(c, 0) = cos(*fst(c, 0));"]
+         if m in ("fptan",): return ["*fst(c, 0) = tan(*fst(c, 0)); fpush(c, 1.0);"]
+         if m in ("fpatan",):return ["*fst(c, 1) = atan2(*fst(c, 1), *fst(c, 0)); fpop(c);"]
+-        if m in ("frndint",): return ["*fst(c, 0) = nearbyint(*fst(c, 0));"]
++        if m in ("frndint",):
++            if FPU_CW: return ["*fst(c, 0) = fpu_rndint(c, *fst(c, 0));"]
++            return ["*fst(c, 0) = nearbyint(*fst(c, 0));"]
+         if m in ("fscale",): return ["*fst(c, 0) = ldexp(*fst(c, 0), (int)*fst(c, 1));"]
+         if m in ("fsincos",): return ["{ double _s=sin(*fst(c,0)), _c=cos(*fst(c,0)); *fst(c,0)=_s; fpush(c,_c); }"]
+         # The rest of the 8087's transcendental set. These are not exotic: a
+@@ -977,11 +996,17 @@ class Lifter:
+             if m != "fcomi" and m != "fucomi": out.append("fpop(c);")
+             return out
+         if m == "fnstsw":
++            sw = "(uint16_t)fpu_fnstsw(c)" if FPU_CW else "(uint16_t)c->fpu_sw"   # 7k : + champ TOP
+             if ops and ops[0].type == X86_OP_REG:   # ax
+-                return ["SET16(c->eax, (uint16_t)c->fpu_sw);"]
+-            return [self.wr(insn, ops[0], "(uint16_t)c->fpu_sw")]
++                return [f"SET16(c->eax, {sw});"]
++            return [self.wr(insn, ops[0], sw)]
+         if m == "fnstcw":
++            if FPU_CW: return [self.wr(insn, ops[0], "fpu_fnstcw(c)")]
+             return [self.wr(insn, ops[0], "0x027Fu")]   # default control word
++        if FPU_CW and m == "fldcw":
++            return [f"fpu_fldcw(c, rd16({self.addr_expr(insn, ops[0])}));"]
++        if FPU_CW and m == "fninit":
++            return ["fpu_fninit(c);"]
+         if m in ("fldcw", "fwait", "wait", "fnclex", "fclex", "fninit"):
+             return [f"/* {m} ignored */"]
+         if m in ("fldenv", "fnstenv"):
+@@ -1239,7 +1264,9 @@ class Lifter:
+         # register-to-register encodings are movhlps and movlhps, which are
+         # different instructions and not these.
+         if m in ("movlps", "movlpd", "movhps", "movhpd"):
+-            lane = 1 if m[4] == "h" else 0
++            # [sc2-partout 7n] « movhps » : le h est m[3] (m[4] est le « p ») — l'ancien
++            # test ne choisissait JAMAIS la voie haute : movhps = movlps, matrices (a,b,a,b).
++            lane = 1 if m[3] == "h" else 0
+             if self._is_xmm(d):
+                 return [f"c->xmm[{self._xi(d)}].u64[{lane}] ="
+                         f" rd64({self.addr_expr(insn, s)});"]
+@@ -1529,6 +1556,65 @@ class Lifter:
+ 
+         return [_todo(insn.address, f"sse {m} {insn.op_str}")]
+ 
++    # ---- atomic memory operations ----
++    _AT_FETCH = {"add": "__atomic_fetch_add", "sub": "__atomic_fetch_sub", "and": "__atomic_fetch_and",
++                 "or": "__atomic_fetch_or", "xor": "__atomic_fetch_xor"}
++
++    def _aptr(self, insn, op):
++        """Host pointer to a memory operand, for the __atomic builtins. GPTR is
++        the guest-to-host mapping of cpu.h (identity in a 1:1 32-bit build)."""
++        return "((volatile uint%d_t *)GPTR(%s))" % (op.size * 8, self.mem_addr(insn, op))
++
++    def _atomic(self, insn, m, ops, locked):
++        """Atomic forms, or None to fall through to the ordinary translation.
++
++        Covered: xchg r/m,reg (8/16/32, implicitly locked on x86); lock
++        add/sub/and/or/xor/inc/dec on memory; lock xadd/cmpxchg at 8/16 bits
++        (32 bits stays with atomic_xadd32/atomic_cmpxchg32 below); cmpxchg8b,
++        locked or not. Flags are computed from the value memory held before,
++        exactly as the instruction defines them. GCC/Clang builtins: a cl.exe
++        build would need _Interlocked* equivalents. fs:-relative operands
++        (the TIB, per thread) keep the plain path."""
++        def memop(op):
++            return (op.type == X86_OP_MEM and op.size in (1, 2, 4)
++                    and self.seg_name(op) in (None, "ds", "ss", "es"))
++        if m == "xchg" and len(ops) == 2:
++            mo, ro = (ops[0], ops[1]) if ops[0].type == X86_OP_MEM else (ops[1], ops[0])
++            if memop(mo) and ro.type == X86_OP_REG:
++                t = "uint%d_t" % (mo.size * 8)
++                rn = self.md.reg_name(ro.reg)
++                return ["{ %s _t = __atomic_exchange_n(%s, (%s)(%s), __ATOMIC_SEQ_CST); %s }"
++                        % (t, self._aptr(insn, mo), t, reg_read(rn), reg_write(rn, "_t"))]
++            return None
++        if m == "cmpxchg8b" and ops and ops[0].type == X86_OP_MEM and self.seg_name(ops[0]) in (None, "ds", "ss", "es"):
++            a = self.mem_addr(insn, ops[0])
++            return ["{ uint64_t _e = ((uint64_t)c->edx << 32) | c->eax, _n = ((uint64_t)c->ecx << 32) | c->ebx;",
++                    "  uint64_t _old = __sync_val_compare_and_swap((volatile uint64_t *)GPTR(%s), _e, _n);" % a,
++                    "  c->zf = (_old == _e);",
++                    "  if (!c->zf) { c->eax = (uint32_t)_old; c->edx = (uint32_t)(_old >> 32); } }"]
++        if not locked or not ops or not memop(ops[0]):
++            return None
++        d = ops[0]; sz = d.size; t = "uint%d_t" % (sz * 8); p = self._aptr(insn, d)
++        if m in self._AT_FETCH and len(ops) == 2:
++            res = {"add": "flags_add(c, _old, _v, %d)", "sub": "flags_sub(c, _old, _v, %d)",
++                   "and": "flags_logicz(c, _old & _v, %d)", "or": "flags_logicz(c, _old | _v, %d)",
++                   "xor": "flags_logicz(c, _old ^ _v, %d)"}[m] % sz
++            return ["{ %s _v = (%s)(%s); %s _old = %s(%s, _v, __ATOMIC_SEQ_CST); (void)%s; }"
++                    % (t, t, self.src(insn, ops[1]), t, self._AT_FETCH[m], p, res)]
++        if m in ("inc", "dec") and len(ops) == 1:
++            fn, fl = ("__atomic_fetch_add", "flags_incs") if m == "inc" else ("__atomic_fetch_sub", "flags_decs")
++            return ["{ %s _old = %s(%s, 1, __ATOMIC_SEQ_CST); (void)%s(c, _old, %d); }" % (t, fn, p, fl, sz)]
++        if sz != 4 and m == "xadd" and len(ops) == 2 and ops[1].type == X86_OP_REG:
++            rn = self.md.reg_name(ops[1].reg)
++            return ["{ %s _v = (%s)(%s); %s _old = __atomic_fetch_add(%s, _v, __ATOMIC_SEQ_CST); %s (void)flags_add(c, _old, _v, %d); }"
++                    % (t, t, reg_read(rn), t, p, reg_write(rn, "_old"), sz)]
++        if sz != 4 and m == "cmpxchg" and len(ops) == 2:
++            acc = {1: "R8L(c->eax)", 2: "R16(c->eax)"}[sz]
++            setacc = {1: "SET8L(c->eax, _old);", 2: "SET16(c->eax, _old);"}[sz]
++            return ["{ %s _old = (%s)%s; __atomic_compare_exchange_n(%s, &_old, (%s)(%s), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);" % (t, t, acc, p, t, self.src(insn, ops[1])),
++                    "  (void)flags_sub(c, %s, _old, %d); %s }" % (acc, sz, setacc)]
++        return None
++
+     def _read_dst(self, insn, op):
+         # read a dst operand (for read-modify-write)
+         if op.type == X86_OP_REG: return reg_read(self.md.reg_name(op.reg))
+-- 
+2.39.5
+
