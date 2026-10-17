@@ -24,6 +24,7 @@ See / voir [LEGAL.md](LEGAL.md).
 | `tools/audio/` | **Audio import decoder & WAV proof checker**: `decode-msvc-audio-imports.py` decodes MSVC-decorated C++ import names (e.g. a whole FMOD Ex API) from a PE import table into a C dispatch table — stdcall stack words to pop, nature of every arg (value / double / in-pointer / out-scalar / out-object / string / callback); `wav-dump-stats.py` checks an audio dump WAV (duration, non-zero samples, peak, saturation, Shannon entropy per sample and per byte, RMS per second — a real sound is neither a flat line nor uniform noise). / **Décodeur d'imports audio & vérificateur de preuve WAV** : décode les noms d'imports C++ décorés MSVC (ex. toute une API FMOD Ex) d'une table d'imports PE en table C de dispatch — mots dépilés stdcall, nature de chaque argument ; vérifie un WAV d'audio (durée, échantillons non nuls, crête, saturation, entropie de Shannon par échantillon et par octet, RMS par seconde — un son réel n'est ni un aplat ni un bruit uniforme). |
 | `tools/mpq/` | **MPQ extract & list (StormLib), hardened against the partial-block EOF trap**: `SFileReadFile` returns FALSE + `ERROR_HANDLE_EOF` *with bytes read* on a final partial read — the naive `while (SFileReadFile(...) && nb > 0)` loop silently truncates any non-multiple of the 64 KiB buffer and empties anything smaller. `mpqget` = size-checked extraction (rc 0 ⟺ total == catalog size), `mpqlist` = full `(listfile)` read + `--tailles` catalog sizes. / **Extraction & listing MPQ (StormLib), durcis contre le piège EOF de bloc partiel** : `SFileReadFile` rend FALSE + `ERROR_HANDLE_EOF` *avec des octets lus* sur la dernière lecture partielle — la boucle naïve `while (SFileReadFile(...) && nb > 0)` tronque silencieusement tout non-multiple du tampon 64 KiB et vide tout fichier plus petit. `mpqget` = extraction à taille vérifiée, `mpqlist` = lecture complète du `(listfile)` + `--tailles` (tailles du catalogue). |
 | `scripts/theora-android.sh` | **Ogg Theora decoder for Android aarch64**: downloads the official Xiph.Org libogg 1.3.5 + libtheora 1.1.1 sources (sha256-checked) and cross-compiles them with the NDK into deterministic static archives (`libtheoradec.a`, `libogg.a`) ready to link into a native `.so` — see *Bricks* below. / **Décodeur Ogg Theora pour Android aarch64** : télécharge les sources officielles Xiph.Org (sha256 vérifiés) et les compile avec le NDK en archives statiques déterministes, prêtes à lier dans une `.so` native — voir *Briques* plus bas. |
+| `scripts/video-transcode.sh` | **Local cinematic transcoder for hardware video decode**: turns the `.ogv` (Theora) files of *your own* install into H.264 Baseline `.mp4` siblings (or a parallel tree), one H.264 frame per Theora packet so frame *n* stays frame *n*; consumed by the runtime's optional AMediaCodec path (`SC2_VIDEO_AMC=1`). / **Transcodeur local des cinématiques pour le décodage vidéo matériel** : convertit les `.ogv` de *votre* installation en `.mp4` H.264 Baseline, une image par paquet Theora. |
 | `docs/METHOD.md` | The end-to-end methodology: PE analysis → lift (CPU-struct model) → host runtime → headless Vulkan backend → per-function differential testing. / La méthodologie de bout en bout. |
 | `.github/workflows/legal-scan.yml` | CI guard: rejects any commit containing binaries, assets or game-derived blobs. / Garde CI : rejette tout commit contenant binaires, assets ou blobs dérivés du jeu. |
 
@@ -35,7 +36,7 @@ See / voir [LEGAL.md](LEGAL.md).
 | Vulkan renderer (D3D9 → Vulkan, shaders SM2/3 → SPIR-V) / rendu Vulkan | ✅ title screen, campaign menu 3D scene, mission terrain + HUD, minimap, unit sprites; cast shadows (opt-in) / écran-titre, menu 3D, terrain + HUD de mission, minicarte, unités ; ombres portées (opt-in) |
 | Android APK (NDK r28, NativeActivity, Vulkan swapchain) / APK Android | ✅ reproducible signed APK; runs on an Android ARM64 emulator (title screen, first mission loads) / APK signé reproductible ; tourne sur émulateur |
 | Audio (engine sound API → software mixer → AAudio) / audio | ✅ menu and in-mission audio play; mission soundtrack + voice reconstruction **bit-exact** (100 % of time-slices, frame-accurate voice), 3D attenuation path mapped / l'audio du menu et de mission joue ; reconstruction **bit-exact** de la bande-son de mission + voix (100 % des tranches, voix au frame près), voie d'atténuation 3D cartographiée |
-| Video (Ogg Theora cinematics) / vidéo | 🟡 the engine's own menu cinematic decodes on the x86 bench; the Theora decoder is now **built and linked into the APK** (`scripts/theora-android.sh`) — on-device check pending / la cinématique du menu se décode sur le banc x86 ; le décodeur Theora est **compilé et lié dans l'APK** — vérification sur appareil à venir |
+| Video (Ogg Theora cinematics) / vidéo | 🟡 the engine's own menu cinematic decodes on the x86 bench; the Theora decoder is now **built and linked into the APK** (`scripts/theora-android.sh`); optional H.264 hardware path (`scripts/video-transcode.sh` + `SC2_VIDEO_AMC=1`) — on-device check pending / la cinématique du menu se décode sur le banc x86 ; le décodeur Theora est **compilé et lié dans l'APK** ; voie matérielle H.264 optionnelle — vérification sur appareil à venir |
 | Playable on a Galaxy Z Fold 8 / jouable sur Fold 8 | ⬜ not yet / pas encore |
 
 
@@ -111,6 +112,55 @@ copyright notices (`COPYING` in each tarball) when you redistribute a binary tha
 ships the build script (MIT). / libogg et libtheora sont © Xiph.Org Foundation sous licences de type BSD (3 clauses)
 — conservez leurs mentions (`COPYING` de chaque archive) si vous redistribuez un binaire qui les lie. Ce dépôt ne
 fournit que le script de build (MIT).
+
+### `scripts/video-transcode.sh` — H.264 video brick / brique vidéo H.264
+
+**EN:** Software Theora decoding of full-screen cinematics is expensive on a phone CPU. This script transcodes,
+**locally and only from your own legitimate copy**, every `.ogv` it finds into an H.264 Baseline `.mp4` that any
+Android hardware AVC decoder accepts (no B-frames, `yuv420p`, level 3.1, one key frame per second, `faststart` index).
+Video only: the engine keeps reading sound and timing from the original `.ogv`; the `.mp4` replaces the picture alone,
+frame *n* of the engine = picture *n* of the `.mp4` (constant frame rate, duplicated Theora packets kept). The script
+checks that the picture count equals the Theora packet count and warns otherwise. Originals are never modified;
+up-to-date outputs are skipped.
+**FR :** Le décodage logiciel Theora des cinématiques plein écran coûte cher au CPU d'un téléphone. Ce script
+transcode, **localement et uniquement depuis votre propre copie légitime**, chaque `.ogv` trouvé en `.mp4` H.264
+Baseline accepté par tout décodeur AVC matériel Android. Image seule : le moteur continue de lire le son et l'horloge
+dans le `.ogv` d'origine ; frame *n* du moteur = image *n* du `.mp4`. Les originaux ne sont jamais modifiés.
+
+```sh
+./scripts/video-transcode.sh /path/to/your/install            # .mp4 next to each .ogv / à côté de chaque .ogv
+SRC_DIR=/path/to/your/install OUT_DIR=/path/to/mp4-tree ./scripts/video-transcode.sh   # parallel tree / arbre parallèle
+```
+
+| Variable | Default / Défaut | Role / Rôle |
+|---|---|---|
+| `SRC_DIR` | — | source folder when no argument is given (recursive `.ogv` scan) / dossier source sans argument |
+| `OUT_DIR` | — (sibling `.mp4`) | parallel output tree, same relative paths / arbre de sortie parallèle |
+| `FFMPEG`, `FFPROBE` | `ffmpeg`, `ffprobe` from `PATH` | binaries to use; ffmpeg must have `libx264` / binaires ; libx264 requis |
+| `CRF`, `PRESET` | `20`, `slow` | libx264 quality / speed |
+| `GOP` | source fps (1 s) | max distance between key frames / distance max entre images clés |
+| `AUDIO` | — | `aac` adds the audio track (not needed by the engine) / ajoute la piste son |
+| `FORCE` | `0` | `1` redoes up-to-date outputs / refait les sorties à jour |
+
+**Runtime switch `SC2_VIDEO_AMC=1` / interrupteur d'exécution :** off by default (the engine's own Theora decoding
+runs unchanged). When set, each time the engine opens a cinematic the Android runtime looks for a `.mp4` with the same
+relative path (case-insensitive), or the same base name, under `SC2_VIDEO_AMC_DIR` — default: the install root — and
+decodes its pictures with the platform hardware decoder (`AMediaCodec`, NDK); sound and timing still come from the
+`.ogv`. So either keep the sibling `.mp4` files in the install, or point `SC2_VIDEO_AMC_DIR` at your `OUT_DIR` tree.
+No `.mp4`, an unsupported stream format or a decoder that fails to open → the cinematic plays through the engine's
+software Theora path; a decoder failure during playback keeps the last picture (the game never stops). On non-Android
+hosts the switch only logs that a `.mp4` was found. / désactivé par défaut ; s'il vaut `1`, le runtime Android cherche,
+à chaque ouverture de cinématique, un `.mp4` de même chemin relatif (casse ignorée) ou de même nom sous
+`SC2_VIDEO_AMC_DIR` (défaut : racine d'installation) et en décode les images avec le décodeur matériel ; le son et
+l'horloge restent ceux du `.ogv`. Absent ou non ouvrable → repli sur le décodage logiciel Theora du moteur ; un échec
+en cours de lecture garde la dernière image.
+
+**Licences:** the script only transforms files you already own, on your machine; **no game asset is distributed**,
+here or in any APK built from this toolkit — the `.mp4` files are derived from your copy and must stay with it.
+ffmpeg/libx264 are third-party tools you install yourself (libx264 is GPL; the script only invokes it, it does not
+ship it). / le script ne fait que transformer vos propres fichiers, localement ; **aucun asset n'est distribué** — les
+`.mp4` dérivent de votre copie et doivent y rester. ffmpeg/libx264 sont installés par vous (libx264 est GPL ; le script
+l'appelle, il ne le fournit pas).
 
 ## License
 
