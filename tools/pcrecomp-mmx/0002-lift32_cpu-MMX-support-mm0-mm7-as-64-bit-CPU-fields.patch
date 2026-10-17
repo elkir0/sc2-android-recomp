@@ -1,0 +1,226 @@
+From 8b59406f646315762e79bf140665db17d3654410 Mon Sep 17 00:00:00 2001
+From: elkir0 <elkir0@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 11:52:05 +0000
+Subject: [PATCH 2/2] lift32_cpu: MMX support (mm0-mm7 as 64-bit CPU fields)
+
+MMX instructions used to raise 'not an xmm operand: mmN' and leave the whole
+function as a TODO. mm0-mm7 are now their own uint64_t fields (cpu.h, appended
+last so no existing offset moves), not aliased onto the x87 stack. Each operation
+is a cpu.h helper on 64-bit values with lanes through a little-endian union:
+
+  movd/movq/movntq, padd/psub b/w/d/q, saturating padds/paddus/psubs/psubus,
+  pmullw/pmulhw/pmulhuw/pmaddwd/pmuludq, pmaxsw/pminsw/pmaxub/pminub,
+  pavgb/pavgw/psadbw, pcmpeq/pcmpgt b/w/d, punpckl/h bw/wd/dq,
+  packsswb/packuswb/packssdw, pand/pandn/por/pxor,
+  psll/psrl/psra by imm or mm/m64 count, pshufw, pmovmskb, pextrw/pinsrw, emms.
+
+Anything else MMX still raises NotImplementedError (a TODO, not a guess).
+No constant from any particular binary.
+---
+ runtime/recomp32_cpu/cpu.h | 87 ++++++++++++++++++++++++++++++++++++++
+ tools/lift/lift32_cpu.py   | 72 +++++++++++++++++++++++++++++++
+ 2 files changed, 159 insertions(+)
+
+diff --git a/runtime/recomp32_cpu/cpu.h b/runtime/recomp32_cpu/cpu.h
+index e3427d5..30ab395 100644
+--- a/runtime/recomp32_cpu/cpu.h
++++ b/runtime/recomp32_cpu/cpu.h
+@@ -96,6 +96,8 @@ typedef struct {
+      * (53-bit precision, round to nearest, all exceptions masked). Read by
+      * fist/fistp/frndint when the lifter runs with PCRECOMP_FPU_CW=1. */
+     uint16_t fpu_cwx;
++    /* MMX mm0-mm7 (lift32_cpu, 64 bits each), appended last so no existing offset moves. */
++    uint64_t mm[8];
+ } CPU;
+ 
+ /* ---- partial register access (preserve unaffected bits, like x86) ---- */
+@@ -736,4 +738,89 @@ static inline int16_t  sse_sat_i16(int32_t v) { return v >  32767 ?  32767 : v <
+ static inline uint8_t  sse_sat_u8 (int32_t v) { return v >  255 ?  255 : v < 0 ? 0 : (uint8_t)v; }
+ static inline uint16_t sse_sat_u16(int32_t v) { return v > 65535 ? 65535 : v < 0 ? 0 : (uint16_t)v; }
+ 
++/* ---- MMX: mm0-mm7 as 64-bit values (CPU.mm[]), helpers called by lift32_cpu ----
++ * Lanes go through a little-endian union (x86 and AArch64 hosts both are). Not
++ * aliased onto the x87 stack: see the lifter's MMX section. */
++typedef union { uint64_t q; uint32_t d[2]; uint16_t w[4]; uint8_t b[8];
++                int32_t sd[2]; int16_t sw[4]; int8_t sb[8]; } MMX;
++static inline MMX mmx_u(uint64_t v) { MMX m; m.q = v; return m; }
++#define MMX_LANES(nom, n, ch, expr) \
++    static inline uint64_t nom(uint64_t x, uint64_t y) { \
++        MMX a = mmx_u(x), b = mmx_u(y), r; r.q = 0; \
++        for (int i = 0; i < (n); i++) r.ch[i] = (expr); \
++        return r.q; }
++MMX_LANES(mmx_paddb, 8, b, (uint8_t)(a.b[i] + b.b[i]))
++MMX_LANES(mmx_paddw, 4, w, (uint16_t)(a.w[i] + b.w[i]))
++MMX_LANES(mmx_paddd, 2, d, a.d[i] + b.d[i])
++MMX_LANES(mmx_psubb, 8, b, (uint8_t)(a.b[i] - b.b[i]))
++MMX_LANES(mmx_psubw, 4, w, (uint16_t)(a.w[i] - b.w[i]))
++MMX_LANES(mmx_psubd, 2, d, a.d[i] - b.d[i])
++static inline uint64_t mmx_paddq(uint64_t x, uint64_t y) { return x + y; }
++static inline uint64_t mmx_psubq(uint64_t x, uint64_t y) { return x - y; }
++MMX_LANES(mmx_paddsb, 8, sb, sse_sat_i8((int32_t)a.sb[i] + b.sb[i]))
++MMX_LANES(mmx_paddsw, 4, sw, sse_sat_i16((int32_t)a.sw[i] + b.sw[i]))
++MMX_LANES(mmx_paddusb, 8, b, sse_sat_u8((int32_t)a.b[i] + b.b[i]))
++MMX_LANES(mmx_paddusw, 4, w, sse_sat_u16((int32_t)a.w[i] + b.w[i]))
++MMX_LANES(mmx_psubsb, 8, sb, sse_sat_i8((int32_t)a.sb[i] - b.sb[i]))
++MMX_LANES(mmx_psubsw, 4, sw, sse_sat_i16((int32_t)a.sw[i] - b.sw[i]))
++MMX_LANES(mmx_psubusb, 8, b, sse_sat_u8((int32_t)a.b[i] - b.b[i]))
++MMX_LANES(mmx_psubusw, 4, w, sse_sat_u16((int32_t)a.w[i] - b.w[i]))
++MMX_LANES(mmx_pmullw, 4, w, (uint16_t)((int32_t)a.sw[i] * b.sw[i]))
++MMX_LANES(mmx_pmulhw, 4, w, (uint16_t)(((int32_t)a.sw[i] * b.sw[i]) >> 16))
++MMX_LANES(mmx_pmulhuw, 4, w, (uint16_t)(((uint32_t)a.w[i] * b.w[i]) >> 16))
++MMX_LANES(mmx_pmaddwd, 2, d, (uint32_t)((int64_t)a.sw[2 * i] * b.sw[2 * i] + (int64_t)a.sw[2 * i + 1] * b.sw[2 * i + 1]))
++MMX_LANES(mmx_pmaxsw, 4, sw, a.sw[i] > b.sw[i] ? a.sw[i] : b.sw[i])
++MMX_LANES(mmx_pminsw, 4, sw, a.sw[i] < b.sw[i] ? a.sw[i] : b.sw[i])
++MMX_LANES(mmx_pmaxub, 8, b, a.b[i] > b.b[i] ? a.b[i] : b.b[i])
++MMX_LANES(mmx_pminub, 8, b, a.b[i] < b.b[i] ? a.b[i] : b.b[i])
++MMX_LANES(mmx_pavgb, 8, b, (uint8_t)(((uint32_t)a.b[i] + b.b[i] + 1) >> 1))
++MMX_LANES(mmx_pavgw, 4, w, (uint16_t)(((uint32_t)a.w[i] + b.w[i] + 1) >> 1))
++MMX_LANES(mmx_pcmpeqb, 8, b, a.b[i] == b.b[i] ? 0xFFu : 0u)
++MMX_LANES(mmx_pcmpeqw, 4, w, a.w[i] == b.w[i] ? 0xFFFFu : 0u)
++MMX_LANES(mmx_pcmpeqd, 2, d, a.d[i] == b.d[i] ? 0xFFFFFFFFu : 0u)
++MMX_LANES(mmx_pcmpgtb, 8, b, a.sb[i] > b.sb[i] ? 0xFFu : 0u)
++MMX_LANES(mmx_pcmpgtw, 4, w, a.sw[i] > b.sw[i] ? 0xFFFFu : 0u)
++MMX_LANES(mmx_pcmpgtd, 2, d, a.sd[i] > b.sd[i] ? 0xFFFFFFFFu : 0u)
++MMX_LANES(mmx_punpcklbw, 8, b, (i & 1) ? b.b[i >> 1] : a.b[i >> 1])
++MMX_LANES(mmx_punpckhbw, 8, b, (i & 1) ? b.b[4 + (i >> 1)] : a.b[4 + (i >> 1)])
++MMX_LANES(mmx_punpcklwd, 4, w, (i & 1) ? b.w[i >> 1] : a.w[i >> 1])
++MMX_LANES(mmx_punpckhwd, 4, w, (i & 1) ? b.w[2 + (i >> 1)] : a.w[2 + (i >> 1)])
++MMX_LANES(mmx_punpckldq, 2, d, i ? b.d[0] : a.d[0])
++MMX_LANES(mmx_punpckhdq, 2, d, i ? b.d[1] : a.d[1])
++MMX_LANES(mmx_packsswb, 8, sb, sse_sat_i8(i < 4 ? a.sw[i] : b.sw[i - 4]))
++MMX_LANES(mmx_packuswb, 8, b, sse_sat_u8(i < 4 ? a.sw[i] : b.sw[i - 4]))
++MMX_LANES(mmx_packssdw, 4, sw, sse_sat_i16(i < 2 ? a.sd[i] : b.sd[i - 2]))
++static inline uint64_t mmx_pmuludq(uint64_t x, uint64_t y) { return (uint64_t)(uint32_t)x * (uint32_t)y; }
++static inline uint64_t mmx_psadbw(uint64_t x, uint64_t y)
++{ MMX a = mmx_u(x), b = mmx_u(y); uint32_t s = 0; for (int i = 0; i < 8; i++) s += a.b[i] > b.b[i] ? a.b[i] - b.b[i] : b.b[i] - a.b[i]; return s; }
++static inline uint64_t mmx_pand(uint64_t x, uint64_t y)  { return x & y; }
++static inline uint64_t mmx_pandn(uint64_t x, uint64_t y) { return ~x & y; }
++static inline uint64_t mmx_por(uint64_t x, uint64_t y)   { return x | y; }
++static inline uint64_t mmx_pxor(uint64_t x, uint64_t y)  { return x ^ y; }
++/* Shifts: the count is the whole 64-bit operand; a count past the lane width
++ * clears the lane (logical) or fills it with the sign (arithmetic). */
++#define MMX_SHL(nom, n, ch, bits) \
++    static inline uint64_t nom(uint64_t x, uint64_t k) { MMX a = mmx_u(x), r; r.q = 0; \
++        if (k >= (bits)) return 0; for (int i = 0; i < (n); i++) r.ch[i] = a.ch[i] << k; return r.q; }
++#define MMX_SHR(nom, n, ch, bits) \
++    static inline uint64_t nom(uint64_t x, uint64_t k) { MMX a = mmx_u(x), r; r.q = 0; \
++        if (k >= (bits)) return 0; for (int i = 0; i < (n); i++) r.ch[i] = a.ch[i] >> k; return r.q; }
++MMX_SHL(mmx_psllw, 4, w, 16)
++MMX_SHL(mmx_pslld, 2, d, 32)
++MMX_SHR(mmx_psrlw, 4, w, 16)
++MMX_SHR(mmx_psrld, 2, d, 32)
++static inline uint64_t mmx_psllq(uint64_t x, uint64_t k) { return k >= 64 ? 0 : x << k; }
++static inline uint64_t mmx_psrlq(uint64_t x, uint64_t k) { return k >= 64 ? 0 : x >> k; }
++static inline uint64_t mmx_psraw(uint64_t x, uint64_t k)
++{ MMX a = mmx_u(x), r; if (k > 15) k = 15; for (int i = 0; i < 4; i++) r.sw[i] = (int16_t)(a.sw[i] >> k); return r.q; }
++static inline uint64_t mmx_psrad(uint64_t x, uint64_t k)
++{ MMX a = mmx_u(x), r; if (k > 31) k = 31; for (int i = 0; i < 2; i++) r.sd[i] = a.sd[i] >> k; return r.q; }
++static inline uint64_t mmx_pshufw(uint64_t x, unsigned imm)
++{ MMX a = mmx_u(x), r; for (int i = 0; i < 4; i++) r.w[i] = a.w[(imm >> (2 * i)) & 3]; return r.q; }
++static inline uint32_t mmx_pmovmskb(uint64_t x)
++{ uint32_t m = 0; for (int i = 0; i < 8; i++) m |= (uint32_t)((x >> (8 * i + 7)) & 1) << i; return m; }
++static inline uint32_t mmx_pextrw(uint64_t x, unsigned i) { return (uint16_t)(x >> (16 * (i & 3))); }
++static inline uint64_t mmx_pinsrw(uint64_t x, uint16_t v, unsigned i)
++{ unsigned s = 16 * (i & 3); return (x & ~((uint64_t)0xFFFF << s)) | ((uint64_t)v << s); }
++
+ #endif /* PCRECOMP_CPU_H */
+diff --git a/tools/lift/lift32_cpu.py b/tools/lift/lift32_cpu.py
+index 682a7e4..631180f 100644
+--- a/tools/lift/lift32_cpu.py
++++ b/tools/lift/lift32_cpu.py
+@@ -134,6 +134,20 @@ for _half, _hi in (("l", False), ("h", True)):
+     for _w, _bits in (("bw", 8), ("wd", 16), ("dq", 32), ("qdq", 64)):
+         SSE_PUNPCK["punpck" + _half + _w] = (_bits, _hi)
+ 
++# MMX (mm0-mm7, 64 bits): mnemonic -> cpu.h helper uint64_t f(uint64_t dst, uint64_t src).
++MMX_BIN = {m: "mmx_" + m for m in (
++    "paddb", "paddw", "paddd", "paddq", "psubb", "psubw", "psubd", "psubq",
++    "paddsb", "paddsw", "paddusb", "paddusw", "psubsb", "psubsw", "psubusb", "psubusw",
++    "pmullw", "pmulhw", "pmulhuw", "pmaddwd", "pmuludq",
++    "pmaxsw", "pminsw", "pmaxub", "pminub", "pavgb", "pavgw", "psadbw",
++    "pcmpeqb", "pcmpeqw", "pcmpeqd", "pcmpgtb", "pcmpgtw", "pcmpgtd",
++    "punpcklbw", "punpcklwd", "punpckldq", "punpckhbw", "punpckhwd", "punpckhdq",
++    "packsswb", "packuswb", "packssdw",
++    "pand", "pandn", "por", "pxor")}
++# MMX shifts by an immediate or by the 64-bit count in mm/m64: mnemonic -> helper f(value, count).
++MMX_SHIFT = {m: "mmx_" + m for m in (
++    "psllw", "pslld", "psllq", "psrlw", "psrld", "psrlq", "psraw", "psrad")}
++
+ # Moves of the whole register. Aligned and unaligned differ only in whether the
+ # hardware faults on a misaligned address; the movnt* forms differ only in a
+ # cache hint, which a host that is not managing the guest cache can ignore.
+@@ -461,6 +475,8 @@ class Lifter:
+ 
+         if m[0] == "f":
+             return self.fpu(insn)
++        if self.is_mmx(insn):
++            return self.mmx(insn)
+         if self.is_sse(insn):
+             return self.sse(insn)
+ 
+@@ -1024,6 +1040,62 @@ class Lifter:
+             raise NotImplementedError("not an xmm operand: %s" % name)
+         return int(name[3:])
+ 
++    # ---- MMX ----
++    # mm0-mm7 are the low 64 bits of the x87 registers on real hardware. Here they
++    # are their own 64-bit fields (cpu.h: uint64_t mm[8]), not aliased onto the
++    # x87 stack: code that mixes the two without fsave/frstor or relies on emms
++    # touching the FPU tag word is not modelled. Each operation is a cpu.h helper
++    # on 64-bit values (lanes through a little-endian union), so the C compiler
++    # picks the host's own 64-bit vector or scalar code (NEON on AArch64).
++    def _is_mm(self, op):
++        return op.type == X86_OP_REG and re.fullmatch(r"mm[0-7]", self.md.reg_name(op.reg) or "") is not None
++
++    def is_mmx(self, insn):
++        return insn.mnemonic == "emms" or any(self._is_mm(o) for o in insn.operands)
++
++    def _mi(self, op):
++        return int(self.md.reg_name(op.reg)[2:])
++
++    def _m64(self, insn, op):
++        """an MMX source as a uint64_t: mm register or 64-bit memory"""
++        if self._is_mm(op): return f"c->mm[{self._mi(op)}]"
++        if op.type == X86_OP_MEM:
++            if op.size != 8: raise self._bad_size(insn, op, "mmx m64")
++            return f"rd64({self.addr_expr(insn, op)})"
++        raise NotImplementedError("mmx: unexpected source (%s %s)" % (insn.mnemonic, insn.op_str))
++
++    def mmx(self, insn):
++        m, ops = insn.mnemonic, insn.operands
++        d = ops[0] if ops else None
++        s = ops[1] if len(ops) > 1 else None
++        if m == "emms":
++            return ["/* emms: mm0-7 are not aliased onto the x87 stack here */"]
++        if m == "movd":                      # 32 bits in (zero-extended) or out (low half)
++            if self._is_mm(d):
++                return [f"c->mm[{self._mi(d)}] = (uint64_t)(uint32_t)({self.src(insn, s)});"]
++            val = f"(uint32_t)c->mm[{self._mi(s)}]"
++            if d.type == X86_OP_REG: return [reg_write(self.md.reg_name(d.reg), val)]
++            return [self.wr(insn, d, val)]
++        if m in ("movq", "movntq"):
++            if self._is_mm(d): return [f"c->mm[{self._mi(d)}] = {self._m64(insn, s)};"]
++            if d.type == X86_OP_MEM and self._is_mm(s):
++                return [f"wr64({self.addr_expr(insn, d)}, c->mm[{self._mi(s)}]);"]
++        if m in MMX_BIN and self._is_mm(d):
++            return [f"c->mm[{self._mi(d)}] = {MMX_BIN[m]}(c->mm[{self._mi(d)}], {self._m64(insn, s)});"]
++        if m in MMX_SHIFT and self._is_mm(d):
++            cnt = f"(uint64_t){s.imm & 0xFF}u" if s.type == X86_OP_IMM else self._m64(insn, s)
++            return [f"c->mm[{self._mi(d)}] = {MMX_SHIFT[m]}(c->mm[{self._mi(d)}], {cnt});"]
++        if m == "pshufw" and self._is_mm(d):
++            return [f"c->mm[{self._mi(d)}] = mmx_pshufw({self._m64(insn, s)}, {ops[2].imm & 0xFF}u);"]
++        if m == "pmovmskb" and d.type == X86_OP_REG and self._is_mm(s):
++            return [reg_write(self.md.reg_name(d.reg), f"mmx_pmovmskb(c->mm[{self._mi(s)}])")]
++        if m == "pextrw" and d.type == X86_OP_REG and self._is_mm(s):
++            return [reg_write(self.md.reg_name(d.reg), f"mmx_pextrw(c->mm[{self._mi(s)}], {ops[2].imm & 3}u)")]
++        if m == "pinsrw" and self._is_mm(d):
++            v = self.src(insn, s) if s.type == X86_OP_REG else f"rd16({self.addr_expr(insn, s)})"
++            return [f"c->mm[{self._mi(d)}] = mmx_pinsrw(c->mm[{self._mi(d)}], (uint16_t)({v}), {ops[2].imm & 3}u);"]
++        raise NotImplementedError("mmx %s %s" % (m, insn.op_str))
++
+     def is_sse(self, insn):
+         m = insn.mnemonic
+         if m not in SSE_MNEMONICS and not SSE_CMP_RE.match(m):
+-- 
+2.39.5
+
