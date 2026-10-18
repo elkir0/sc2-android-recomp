@@ -1,0 +1,45 @@
+From b71928cf56c744b3bdc6301c716a33a9f5f044c5 Mon Sep 17 00:00:00 2001
+From: elkir0 <elkir0@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 13:23:44 +0000
+Subject: [PATCH] lift32_cpu: movhlps / movlhps (register to register)
+
+movhlps xmm1, xmm2 copies xmm2's high quadword into xmm1's low one, movlhps
+xmm2's low quadword into xmm1's high one; the other half of xmm1 is kept.
+Both went to a TODO. The source lane is read into a temporary first, since
+'movhlps xmm0, xmm0' names the same register twice. No binary-specific constant.
+---
+ tools/lift/lift32_cpu.py | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/tools/lift/lift32_cpu.py b/tools/lift/lift32_cpu.py
+index 631180f..5935ad6 100644
+--- a/tools/lift/lift32_cpu.py
++++ b/tools/lift/lift32_cpu.py
+@@ -199,7 +199,7 @@ SSE_MNEMONICS = (
+                  "psraw", "psrad",
+                  "pmullw", "pmaddwd", "pmovmskb", "movmskps", "movmskpd",
+                  "pshuflw", "pshufhw", "cvtdq2pd",
+-                 "movlps", "movlpd", "movhps", "movhpd"})
++                 "movlps", "movlpd", "movhps", "movhpd", "movhlps", "movlhps"})
+     | frozenset(SSE_PINT) | frozenset(SSE_PSAT) | frozenset(SSE_PCMP)
+     | frozenset(SSE_PACK) | frozenset(SSE_PUNPCK)
+     | frozenset(o + w for o in SSE_ARITH for w in ("ps", "pd"))
+@@ -1345,6 +1345,15 @@ class Lifter:
+             return [f"wr64({self.addr_expr(insn, d)},"
+                     f" c->xmm[{self._xi(s)}].u64[{lane}]);"]
+ 
++        # movhlps/movlhps: register to register only. movhlps puts the source's
++        # high quadword in the destination's low one; movlhps the source's low
++        # quadword in the destination's high one. The other half is kept. Read
++        # into a temporary first: `movhlps xmm0, xmm0` names one register twice.
++        if m in ("movhlps", "movlhps") and self._is_xmm(d) and self._is_xmm(s):
++            de, so = (0, 1) if m == "movhlps" else (1, 0)
++            return [f"{{ uint64_t _q = c->xmm[{self._xi(s)}].u64[{so}];"
++                    f" c->xmm[{self._xi(d)}].u64[{de}] = _q; }}"]
++
+         # ---- packed shifts ----
+         #
+         # `psllq xmm3, 0x20` in MachStorm's own code at 0x008f3a21. Every lane
+-- 
+2.39.5
+
