@@ -117,6 +117,16 @@ calibration and a pitfall checklist — is in
 | [docs/PACK-SPIRV.md](docs/PACK-SPIRV.md) 🇫🇷 | the SPIR-V pack format |
 | [docs/BANC-MAC.md](docs/BANC-MAC.md) 🇫🇷 | the native bench method |
 
+## Precedent watch
+
+We track how projects comparable to this one fare. The closest analogue — a static
+recompilation of a 2010 shooter ([bo1z](http://vel.gg/bo1z)) — was taken down with
+**HTTP 451** in October 2026: it distributed game-derived code and binaries. This
+project follows the opposite policy: method and original tooling only, **everything
+derived from the game stays on the user's machine** ([LEGAL.md](LEGAL.md)). Watching
+the ecosystem is part of the method — if its rules change, this policy changes with
+them.
+
 ## License & legal
 
 MIT for the tooling in this repository — original work, no Blizzard content. Built on
