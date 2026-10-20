@@ -1,0 +1,9 @@
+--------- beginning of main
+10-17 08:00:01.200  2780  2812 I SC2Partout: [FENETRE] INIT_WINDOW 2176x1812 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-17 08:00:05.801  2780  2813 I SC2Partout: [VKP] SC2_SWAPCHAIN=1 : présentation GPU par swapchain (le chargeur Vulkan est interposé)
+10-17 08:00:13.330  2780  2813 I SC2Partout: [VKP] swapchain 2176x1812, format 37, 3 images, FIFO — création n°1 (initiale ; rotation courante 0x1, preTransform 0x1 ; usages supportés 0x9F, demandés 0x2 ; compositeAlpha supportés 0x9, choisi 0x1)
+10-17 08:00:13.352  2780  2813 I SC2Partout: [VKP] 1er vkQueuePresentKHR (frame n°1, image 0) → -13
+10-17 08:00:13.353  2780  2813 I SC2Partout: [VKP] vkQueuePresentKHR : -13
+10-17 08:00:13.360  2780  2813 E SC2Partout: [AFFICHAGE] ANativeWindow_lock : échec -22 (Invalid argument) — tampon NON posté (échec n°1, 0 postés avant)
+10-17 08:00:13.561  2780  2813 I SC2Partout: [VKP] vkQueuePresentKHR : -13
+10-17 08:00:13.570  2780  2813 E SC2Partout: [AFFICHAGE] ANativeWindow_lock : échec -22 (Invalid argument) — tampon NON posté (échec n°2, 0 postés avant)

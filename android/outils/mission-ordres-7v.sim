@@ -1,0 +1,35 @@
+# Passe 7v — TRaynor01 : fermer l'aide, puis donner des ordres pour faire jouer la partie (1280×720).
+# Format (5f) : frame <n> souris <x> <y> [bouton g|m|d down|up] | frame <n> touche <vk> down|up ; n = tours de pompe.
+# Les unités ne sont pas dessinées (shaders de partie en repli) : sélection par rectangle sur toute la vue de jeu,
+# ordres par clic droit sur la route puis sur la minicarte (cadre bas-gauche, vide mais cliquable).
+# fermer la fenêtre d'aide (comme android/outils/mission-fermer-aide.sim de la 7u)
+frame 1040 souris 945 583
+frame 1045 souris 945 583 bouton g down
+frame 1048 souris 945 583 bouton g up
+# sélection par rectangle (vue de jeu, au-dessus de la console)
+frame 1100 souris 20 70
+frame 1102 souris 20 70 bouton g down
+frame 1106 souris 640 300
+frame 1110 souris 1240 500
+frame 1114 souris 1240 500 bouton g up
+# déplacement le long de la route (clic droit)
+frame 1140 souris 900 400
+frame 1142 souris 900 400 bouton d down
+frame 1144 souris 900 400 bouton d up
+# ordre lointain par la minicarte (clic droit), vers le bas puis la droite de la carte
+frame 1500 souris 120 640
+frame 1502 souris 120 640 bouton d down
+frame 1504 souris 120 640 bouton d up
+# attaque-déplacement (A puis clic gauche sur la minicarte)
+frame 2000 touche 0x41 down
+frame 2002 touche 0x41 up
+frame 2004 souris 170 600
+frame 2006 souris 170 600 bouton g down
+frame 2008 souris 170 600 bouton g up
+# caméra : clic gauche sur la minicarte au même endroit (suivre les unités)
+frame 2400 souris 150 620
+frame 2402 souris 150 620 bouton g down
+frame 2404 souris 150 620 bouton g up
+# flèche droite tenue (défilement de la caméra)
+frame 2800 touche 0x27 down
+frame 2900 touche 0x27 up

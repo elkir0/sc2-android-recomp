@@ -1,0 +1,97 @@
+# Passe 7x — TRaynor01 : ordres de COMBAT (1280×720 = coordonnées client = pixels des captures PPM du banc x86 ;
+# sur Android, la conversion écran → client de la 7o, android/jni/sc2_geo.h, s'applique en amont).
+# Format (5f) : frame <n> souris <x> <y> [bouton g|m|d down|up] | frame <n> touche <vk> down|up ; n = tours de pompe.
+# Repères (capture f1150 du run reco, interface de partie) :
+#   « CLOSE » de la fenêtre d'aide (945, 583) ; à droite, le bouton du héros = portrait de Raynor (1250, 473) ;
+#   minicarte (cadre noir) x 15..197, y 535..712 ; vue de jeu au-dessus de y = 520.
+#   ATTENTION : les icônes « Hero Units » (1250, 368) et « Marines » (1250, 414) au-dessus du portrait sont des ASTUCES
+#   du tutoriel : un clic rouvre la fenêtre d'aide (modale) — run combat0-astuces de la 7x. Ne pas les viser.
+# Un double clic = deux appuis dans la MÊME frame (messages consécutifs, sans délai de pompe entre eux).
+#
+# 1. fermer la fenêtre d'aide (la fenêtre est ouverte dès f750–f950 selon le run)
+frame 1040 souris 945 583
+frame 1045 souris 945 583 bouton g down
+frame 1048 souris 945 583 bouton g up
+# 2. héros : double clic sur le portrait de Raynor = sélection du héros + caméra centrée sur lui
+frame 1080 souris 1250 473
+frame 1082 souris 1250 473 bouton g down
+frame 1082 souris 1250 473 bouton g up
+frame 1082 souris 1250 473 bouton g down
+frame 1082 souris 1250 473 bouton g up
+# 3. sélection multiple : rectangle sur la vue de jeu autour de la caméra (Raynor + marines voisins)
+frame 1120 souris 200 110
+frame 1122 souris 200 110 bouton g down
+frame 1126 souris 640 300
+frame 1130 souris 1100 500
+frame 1134 souris 1100 500 bouton g up
+# 4. attaque-déplacement devant (A + clic gauche sur la vue)
+frame 1160 touche 0x41 down
+frame 1161 touche 0x41 up
+frame 1163 souris 1000 250
+frame 1164 souris 1000 250 bouton g down
+frame 1165 souris 1000 250 bouton g up
+# caméra sur le héros (double clic) pour voir le groupe avancer
+frame 1300 souris 1250 473 bouton g down
+frame 1300 souris 1250 473 bouton g up
+frame 1300 souris 1250 473 bouton g down
+frame 1300 souris 1250 473 bouton g up
+# 5. attaque-déplacement lointain par la minicarte : centre
+frame 1400 touche 0x41 down
+frame 1401 touche 0x41 up
+frame 1403 souris 106 623
+frame 1404 souris 106 623 bouton g down
+frame 1405 souris 106 623 bouton g up
+frame 1550 souris 1250 473 bouton g down
+frame 1550 souris 1250 473 bouton g up
+frame 1550 souris 1250 473 bouton g down
+frame 1550 souris 1250 473 bouton g up
+# 6. formation / file d'ordres : Maj + clics droits successifs sur la minicarte (haut-gauche puis haut-droite)
+frame 1800 touche 0x10 down
+frame 1801 souris 50 560
+frame 1802 souris 50 560 bouton d down
+frame 1803 souris 50 560 bouton d up
+frame 1805 souris 170 560
+frame 1806 souris 170 560 bouton d down
+frame 1807 souris 170 560 bouton d up
+frame 1809 touche 0x10 up
+frame 1950 souris 1250 473 bouton g down
+frame 1950 souris 1250 473 bouton g up
+frame 1950 souris 1250 473 bouton g down
+frame 1950 souris 1250 473 bouton g up
+# 7. construction : B (sans SCV dans la sélection : le jeu doit l'ignorer) puis Échap
+frame 2100 touche 0x42 down
+frame 2101 touche 0x42 up
+frame 2110 touche 0x1B down
+frame 2111 touche 0x1B up
+# 8. attaques-déplacements vers les autres quadrants de la minicarte, caméra recentrée après chacun
+frame 2200 touche 0x41 down
+frame 2201 touche 0x41 up
+frame 2203 souris 170 690
+frame 2204 souris 170 690 bouton g down
+frame 2205 souris 170 690 bouton g up
+frame 2350 souris 1250 473 bouton g down
+frame 2350 souris 1250 473 bouton g up
+frame 2350 souris 1250 473 bouton g down
+frame 2350 souris 1250 473 bouton g up
+frame 2600 touche 0x41 down
+frame 2601 touche 0x41 up
+frame 2603 souris 40 690
+frame 2604 souris 40 690 bouton g down
+frame 2605 souris 40 690 bouton g up
+frame 2750 souris 1250 473 bouton g down
+frame 2750 souris 1250 473 bouton g up
+frame 2750 souris 1250 473 bouton g down
+frame 2750 souris 1250 473 bouton g up
+frame 3000 touche 0x41 down
+frame 3001 touche 0x41 up
+frame 3003 souris 106 560
+frame 3004 souris 106 560 bouton g down
+frame 3005 souris 106 560 bouton g up
+frame 3150 souris 1250 473 bouton g down
+frame 3150 souris 1250 473 bouton g up
+frame 3150 souris 1250 473 bouton g down
+frame 3150 souris 1250 473 bouton g up
+frame 3400 souris 1250 473 bouton g down
+frame 3400 souris 1250 473 bouton g up
+frame 3400 souris 1250 473 bouton g down
+frame 3400 souris 1250 473 bouton g up

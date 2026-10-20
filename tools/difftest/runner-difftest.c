@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <sys/mman.h>
+#include <signal.h>
+#include <unistd.h>
 #include "cpu.h"
 #include "sc2_host.h"
 
@@ -29,6 +31,22 @@ static Entree g_table[] = {
 #undef X
 #define N_TABLE (sizeof g_table / sizeof g_table[0])
 
+/* Passe 7k : un plantage nomme la fonction liftée en cours (pile fantôme) et l'adresse
+ * invitée fautive, sur stderr, au lieu d'un rc anonyme. */
+static void sur_signal(int sig, siginfo_t *si, void *uc)
+{
+    (void)uc;
+    char b[160];
+    sc2_shadow *ss = g_sc2_ss;
+    uint32_t fn = (ss && ss->n > 0 && ss->n <= (int)(sizeof ss->va / sizeof ss->va[0])) ? ss->va[ss->n - 1] : 0;
+    uintptr_t a = (uintptr_t)si->si_addr;
+    uint32_t va = (a >= g_hote_delta && a - g_hote_delta < 0x100000000ull) ? (uint32_t)(a - g_hote_delta) : 0;
+    int n = snprintf(b, sizeof b, "[SIGNAL] sig %d adresse invitée 0x%08X dans 0x%08X (profondeur %d)\n",
+                     sig, va, fn, ss ? ss->n : -1);
+    if (write(2, b, (size_t)n) < 0) { }
+    _exit(128 + sig);
+}
+
 static void *lire_exacte(FILE *f, void *p, size_t n) {
     return fread(p, 1, n, f) == n ? p : NULL;
 }
@@ -48,6 +66,34 @@ int main(int argc, char **argv)
                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (zone == MAP_FAILED) { perror("mmap zone 4G"); return 2; }
     g_hote_delta = (uintptr_t)zone;   /* GPTR(va) = zone + va, tout l'espace 32 bits */
+
+    struct sigaction sa; memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = sur_signal; sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    static char pile_sig[65536]; stack_t st = { .ss_sp = pile_sig, .ss_size = sizeof pile_sig };
+    sigaltstack(&st, NULL);
+    sigaction(SIGSEGV, &sa, NULL); sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGFPE, &sa, NULL); sigaction(SIGILL, &sa, NULL);
+
+    /* Passe 7k : SC2_DT_IMAGE = image de SC2.exe telle que la voit Unicorn (harnais v2) :
+     * « DTI1 », n, puis n segments (va, len, octets) — ou l'image plate depuis 0x00800000 — en-têtes + octets des sections, IAT
+     * remplie de sentinelles ; le reste de l'image est nul (zone neuve). Posée AVANT les fenêtres. */
+    const char *img = getenv("SC2_DT_IMAGE");
+    if (img) {
+        FILE *fi = fopen(img, "rb");
+        if (!fi) { perror("SC2_DT_IMAGE"); return 2; }
+        uint32_t m, n = 0;
+        if (!LIRE(fi, m)) { fprintf(stderr, "SC2_DT_IMAGE vide\n"); return 2; }
+        if (m != 0x31495444u) {          /* image plate (1re forme) : posée à 0x00800000 */
+            rewind(fi);
+            if (!fread(GPTR(0x00800000u), 1, 0x08000000u, fi)) { fprintf(stderr, "SC2_DT_IMAGE vide\n"); return 2; }
+        } else if (!LIRE(fi, n)) { fprintf(stderr, "SC2_DT_IMAGE invalide\n"); return 2; }
+        for (uint32_t k = 0; k < n; k++) {
+            uint32_t va, len;
+            if (!LIRE(fi, va) || !LIRE(fi, len) || !lire_exacte(fi, GPTR(va), len)) {
+                fprintf(stderr, "SC2_DT_IMAGE tronquée\n"); return 2; }
+        }
+        fclose(fi);
+    }
 
     CPU c; memset(&c, 0, sizeof c);
     uint32_t addr, eflags;

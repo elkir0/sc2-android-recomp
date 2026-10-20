@@ -1,0 +1,13 @@
+--- a/tools/lift/lift32_cpu.py
++++ b/tools/lift/lift32_cpu.py
+@@ -1264,7 +1264,9 @@
+         # register-to-register encodings are movhlps and movlhps, which are
+         # different instructions and not these.
+         if m in ("movlps", "movlpd", "movhps", "movhpd"):
+-            lane = 1 if m[4] == "h" else 0
++            # [sc2-partout 7n] « movhps » : le h est m[3] (m[4] est le « p ») — l'ancien
++            # test ne choisissait JAMAIS la voie haute : movhps = movlps, matrices (a,b,a,b).
++            lane = 1 if m[3] == "h" else 0
+             if self._is_xmm(d):
+                 return [f"c->xmm[{self._xi(d)}].u64[{lane}] ="
+                         f" rd64({self.addr_expr(insn, s)});"]

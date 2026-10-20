@@ -1,0 +1,13 @@
+--------- beginning of main
+10-17 07:30:01.200  8450  8482 I SC2Partout: [FENETRE] INIT_WINDOW 2176x1812 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-17 07:30:05.801  8450  8483 I SC2Partout: [VKP] SC2_SWAPCHAIN=1 : présentation GPU par swapchain (le chargeur Vulkan est interposé)
+10-17 07:30:13.330  8450  8483 I SC2Partout: [VKP] swapchain 2176x1812, format 37, 3 images, FIFO — création n°1 (initiale ; rotation courante 0x1, preTransform 0x1 ; usages supportés 0x9F, demandés 0x2 ; compositeAlpha supportés 0x9, choisi 0x1)
+10-17 07:30:13.352  8450  8483 I SC2Partout: [VKP] 1er vkQueuePresentKHR (frame n°1, image 0) → 0
+10-17 07:30:13.354  8450  8483 I SC2Partout: [VKP] 1re frame présentée par la swapchain (back buffer 1280x720 → 2176x1224 en (0, 294), image 2176x1812)
+10-17 07:31:02.118  8450  8482 I SC2Partout: [FENETRE] WINDOW_RESIZED 1812x2176 — 640 Present vus
+10-17 07:31:02.140  8450  8483 I SC2Partout: [VKP] vkAcquireNextImageKHR → VK_ERROR_OUT_OF_DATE_KHR : swapchain à recréer
+10-17 07:31:02.141  8450  8483 I SC2Partout: [VKP] vkCreateSwapchainKHR : échec -3
+10-17 07:31:02.160  8450  8483 I SC2Partout: [AFFICHAGE] 1er tampon de fenêtre verrouillé : 1280x1536, stride 1280, format 1 (attendu 1 = RGBA_8888)
+10-17 07:31:02.168  8450  8483 I SC2Partout: [AFFICHAGE] 1er tampon posté à SurfaceFlinger (copie CPU)
+10-17 07:32:40.660  8450  8483 I SC2Partout: [ANDROID] affichage : 1487 Present ; copie CPU : tampons postés 37 / échecs de verrou 0 / échecs de post 0 / géométries vides 0 ; fenêtres perdues 0 ; Present sans fenêtre 0 ; cibles refusées 0
+10-17 07:32:40.661  8450  8483 I SC2Partout: [ANDROID] swapchain active : 1450 frames présentées par le GPU, 37 repli(s) sur la copie CPU ; créée 1 fois (OUT_OF_DATE 1, redimensionnements 0), SUBOPTIMAL ignorés 0 ; bandes seules 0 ; vkWaitForFences en échec 0

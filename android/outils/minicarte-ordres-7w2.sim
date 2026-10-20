@@ -1,0 +1,22 @@
+# Passe 7w2 — TRaynor01 : ordres de déplacement PAR LA MINICARTE (1280×720, coordonnées client = pixels PPM).
+# Minicarte : cadre x 15..197, y 535..712 ; zone jouable = bande verticale centrale (7w : lignes vertes) ; Raynor part en
+# bas à gauche (~(60, 700)), l'objectif est révélé en haut (~(128, 560)).
+# 1. fermer l'aide ; 2. sélectionner Raynor (portrait, clic simple) ; 3. clic droit minicarte au milieu de la bande ;
+# 4. clic droit minicarte vers l'objectif ; 5. A + clic gauche minicarte (attaque-déplacement).
+frame 1040 souris 945 583
+frame 1045 souris 945 583 bouton g down
+frame 1048 souris 945 583 bouton g up
+frame 1080 souris 1250 473
+frame 1082 souris 1250 473 bouton g down
+frame 1083 souris 1250 473 bouton g up
+frame 1120 souris 100 640
+frame 1122 souris 100 640 bouton d down
+frame 1123 souris 100 640 bouton d up
+frame 1400 souris 128 565
+frame 1402 souris 128 565 bouton d down
+frame 1403 souris 128 565 bouton d up
+frame 1600 touche 0x41 down
+frame 1601 touche 0x41 up
+frame 1603 souris 70 690
+frame 1604 souris 70 690 bouton g down
+frame 1605 souris 70 690 bouton g up

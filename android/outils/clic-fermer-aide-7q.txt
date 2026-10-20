@@ -1,0 +1,31 @@
+# Passe 7q : ferme le panneau d aide de TRaynor01 (bouton « Close », ~940,584 en 1280×720) — horloge = tours de pompe
+frame 700 souris 940 584
+frame 702 souris 940 584 bouton g down
+frame 704 souris 940 584 bouton g up
+frame 800 souris 940 584
+frame 802 souris 940 584 bouton g down
+frame 804 souris 940 584 bouton g up
+frame 900 souris 940 584
+frame 902 souris 940 584 bouton g down
+frame 904 souris 940 584 bouton g up
+frame 1000 souris 940 584
+frame 1002 souris 940 584 bouton g down
+frame 1004 souris 940 584 bouton g up
+frame 1100 souris 940 584
+frame 1102 souris 940 584 bouton g down
+frame 1104 souris 940 584 bouton g up
+frame 1200 souris 940 584
+frame 1202 souris 940 584 bouton g down
+frame 1204 souris 940 584 bouton g up
+frame 1300 souris 940 584
+frame 1302 souris 940 584 bouton g down
+frame 1304 souris 940 584 bouton g up
+frame 1400 souris 940 584
+frame 1402 souris 940 584 bouton g down
+frame 1404 souris 940 584 bouton g up
+frame 1500 souris 940 584
+frame 1502 souris 940 584 bouton g down
+frame 1504 souris 940 584 bouton g up
+frame 1600 souris 940 584
+frame 1602 souris 940 584 bouton g down
+frame 1604 souris 940 584 bouton g up

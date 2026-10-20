@@ -1,0 +1,8 @@
+--------- beginning of main
+10-17 07:40:02.300  9560  9592 I SC2Partout: [FENETRE] INIT_WINDOW 2176x1812 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-17 07:40:14.902  9560  9593 I SC2Partout: fenêtre 2176x1812 → tampon 1280x1066, image du jeu 1280x720 en (0, 173)
+10-17 07:40:14.903  9560  9593 E SC2Partout: [AFFICHAGE] ANativeWindow_lock : échec -22 (Invalid argument) — tampon NON posté (échec n°1, 0 postés avant)
+10-17 07:40:15.101  9560  9593 E SC2Partout: [AFFICHAGE] ANativeWindow_lock : échec -22 (Invalid argument) — tampon NON posté (échec n°2, 0 postés avant)
+10-17 07:40:15.302  9560  9593 E SC2Partout: [AFFICHAGE] ANativeWindow_lock : échec -22 (Invalid argument) — tampon NON posté (échec n°3, 0 postés avant)
+10-17 07:40:16.710  9560  9593 E SC2Partout: [AFFICHAGE] ANativeWindow_lock : échec -22 (Invalid argument) — tampon NON posté (échec n°10, 0 postés avant)
+10-17 07:40:16.711  9560  9593 I SC2Partout: frame n°1 affichée à l'écran (1 affichées)

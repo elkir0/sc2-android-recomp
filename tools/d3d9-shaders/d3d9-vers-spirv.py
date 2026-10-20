@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """d3d9-vers-spirv.py — traduction HORS-LIGNE des shaders D3D9 (SM 2.x/3.0) de SC2 en SPIR-V (passe 5d).
 
-    scripts/d3d9-vers-spirv.py <dossier de .bin> <sortie.h> [--glsl <dossier>] [--liste hash,…]
+    scripts/d3d9-vers-spirv.py <dossier de .bin> <sortie.h> [--glsl <dossier>] [--liste hash,…] [--ombres <liste>]
 
 Chaque bytecode (vs_<hash>.bin / ps_<hash>.bin, hash = FNV-1a 64 du bytecode, celui du
 runtime) → GLSL 450 → glslangValidator -V → spirv-val. Les traductions VALIDÉES sont
@@ -13,12 +13,21 @@ Interface commune (doit rester alignée sur runtime/sc2_d3d9v.c) :
   set 0 binding 0  UBO constantes VS : vec4 c[256] ; ivec4 i[16] ; ivec4 b[16]   (std140)
   set 0 binding 1  UBO constantes PS : même structure
   set 0 binding 2+n  sampler n du PS (2D / cube / 3D selon dcl)
+  set 0 binding 18+n sampler n à COMPARAISON (sampler2DShadow), variante « ombres » seulement (passe 7v3)
+
+Passe 7v3 (--ombres <liste>, ex. android/outils/profondeur-ps-7v2.txt, lignes « <hash> <slot> ») : pour chaque PS
+listé, une 2e traduction (variante « ombres ») est embarquée À CÔTÉ de l'originale (champ spv_ombre). Pour chaque
+texld/texldp/texldl/texldd sur un slot k listé, elle déclare `layout(constant_id = 100 + k) const int profondeur_k`
+et lit `profondeur_k != 0 ? texture(sampler2DShadow binding 18+k, uv + réf) : texture(sampler2D binding 2+k, uv)`.
+Le runtime ne la prend que sous SC2_OMBRES=1 (layout à 34 bindings) : la traduction par défaut reste octet pour octet
+celle d'avant, d'où un défaut inchangé par construction.
   push constants   VS : vec4 hp (correction demi-pixel D3D9, 1/L, 1/H) ;
                    PS (offset 16) : vec4 at (test alpha : actif, fonction D3DCMP, référence)
   entrées VS       location = n° du registre v ; (usage, index) dans les métadonnées
   varyings         location fixe par (usage, index) : color i → i, texcoord i → 2+i, fog → 10,
-                   normal → 11, tangent → 12, binormal → 13, autres → 14 ; le VS les déclare
-                   TOUTES (16, à zéro par défaut) pour que tout PS trouve ses entrées.
+                   normal → 11, tangent → 12, binormal → 13, autres → 14, texcoord 8 → 15 ; le VS les déclare
+                   TOUTES (16, à zéro par défaut) pour que tout PS trouve ses entrées — passe 9a : 16 variables
+                   `out vec4 ovk` distinctes (location k), plus un tableau en location 0 (refusé par l'Adreno).
   y : gl_Position.y inversé (repère Vulkan) ; z D3D9 [0,1] = Vulkan.
 """
 import hashlib, os, struct, subprocess, sys, tempfile
@@ -33,8 +42,8 @@ def slot_varying(usage, idx):
     u = sm.USAGES[usage] if usage < len(sm.USAGES) else ''
     if u == 'color':
         return idx if idx < 2 else None
-    if u == 'texcoord':
-        return 2 + idx if idx < 8 else None
+    if u == 'texcoord':                     # passe 7m : texcoord8 (modèles du menu de campagne) → 15, libre
+        return 2 + idx if idx < 8 else 15 if idx == 8 else None
     return {'fog': 10, 'normal': 11, 'tangent': 12, 'binormal': 13}.get(u, 14)
 
 
@@ -43,7 +52,8 @@ class NonGere(Exception):
 
 
 class Traducteur:
-    def __init__(self, code):
+    def __init__(self, code, ombres=()):
+        self.ombres = set(ombres)  # 7v3 : slots lus en Dref (variante « ombres »)
         self.ps, self.ver, self.ins, self.com = sm.decoder(code)
         if self.ver[0] < 2:
             raise NonGere('SM1')
@@ -255,6 +265,18 @@ class Traducteur:
             e = f'textureLod(s{sn}, ({coord}).{cc}, ({coord}).w)'
         else:
             e = f'textureGrad(s{sn}, ({coord}).{cc}, ({S[2]}).{cc}, ({S[3]}).{cc})'
+        if sn in self.ombres and dim == 2:       # 7v3 : chemin Dref, choisi par la constante de spécialisation
+            if i.name == 'texld' and i.ctrl == 1:
+                z = f'vec4(textureProj(s{sn}c, ({coord})))'                         # réf = z/w, uv = xy/w
+            elif i.name == 'texld' and i.ctrl == 2:
+                z = f'vec4(texture(s{sn}c, ({coord}).xyz, ({coord}).w))'
+            elif i.name == 'texld':
+                z = f'vec4(texture(s{sn}c, ({coord}).xyz))'                        # réf = z
+            elif i.name == 'texldl':
+                z = f'vec4(textureLod(s{sn}c, ({coord}).xyz, ({coord}).w))'
+            else:
+                z = f'vec4(textureGrad(s{sn}c, ({coord}).xyz, ({S[2]}).xy, ({S[3]}).xy))'
+            e = f'(profondeur_{sn} != 0 ? {z} : {e})'
         if sw != 'xyzw':
             e = f'({e}).{sw}'
         self.ecrire(i.dst, e)
@@ -300,6 +322,9 @@ class Traducteur:
             for n, dim in sorted(self.samplers.items()):
                 t = {2: 'sampler2D', 3: 'samplerCube', 4: 'sampler3D'}[dim]
                 tete.append(f'layout(set = 0, binding = {2 + n}) uniform {t} s{n};')
+                if n in self.ombres and dim == 2:
+                    tete.append(f'layout(constant_id = {100 + n}) const int profondeur_{n} = 0;')
+                    tete.append(f'layout(set = 0, binding = {18 + n}) uniform sampler2DShadow s{n}c;')
             vus = set()
             for reg, us, ix in self.entrees:
                 if self.ver[0] >= 3:
@@ -327,7 +352,13 @@ class Traducteur:
             tete.append('layout(push_constant) uniform PC { vec4 hp; } pc;')
             for reg, us, ix in self.entrees:
                 tete.append(f'layout(location = {reg}) in vec4 v{reg};')
-            tete.append(f'layout(location = 0) out vec4 ov[{NVARY}];')
+            # passe 9a : 16 sorties vec4 DISTINCTES (location k), pas un tableau `out vec4 ov[16]` en location 0 :
+            # chaque entrée PS `layout(location = k) in vec4` trouve une sortie VS de même type à la même location.
+            # Le tableau couvrait bien les locations 0-15, mais l'appariement tableau → vec4 isolé n'est pas
+            # « même type » : swiftshader l'acceptait, l'Adreno refusait tous les pipelines (VkResult -13).
+            for k in range(NVARY):
+                tete.append(f'layout(location = {k}) out vec4 ov{k};')
+            corps.append(f'    vec4 ov[{NVARY}];')
             corps.append(f'    for (int k = 0; k < {NVARY}; k++) ov[k] = vec4(0.0);')
             corps.append('    vec4 oPos = vec4(0.0, 0.0, 0.0, 1.0);')
             if self.ver[0] >= 3:
@@ -362,6 +393,8 @@ class Traducteur:
                         if sl is None:
                             raise NonGere('varying de sortie hors table')
                         fin.append(f'    ov[{sl}] = o{reg};')
+            for k in range(NVARY):
+                fin.append(f'    ov{k} = ov[{k}];')
             fin.append('    gl_Position = vec4(oPos.x, -oPos.y, oPos.z, oPos.w);')
             fin.append('    gl_Position.xy += pc.hp.xy * gl_Position.w;   // demi-pixel D3D9')
         if self.ps and 'oC0' not in ' '.join(tete):
@@ -395,6 +428,12 @@ def main():
         print(__doc__); sys.exit(2)
     din, hout = sys.argv[1], sys.argv[2]
     gdir = None
+    ombres = {}                                  # 7v3 : hash PS → slots en Dref
+    if '--ombres' in sys.argv:
+        for l in open(sys.argv[sys.argv.index('--ombres') + 1]):
+            c = l.split('#')[0].split()
+            if len(c) >= 2:
+                ombres.setdefault(int(c[0], 16), set()).add(int(c[1]))
     if '--glsl' in sys.argv:
         gdir = sys.argv[sys.argv.index('--glsl') + 1]; os.makedirs(gdir, exist_ok=True)
     fichiers = sorted(f for f in os.listdir(din) if f.endswith('.bin') and f[:3] in ('vs_', 'ps_'))
@@ -415,31 +454,54 @@ def main():
             spv, err = compiler(g, t.ps, tmp)
             if spv is None:
                 ko.append((f, err.strip().splitlines()[-1] if err.strip() else 'échec')); continue
-            ok.append((h, t, spv, f))
+            spv_o = None
+            if t.ps and h in ombres:             # 7v3 : variante « ombres » (Dref sous profondeur_k)
+                try:
+                    to = Traducteur(code, ombres[h]); go = to.glsl()
+                except (NonGere, KeyError, IndexError) as e:
+                    ko.append((f, f'variante ombres non gérée : {e}')); go = None
+                if go is not None:
+                    if gdir:
+                        open(os.path.join(gdir, f[:-4] + '.ombres.frag'), 'w').write(go)
+                    spv_o, err = compiler(go, True, tmp)
+                    if spv_o is None:
+                        ko.append((f, 'variante ombres : ' + (err.strip().splitlines()[-1] if err.strip() else 'échec')))
+                    elif spv_o == spv:
+                        spv_o = None                 # slot non 2D : rien à changer
+            ok.append((h, t, spv, f, spv_o))
     with open(hout, 'w') as o:
         o.write('/* sc2_shaders_spv.h — GÉNÉRÉ par scripts/d3d9-vers-spirv.py (passe 5d) : ne pas éditer.\n')
         o.write(f' * {len(ok)} shaders D3D9 de SC2 traduits en SPIR-V (validés spirv-val), {len(ko)} non traduits. */\n')
         o.write('#include <stdint.h>\n\n')
-        for h, t, spv, f in ok:
-            w = struct.unpack(f'<{len(spv) // 4}I', spv)
-            o.write(f'static const uint32_t spv_{h:016x}[{len(w)}] = {{')
-            o.write(','.join(f'0x{x:08x}' for x in w))
-            o.write('};\n')
+        for h, t, spv, f, spv_o in ok:
+            for nom, b in ((f'spv_{h:016x}', spv), (f'spvo_{h:016x}', spv_o)):
+                if b is None:
+                    continue
+                w = struct.unpack(f'<{len(b) // 4}I', b)
+                o.write(f'static const uint32_t {nom}[{len(w)}] = {{')
+                o.write(','.join(f'0x{x:08x}' for x in w))
+                o.write('};\n')
         o.write('\ntypedef struct { uint8_t reg, usage, index; } sc2_spv_entree;\n')
         o.write('typedef struct {\n    uint64_t hash; uint8_t ps; uint8_t nentrees; sc2_spv_entree entrees[16];\n'
                 '    uint8_t samplers[16];   /* 0 aucun, 2 2D, 3 cube, 4 volume */\n'
-                '    const uint32_t *spv; uint32_t nmots;\n} sc2_spv_shader;\n\n')
+                '    const uint32_t *spv; uint32_t nmots;\n'
+                '    const uint32_t *spv_ombre; uint32_t nmots_ombre;   /* 7v3 : variante Dref (SC2_OMBRES=1), sinon 0 */\n'
+                '} sc2_spv_shader;\n\n')
+        o.write('#define SC2_SPV_OMBRES 1\n')
         o.write(f'#define SC2_NB_SPV {len(ok)}\n')
         o.write('static const sc2_spv_shader SC2_SHADERS_SPV[SC2_NB_SPV > 0 ? SC2_NB_SPV : 1] = {\n')
-        for h, t, spv, f in ok:
+        for h, t, spv, f, spv_o in ok:
             ent = ', '.join(f'{{ {r}, {u}, {x} }}' for r, u, x in t.entrees[:16]) or '{ 0, 0, 0 }'
             smp = ', '.join(str(t.samplers.get(k, 0)) for k in range(16))
             o.write(f'    {{ 0x{h:016x}ull, {1 if t.ps else 0}, {min(len(t.entrees), 16)}, {{ {ent} }}, {{ {smp} }}, '
-                    f'spv_{h:016x}, {len(spv) // 4} }},\n')
+                    f'spv_{h:016x}, {len(spv) // 4}, '
+                    + (f'spvo_{h:016x}, {len(spv_o) // 4}' if spv_o else '0, 0') + ' },\n')
         if not ok:
             o.write('    { 0 }\n')
         o.write('};\n')
     print(f'{len(ok)} traduits et validés (spirv-val), {len(ko)} non traduits → {hout}')
+    if ombres:
+        print(f'  variantes « ombres » (Dref) : {sum(1 for x in ok if x[4])} / {len(ombres)} PS listés')
     for f, e in ko:
         print(f'  NON TRADUIT {f} : {e}')
 
