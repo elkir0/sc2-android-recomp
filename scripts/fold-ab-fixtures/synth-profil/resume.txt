@@ -1,0 +1,4 @@
+09:59:50 [synth-profil] température avant : Thermal Status: 2 Temperature{mValue=40.0, mType=0, mName=AP, mStatus=2}
+Success
+10:00:55 [synth-profil] température après : Thermal Status: 3 Temperature{mValue=44.5, mType=0, mName=AP, mStatus=3}
+plantages : 0 ; Present (bilan) : 751

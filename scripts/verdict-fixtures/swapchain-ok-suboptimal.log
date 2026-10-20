@@ -1,0 +1,12 @@
+--------- beginning of main
+10-17 07:20:05.100  7340  7372 I SC2Partout: [ANDROID] SC2 Partout - passe 7a, /sdcard/SC2Partout/install
+10-17 07:20:05.212  7340  7372 I SC2Partout: [FENETRE] INIT_WINDOW 2176x1812 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-17 07:20:09.801  7340  7373 I SC2Partout: [VKP] SC2_SWAPCHAIN=1 : présentation GPU par swapchain (le chargeur Vulkan est interposé)
+10-17 07:20:09.840  7340  7373 I SC2Partout: [VKP] device : VK_KHR_swapchain ajoutée ; file de présentation PROPRE (n°1) (famille 0)
+10-17 07:20:17.330  7340  7373 I SC2Partout: [VKP] swapchain 2176x1812, format 37, 3 images, FIFO — création n°1 (initiale ; rotation courante 0x1, preTransform 0x1 ; usages supportés 0x9F, demandés 0x2 ; compositeAlpha supportés 0x9, choisi 0x1)
+10-17 07:20:17.352  7340  7373 I SC2Partout: [VKP] 1er vkQueuePresentKHR (frame n°1, image 0) → 1000001003
+10-17 07:20:17.353  7340  7373 I SC2Partout: [VKP] vkQueuePresentKHR → VK_SUBOPTIMAL_KHR, taille inchangée (rotation courante 0x1, preTransform 0x1) : swapchain GARDÉE, la rotation reste au compositeur (suivants comptés, pas journalisés)
+10-17 07:20:17.354  7340  7373 I SC2Partout: [VKP] 1re frame présentée par la swapchain (back buffer 1280x720 → 2176x1224 en (0, 294), image 2176x1812)
+10-17 07:20:17.354  7340  7374 I SC2Partout: frame n°1 affichée à l'écran (1 affichées)
+10-17 07:22:50.660  7340  7373 I SC2Partout: [ANDROID] affichage : 2310 Present ; copie CPU : tampons postés 0 / échecs de verrou 0 / échecs de post 0 / géométries vides 0 ; fenêtres perdues 0 ; Present sans fenêtre 0 ; cibles refusées 0
+10-17 07:22:50.661  7340  7373 I SC2Partout: [ANDROID] swapchain active : 2310 frames présentées par le GPU, 0 repli(s) sur la copie CPU ; créée 1 fois (OUT_OF_DATE 0, redimensionnements 0), SUBOPTIMAL ignorés 2309 ; bandes seules 0 ; vkWaitForFences en échec 0

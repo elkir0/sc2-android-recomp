@@ -1,0 +1,42 @@
+# Passe 8h — TRaynor01 : le combo souris + clavier en mission (base : scénario événementiel 7u, mêmes déclencheurs).
+# Prouve, message par message ([INPUT] → wndproc du jeu) et sur les captures : sélection (gauche), ordre (droit),
+# survol (sans bouton), zoom (molette), raccourci clavier (A = attaque) + Maj (file d'ordres).
+# 1. fermer l'aide QUAND elle est visible ;
+frame 300 souris 945 583 quand:aide max:3000
+frame 305 souris 945 583 bouton g down
+frame 308 souris 945 583 bouton g up
+# 2. SÉLECTION : clic gauche sur le portrait de Raynor QUAND la partie est active ;
+frame 340 souris 1250 473 quand:partie max:600
+frame 342 souris 1250 473 bouton g down
+frame 343 souris 1250 473 bouton g up
+# 3. ORDRE DROIT par la minicarte QUAND Raynor est sélectionné ;
+frame 380 souris 100 640 quand:selection max:600
+frame 382 souris 100 640 bouton d down
+frame 383 souris 100 640 bouton d up
+# 4. SURVOL : le curseur glisse sur la carte de commande et s'y arrête (info-bulle), aucun bouton ;
+frame 420 souris 1000 600
+frame 424 souris 1030 595
+frame 428 souris 1062 590
+# 5. MOLETTE au centre de la vue : 5 crans vers soi (dézoom), pause, 5 crans vers l'avant (zoom) ;
+frame 500 souris 640 330
+frame 502 molette -120
+frame 504 molette -120
+frame 506 molette -120
+frame 508 molette -120
+frame 510 molette -120
+frame 600 molette 120
+frame 602 molette 120
+frame 604 molette 120
+frame 606 molette 120
+frame 608 molette 120
+# 6. ordre droit vers l'objectif AVEC Maj (file d'ordres), puis RACCOURCI A + clic gauche (attaque-déplacement).
+frame 700 souris 128 565
+frame 701 touche 0xA0 down
+frame 702 souris 128 565 bouton d down
+frame 703 souris 128 565 bouton d up
+frame 704 touche 0xA0 up
+frame 900 touche 0x41 down
+frame 901 touche 0x41 up
+frame 903 souris 70 690
+frame 904 souris 70 690 bouton g down
+frame 905 souris 70 690 bouton g up

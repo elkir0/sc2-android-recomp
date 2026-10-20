@@ -1,0 +1,8 @@
+10-20 10:00:00.000 I/SC2Partout( 2000): [INPUT] frame 10 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00C60385 = (901, 198)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-20 10:00:15.000 I/SC2Partout( 2000): [FPS] 20.0 images/s sur 5.0 s (frames 1→101, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 20.0 ; phase chargement ; ms/frame : jeu 30.0, backend 1.0
+10-20 10:00:20.000 I/SC2Partout( 2000): [FPS] 30.0 images/s sur 5.0 s (frames 101→251, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 25.0 ; phase chargement ; ms/frame : jeu 40.0, backend 6.0
+10-20 10:00:25.000 I/SC2Partout( 2000): [FPS] 40.0 images/s sur 5.0 s (frames 251→451, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 30.0 ; phase chargement ; ms/frame : jeu 50.0, backend 2.0
+10-20 10:00:35.000 I/SC2Partout( 2000): [FPS] 20.0 images/s sur 5.0 s (frames 451→551, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 27.5 ; phase chargement ; ms/frame : jeu 30.0, backend 1.0
+10-20 10:00:40.000 I/SC2Partout( 2000): [FPS] 20.0 images/s sur 5.0 s (frames 551→651, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 26.0 ; phase chargement ; ms/frame : jeu 30.0, backend 1.0
+10-20 10:00:45.000 I/SC2Partout( 2000): [FPS] 20.0 images/s sur 5.0 s (frames 651→751, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 25.0 ; phase chargement ; ms/frame : jeu 30.0, backend 1.0
+10-20 10:00:50.000 I/SC2Partout( 2000): [BILAN] frames présentées (Present) : 751

@@ -1,0 +1,49 @@
+# manifest-install.txt — données de StarCraft II : Wings of Liberty (Base15405, enUS) pour la CAMPAGNE hors ligne
+# sur SC2 Partout (passe 7y). Chemins relatifs à la racine d'installation (sur l'appareil : /sdcard/SC2Partout/install).
+# Format : <classe> <TAB> <chemin> <TAB> <octets> <TAB> <rôle — justification (preuve : android/TRACE-PASSE7Y.md)>
+#   A = requis au démarrage (moteur, données de base, locale)   B = requis par la campagne (toutes les missions)
+#   C = optionnel / inutile au portage (non poussé)              chemin finissant par « / » = dossier vide à créer
+# Mesures : extraction/install (DVD, installation de référence 6a) + extraction/install-ajouts-7h (archives retrouvées
+# sur le DVD, 7h). Lectures relevées dans les journaux des runs (lignes « [MPQ] … 1re lecture » et « [FS] »).
+A	Versions/Base15405/SC2.exe	16458904	moteur : l'exécutable que le runtime charge et dont le code est lifté (SC2_EXE)
+A	Mods/Core.SC2Mod/Base.SC2Data	8238904	données de base du moteur (UI, layouts, TriggerLibs, GameData) — ~280 fichiers lus par run
+A	Mods/Core.SC2Mod/base.SC2Assets	29653983	textures de base (UI, curseurs, polices d'image) — ~240 fichiers lus par run
+A	Mods/Core.SC2Mod/enUS.SC2Data	885052	locale enUS du moteur (GameStrings…) : ouverte au démarrage
+A	Mods/Core.SC2Mod/enUS.SC2Assets	863964	locale enUS : textures localisées du moteur
+A	Mods/Core.SC2Mod/Index.SC2Locale	611	index des locales disponibles (ouvert au démarrage)
+A	Versions/Shaders14513/baselineCache.bin	141923542	cache de shaders du jeu : SANS lui, le jeu tourne (sons, chargement) mais l'écran reste NOIR (TRACE-PASSE7Y §3)
+A	Support/	0	dossier de travail du jeu (SetCurrentDirectory « Support ») : vide suffit, les DLL sont émulées par le runtime
+B	Mods/Liberty.SC2Mod/base.SC2Assets	2405613201	modèles, textures, sons, musiques de Wings of Liberty — ~1 350 fichiers lus pour TRaynor01
+B	Mods/Liberty.SC2Mod/Base.SC2Data	99082368	données de jeu WoL (unités, armes, TriggerLibs) — dépendance de toutes les cartes
+B	Mods/Liberty.SC2Mod/enUS.SC2Assets	336321819	locale enUS WoL : voix des unités, textures de texte
+B	Mods/Liberty.SC2Mod/enUS.SC2Data	164576	locale enUS WoL : textes
+B	Mods/LibertyMulti.SC2Mod/Base.SC2Data	17277	dépendance déclarée par les cartes (vue « base » des passes 7q/7u)
+B	Mods/LibertyMulti.SC2Mod/enUS.SC2Data	3245	locale enUS du précédent (lue en mission)
+B	Campaigns/Liberty.SC2Campaign/Base.SC2Maps	71836547	LES 33 CARTES de la campagne (TRaynor01 … TZeratul04, TArcade, TSimulator) + 8 défis
+B	Campaigns/Liberty.SC2Campaign/base.SC2Assets	3489270406	modèles/textures/sons propres à la campagne, cinématiques — ~230 fichiers lus pour TRaynor01
+B	Campaigns/Liberty.SC2Campaign/Base.SC2Data	964116	données de campagne (GameData, scènes cinématiques)
+B	Campaigns/Liberty.SC2Campaign/enUS.SC2Assets	934371560	locale enUS campagne : dialogues/briefings (3 731 .ogg), vidéos .ogv localisées, visages
+B	Campaigns/Liberty.SC2Campaign/enUS.SC2Data	254482	locale enUS campagne : textes
+B	Campaigns/LibertyStory.SC2Campaign/Base.SC2Data	2040300	histoire : Hypérion, armurerie, laboratoire, cantina (TriggerLibs 10 Mo décompressés) — 52 fichiers lus
+B	Campaigns/LibertyStory.SC2Campaign/enUS.SC2Data	442170	locale enUS de l'histoire : textes
+C	Battle.net/Battle.net.MPQ	98693628	interface Battle.net (connexion, amis) : seulement montée (listfile/attributes), rien d'utile hors ligne
+C	Mods/Challenges.SC2Mod	321513	mode « défis » : sondé, jamais lu en campagne
+C	StarCraft II.exe	5512864	lanceur Windows : jamais exécuté (le runtime charge Versions/Base15405/SC2.exe)
+C	Support/Battle.net.dll	6808	DLL Windows : émulées (HLE) par le runtime
+C	Support/d3dx9_41.dll	4178264	idem
+C	Support/dbghelp.dll	1061944	idem
+C	Support/ErrorReporter.exe	430744	idem (rapporteur d'erreurs Windows)
+C	Support/fmodex_4_28_08.dll	950272	idem (FMOD réimplémenté : runtime/sc2_audio_*.c)
+C	Support/icudt44.dll	6975488	idem
+C	Support/icuin44.dll	1257472	idem
+C	Support/icuuc44.dll	958464	idem
+C	Support/Microsoft.VC80.CRT.manifest	1364	idem
+C	Support/msvcp80.dll	554832	idem
+C	Support/msvcr80.dll	632656	idem
+C	Support/RzAPM.DLL	19456	idem
+C	Support/SC2Switcher.exe	438936	idem
+C	Support/BattlenetAccount.url	117	raccourci web
+C	Support/TechSupport.url	122	raccourci web
+C	Versions/Base15405/Microsoft.VC80.CRT.manifest	1364	CRT Windows : émulée
+C	Versions/Base15405/msvcp80.dll	554832	idem
+C	Versions/Base15405/msvcr80.dll	632656	idem

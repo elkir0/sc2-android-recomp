@@ -7,20 +7,40 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: No binaries, no assets, no game-derived content
+      - name: No binaries, no assets, no game-derived content (v2)
         run: |
           set -e
           FAIL=0
           # 1) extensions interdites / forbidden extensions
-          BAD=$(find . -path ./.git -prune -o -type f \( -iname '*.exe' -o -iname '*.dll' -o -iname '*.mpq' -o -iname '*.mpqe' -o -iname '*.dds' -o -iname '*.m3' -o -iname '*.s2map' -o -iname '*.sc2map' -o -iname '*.bank' -o -iname '*.iso' -o -iname '*.w3x' \) -print)
-          if [ -n "$BAD" ]; then echo "::error::Forbidden files (game binaries/assets)::$BAD"; FAIL=1; fi
+          BAD=$(find . -path ./.git -prune -o -type f \( \
+            -iname '*.exe' -o -iname '*.dll' -o -iname '*.so' -o -iname '*.apk' \
+            -o -iname '*.mpq' -o -iname '*.mpqe' -o -iname '*.dds' -o -iname '*.m3' \
+            -o -iname '*.s2map' -o -iname '*.sc2map' -o -iname '*.sc2bank' -o -iname '*.bank' \
+            -o -iname '*.s2v' -o -iname '*.iso' -o -iname '*.w3x' \
+            -o -iname '*.bin' -o -iname '*.pak' -o -iname '*.ogv' -o -iname '*.swf' \
+            -o -iname '*.fxa' -o -iname '*.ogg' -o -iname '*.wav' -o -iname '*.mp4' \) -print)
+          if [ -n "$BAD" ]; then echo "::error::Forbidden files (game binaries/assets/shader bytecodes)::$BAD"; FAIL=1; fi
           # 2) gros fichiers / oversized files
           BIG=$(find . -path ./.git -prune -o -type f -size +20M -print)
           if [ -n "$BIG" ]; then echo "::error::Oversized files (likely derived blobs)::$BIG"; FAIL=1; fi
-          # 3) magies MPQ/PE dans les fichiers committés / magic bytes
-          HIT=$(grep -rl $'MPQ\x1a' --include='*' . 2>/dev/null | grep -v '^\./\.git' | head -5 || true)
+          # 3) magies MPQ dans les fichiers committés / magic bytes
+          HIT=$(grep -rl $'MPQ\x1a' --include='*' . 2>/dev/null | grep -v '^\./\.git/' | head -5 || true)
           if [ -n "$HIT" ]; then echo "::error::MPQ archive magic found::$HIT"; FAIL=1; fi
-          # 4) secrets / tokens (garde de base)
-          SEC=$(grep -rEn '(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|xox[baprs]-)' --include='*.py' --include='*.sh' --include='*.md' --include='*.json' . 2>/dev/null | grep -v '^\./\.git' | head -3 || true)
+          # 4) hashs littéraux du jeu (ISO DVD, SC2.exe) / known game-hash literals
+          #    (littéral coupé en deux pour que ce fichier ne s'auto-détecte pas)
+          HASH=$(grep -rEn '7f4853''ddbda2|fa6e''828d[0-9a-f]{8}' --include='*' . 2>/dev/null | grep -v '^\./\.git/' | head -5 || true)
+          if [ -n "$HASH" ]; then echo "::error::Known game artifact hash literal::$HASH"; FAIL=1; fi
+          # 5) images : ensemble documentaire borné (docs/ + racine, <=12, <=2 Mo chacune)
+          IMG_ALL=$(find . -path ./.git -prune -o -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print | grep -v '^\./\.git' || true)
+          IMG_BAD=$(echo "$IMG_ALL" | grep -vE '^\./(docs/[^/]+|[^/]+)\.(png|jpg|jpeg|webp)$' || true)
+          if [ -n "$IMG_BAD" ]; then echo "::error::Images allowed only at docs/ top level or repo root::$IMG_BAD"; FAIL=1; fi
+          IMG_N=$(echo "$IMG_ALL" | grep -c . || true)
+          if [ "${IMG_N:-0}" -gt 12 ]; then echo "::error::Too many images (policy: curated set <= 12, found $IMG_N)"; FAIL=1; fi
+          IMG_BIG=$(echo "$IMG_ALL" | xargs -r -I{} find {} -maxdepth 0 -size +2M 2>/dev/null || true)
+          if [ -n "$IMG_BIG" ]; then echo "::error::Image over 2MB::$IMG_BIG"; FAIL=1; fi
+          # 6) secrets / tokens (garde étendue aux webhooks Discord)
+          SEC=$(grep -rEn '(sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{30,}|xox[baprs]-|discord(app)?\.com/api/webhooks/[0-9]+/)' \
+            --include='*.py' --include='*.sh' --include='*.md' --include='*.json' --include='*.yml' --include='*.c' --include='*.h' . 2>/dev/null \
+            | grep -v '^\./\.git' | grep -v 'DISCORD_WEBHOOK' | head -3 || true)
           if [ -n "$SEC" ]; then echo "::error::Possible secret::$SEC"; FAIL=1; fi
           exit $FAIL

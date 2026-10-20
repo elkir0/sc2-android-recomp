@@ -1,0 +1,24 @@
+# Copie LUE de sc2-passe7l/android/outils/minicarte-ordres-7w2.sim (passe 7w2, non fusionnée au 16/10 02:40) — scénario de la 7q2
+# 7q2 : décalé de +420 tours de pompe — en installation complète le chargement finit vers f1 200 et l'aide paraît à ~f1 420 (au lieu de ~f1 000 dans la 7w2)
+# Passe 7w2 — TRaynor01 : ordres de déplacement PAR LA MINICARTE (1280×720, coordonnées client = pixels PPM).
+# Minicarte : cadre x 15..197, y 535..712 ; zone jouable = bande verticale centrale (7w : lignes vertes) ; Raynor part en
+# bas à gauche (~(60, 700)), l'objectif est révélé en haut (~(128, 560)).
+# 1. fermer l'aide ; 2. sélectionner Raynor (portrait, clic simple) ; 3. clic droit minicarte au milieu de la bande ;
+# 4. clic droit minicarte vers l'objectif ; 5. A + clic gauche minicarte (attaque-déplacement).
+frame 1460 souris 945 583
+frame 1465 souris 945 583 bouton g down
+frame 1468 souris 945 583 bouton g up
+frame 1500 souris 1250 473
+frame 1502 souris 1250 473 bouton g down
+frame 1503 souris 1250 473 bouton g up
+frame 1540 souris 100 640
+frame 1542 souris 100 640 bouton d down
+frame 1543 souris 100 640 bouton d up
+frame 1820 souris 128 565
+frame 1822 souris 128 565 bouton d down
+frame 1823 souris 128 565 bouton d up
+frame 2020 touche 0x41 down
+frame 2021 touche 0x41 up
+frame 2023 souris 70 690
+frame 2024 souris 70 690 bouton g down
+frame 2025 souris 70 690 bouton g up

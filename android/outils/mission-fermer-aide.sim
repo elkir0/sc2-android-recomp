@@ -1,0 +1,6 @@
+# Passe 7u — TRaynor01 : ferme la fenêtre d'aide du tutoriel (bouton « Close », bas-droite de la fenêtre, 1280×720).
+# La fenêtre apparaît vers la frame 950 (enUS) ou 750 (sans enUS) : clic à 1045.
+# Format (5f) : frame <n> souris <x> <y> [bouton g|m|d down|up] ; n = tours de pompe (≈ frames présentées).
+frame 1040 souris 945 583
+frame 1045 souris 945 583 bouton g down
+frame 1048 souris 945 583 bouton g up

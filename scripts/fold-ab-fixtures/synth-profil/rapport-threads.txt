@@ -1,0 +1,10 @@
+Cmdline: /system/bin/simpleperf record --app fr.sc2partout -e cpu-clock -f 4000 --duration 60 (synthétique)
+Arch: arm64
+Event: cpu-clock (type 1, config 0x0, config1 0x0, config2: 0x0)
+Samples: 800
+Event count: 200000000
+
+Overhead  Sample  Command
+95.00%    760     sc2-jeu
+3.75%     30      fr.sc2partout:jeu
+1.25%     10      AAudio_1

@@ -1,0 +1,54 @@
+From bd34e25f1041ca47f85218a0ab63df927300a6bc Mon Sep 17 00:00:00 2001
+From: elkir0 <anthony.dhaene@gmail.com>
+Date: Sat, 17 Oct 2026 23:16:56 +0000
+Subject: [PATCH] lift32_cpu: rsqrtss / rcpss / rsqrtps / rcpps (full
+ precision, as QEMU computes them)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CYrihR8PNuNHzuWv4Jp7Tq
+---
+ tools/lift/lift32_cpu.py | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/tools/lift/lift32_cpu.py b/tools/lift/lift32_cpu.py
+index 2fe2c02..6df43b8 100644
+--- a/tools/lift/lift32_cpu.py
++++ b/tools/lift/lift32_cpu.py
+@@ -182,6 +182,7 @@ SSE_AMBIGUOUS = (SSE_AMBIGUOUS | frozenset(SSE_PINT) | frozenset(SSE_PSAT)
+ SSE_MNEMONICS = (
+     SSE_MOV128 | SSE_AMBIGUOUS | frozenset(SSE_BITWISE)
+     | frozenset({"movss", "sqrtss", "sqrtsd", "sqrtps",
++                 "rsqrtss", "rsqrtps", "rcpss", "rcpps",
+                  "shufps", "unpcklps", "unpckhps",
+                  "minps", "maxps", "minpd", "maxpd", "minss", "maxss", "minsd", "maxsd",
+                  "ucomiss", "comiss", "ucomisd", "comisd",
+@@ -1486,6 +1487,13 @@ class Lifter:
+             rd_ = self._sd if wide else self._ss
+             fn = "sqrt" if wide else "sqrtf"
+             return [f"{rd_(insn, d)} = {fn}({rd_(insn, s)});"]
++        # rsqrtss / rcpss: the hardware returns a ~12-bit approximation whose
++        # exact bits differ between vendors; the full-precision value (one
++        # rounding for sqrt, one for the division) is what QEMU computes.
++        if m in ("rsqrtss", "rcpss"):
++            v = self._ss(insn, s)
++            expr = f"1.0f / sqrtf({v})" if m == "rsqrtss" else f"1.0f / {v}"
++            return [f"{self._ss(insn, d)} = {expr};"]
+         if m in ("minss", "maxss", "minsd", "maxsd"):
+             wide = m.endswith("sd")
+             rd_ = self._sd if wide else self._ss
+@@ -1507,6 +1515,12 @@ class Lifter:
+             return ["{ XMM _s = %s; for (int _i = 0; _i < %d; _i++)"
+                     " c->xmm[%d].%s[_i] = %s(c->xmm[%d].%s[_i], _s.%s[_i]); }"
+                     % (self._xm(insn, s), lanes, n, fld, fn, n, fld, fld)]
++        if m in ("rsqrtps", "rcpps"):
++            n = self._xi(d)
++            expr = "1.0f / sqrtf(_s.f32[_i])" if m == "rsqrtps" else "1.0f / _s.f32[_i]"
++            return ["{ XMM _s = %s; for (int _i = 0; _i < 4; _i++)"
++                    " c->xmm[%d].f32[_i] = %s; }"
++                    % (self._xm(insn, s), n, expr)]
+         if m in ("sqrtps",):
+             n = self._xi(d)
+             return ["{ XMM _s = %s; for (int _i = 0; _i < 4; _i++)"
+-- 
+2.39.5
+

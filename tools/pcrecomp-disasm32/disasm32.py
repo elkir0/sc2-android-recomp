@@ -1,0 +1,2031 @@
+"""
+x86-32 Disassembler for XWA static recompilation.
+Uses Capstone to disassemble code, build basic blocks, and identify
+function boundaries via recursive descent.
+"""
+
+import re
+import struct
+from dataclasses import dataclass, field
+from typing import Optional
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32, CS_GRP_JUMP, CS_GRP_CALL, CS_GRP_RET, CS_GRP_INT
+from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_OP_REG
+
+
+# Conditional jump mnemonics
+COND_JUMPS = {
+    'je', 'jne', 'jz', 'jnz', 'ja', 'jae', 'jb', 'jbe',
+    'jg', 'jge', 'jl', 'jle', 'js', 'jns', 'jo', 'jno',
+    'jp', 'jnp', 'jcxz', 'jecxz',
+    # loop/loope/loopne are conditional branches with a fallthrough, and the
+    # lifter emits them as `if (--ecx) goto L_target`. Leaving them out here
+    # does not lose the jump -- it loses the LABEL, because block leaders only
+    # come from this set, and a `loop` back into the middle of its own block
+    # then compiles to a goto with nothing to go to.
+    'loop', 'loope', 'loopz', 'loopne', 'loopnz',
+}
+
+# Unconditional jump
+UNCOND_JUMPS = {'jmp'}
+
+# Call instructions
+CALLS = {'call'}
+
+# Return instructions
+RETS = {'ret', 'retn', 'retf'}
+# Instructions no 32-bit compiler emits. A candidate whose decode meets one
+# before its terminator is data: a string decodes as `arpl`, `bound`, BCD.
+NOT_COMPILED = {"arpl", "bound", "into", "salc", "sldt", "str", "lsl", "lar", "ud2",
+                "daa", "das", "aaa", "aas"}
+
+
+def decode(md, code, va):
+    """Yield capstone instructions from `code` at `va`, decoded in batches.
+
+    capstone's own `md.disasm()` looks lazy and is not: it is a generator over
+    one `cs_disasm(count=0)` call that decodes the whole buffer in C before the
+    first instruction comes back. Every caller here stops within a few
+    instructions, so that paid for a full window per call: 90% of a 143-minute
+    run on The Movies. Small batches, doubling, stop when the caller does.
+    """
+    view, off, batch = memoryview(code), 0, 8
+    while off < len(view):
+        n = 0
+        for ins in md.disasm(view[off:], va + off, count=batch):
+            n += 1
+            off += ins.size
+            yield ins
+        if n < batch:           # an undecodable byte, or the end of the buffer
+            return
+        batch = min(batch * 2, 256)
+# The multi-byte no-ops MASM's `align` pads hand-written assembly with
+# (Disassembler.past_padding); `mov edi, edi` closes a run of them.
+_MASM_FILL = (b'\x8D\xA4\x24\x00\x00\x00\x00',    # lea esp, [esp+0x0]
+              b'\x8D\x9B\x00\x00\x00\x00',        # lea ebx, [ebx+0x0]
+              b'\x8D\x64\x24\x00',                # lea esp, [esp+0]
+              b'\x8D\x49\x00')                    # lea ecx, [ecx+0]
+
+
+def prologue_starts(data, code_start):
+    """Addresses that open with `push ebp; mov ebp, esp` (55 8B EC).
+
+    Except after `mov edi, edi` (8B FF): that is Microsoft's hot-patch
+    prologue (/hotpatch; D3DX, the CRT, most MS libraries). The function
+    starts at the mov, which is what every call names, and the push is one
+    instruction in. Taking the push as a start split The Movies' D3DX code two
+    bytes into 2,048 of its 3,083 framed functions.
+    """
+    found = set()
+    at = data.find(b'\x55\x8B\xEC')
+    while at >= 0:
+        hot = at >= 2 and data[at - 2:at] == b'\x8B\xFF'
+        found.add(code_start + at - (2 if hot else 0))
+        at = data.find(b'\x55\x8B\xEC', at + 1)
+    return found
+
+
+def thunk_tables(data, code_start, min_run=16):
+    """Runs of `jmp rel32` (E9) slots into the code, back to back: [(lo, hi)].
+
+    An incrementally linked image (/INCREMENTAL, MSVC 2.x-4.x debug and many
+    shipped retail builds) routes every function through a 5-byte thunk in one
+    table, and every call and function pointer names the thunk. Each slot is a
+    function start by construction, and nothing else can start inside one. A
+    pointer-shaped value naming a byte in the middle of a slot otherwise decodes
+    across the next one and hides it: in Monster Truck Madness 2, 0x00402733
+    (the last byte of `jmp 0x43B7E0`) took out the thunk at 0x00402734, and the
+    game's first call through that pointer was `ICALL: unresolved`.
+
+    Sixteen slots in a row whose every target lands in the code is not what
+    compiled code or a switch table looks like.
+    """
+    end = code_start + len(data)
+    runs = []
+    at = data.find(b'\xE9')
+    while at >= 0:
+        j = at
+        while (j + 5 <= len(data) and data[j] == 0xE9 and
+               code_start <= code_start + j + 5 + int.from_bytes(data[j + 1:j + 5], 'little', signed=True) < end):
+            j += 5
+        if (j - at) // 5 >= min_run:
+            runs.append((code_start + at, code_start + j))
+            at = data.find(b'\xE9', j)
+        else:
+            at = data.find(b'\xE9', at + 1)
+    return runs
+
+
+@dataclass
+class Instruction:
+    address: int
+    size: int
+    mnemonic: str
+    op_str: str
+    bytes: bytes
+    operands: list = None  # Capstone operand list
+
+    @property
+    def is_call(self) -> bool:
+        return self.mnemonic in CALLS
+
+    @property
+    def is_ret(self) -> bool:
+        return self.mnemonic in RETS
+
+    @property
+    def is_cond_jump(self) -> bool:
+        return self.mnemonic in COND_JUMPS
+
+    @property
+    def is_uncond_jump(self) -> bool:
+        return self.mnemonic in UNCOND_JUMPS
+
+    @property
+    def is_jump(self) -> bool:
+        return self.is_cond_jump or self.is_uncond_jump
+
+    @property
+    def is_terminator(self) -> bool:
+        return self.is_ret or self.is_jump
+
+    @property
+    def end_address(self) -> int:
+        return self.address + self.size
+
+    def get_branch_target(self) -> Optional[int]:
+        """Get the immediate branch/call target, or None for indirect."""
+        if self.operands:
+            op = self.operands[0]
+            if op.type == X86_OP_IMM:
+                return op.imm & 0xFFFFFFFF
+        return None
+
+    def get_mem_operand(self) -> Optional[tuple]:
+        """Get memory operand details (base_reg, index_reg, scale, disp)."""
+        if self.operands:
+            for op in self.operands:
+                if op.type == X86_OP_MEM:
+                    return (op.mem.base, op.mem.index, op.mem.scale, op.mem.disp)
+        return None
+
+    def __repr__(self):
+        return f"0x{self.address:08X}: {self.mnemonic} {self.op_str}"
+
+
+@dataclass
+class BasicBlock:
+    start: int
+    end: int  # address past last instruction
+    instructions: list = field(default_factory=list)
+    successors: list = field(default_factory=list)  # target addresses
+    is_exit: bool = False  # ends with ret
+
+    @property
+    def last_insn(self) -> Optional[Instruction]:
+        return self.instructions[-1] if self.instructions else None
+
+
+@dataclass
+class Function:
+    address: int
+    end: int = 0
+    name: str = ""
+    blocks: dict = field(default_factory=dict)  # addr -> BasicBlock
+    calls_to: set = field(default_factory=set)  # addresses this function calls
+    called_from: set = field(default_factory=set)  # addresses that call this function
+    is_thunk: bool = False  # single-jmp wrapper
+    size: int = 0
+    jump_targets: set = field(default_factory=set)
+    # "start" -- we believe a function begins here.
+    # "alias" -- we do NOT. Something branches into the middle of another
+    # function (a shared epilogue, a switch arm reached from elsewhere, an
+    # alternate entry point), and the lifter needs a dispatchable body at that
+    # address or the branch is unresolved at runtime. The body deliberately
+    # overlaps the function that contains it.
+    #
+    # The distinction is not cosmetic. Scored against Trespasser's linker map,
+    # 6,427 of 7,364 "false positives" were aliases -- addresses the catalog
+    # never claimed were function starts, counted as if it had. That is 87% of
+    # the error in a precision number, and it was measuring a design decision
+    # rather than a defect.
+    entry_kind: str = "start"
+
+    @property
+    def num_instructions(self) -> int:
+        return sum(len(b.instructions) for b in self.blocks.values())
+
+
+def table_entries(read, table, is_code, limit=256):
+    """The code addresses in a jump table at `table`, read with read(va, n).
+
+    Stop at the first entry that is not a code address -- that is where the
+    table ends. Shared by recursive descent and by the interior walk in
+    drop_mid_instruction_entries, which must reach the same switch arms.
+    """
+    out = []
+    misses = 0
+    for k in range(limit):
+        raw = read(table + k * 4, 4)
+        if not raw or len(raw) < 4:
+            break
+        tgt = int.from_bytes(raw, 'little')
+        if is_code(tgt):
+            out.append(tgt)
+            misses = 0
+            continue
+        # The entries do not always begin exactly at the displacement: the
+        # index can be biased, or alignment padding sits in front of the
+        # table (memcpy's [eax*4 + 0x49E140] really starts at 0x49E144, and
+        # slot 0 reads as the tail of the preceding instruction). Stopping
+        # at the first non-code slot therefore finds nothing at all for such
+        # a table. Tolerate a couple, and end the table only once entries
+        # have actually been seen.
+        misses += 1
+        if out and misses >= 2:
+            break
+        if not out and misses >= 4:
+            break
+    return out
+
+
+# `jmp dword ptr [idx*4 + table]`; with a base register the disp is not the table
+_TABLE_JMP = re.compile(r"dword ptr \[\w+\*4 \+ (0x[0-9a-f]+)\]$")
+
+
+# Bytes decoded per linear scan inside a function. Straight-line code longer
+# than this continues from a new leader at the window's end (disassemble_function).
+SCAN_WINDOW = 8192
+
+
+class Disassembler:
+    def __init__(self, pe_data: bytes, image_base: int, sections: list):
+        """
+        pe_data: raw bytes of the PE file
+        image_base: PE image base address
+        sections: list of Section objects from pe_analyze
+        """
+        self.pe_data = pe_data
+        self.image_base = image_base
+        self.sections = sections
+        self.md = Cs(CS_ARCH_X86, CS_MODE_32)
+        self.md.detail = True
+
+        # A second decoder with detail OFF, for probes_as_function_body. The
+        # probe wants mnemonics and sizes and nothing else; building capstone
+        # operand detail for every instruction it walks past is the whole cost
+        # of running it, and it throws all of it away.
+        self._probe_md = Cs(CS_ARCH_X86, CS_MODE_32)
+
+        # Build VA -> file offset cache for code sections
+        # adj = raw_offset - va_start, so file_offset = va + adj
+        self._code_sections = [(s.virtual_address + image_base,
+                                s.virtual_address + image_base + s.raw_size,
+                                s.raw_offset - (s.virtual_address + image_base))
+                               for s in sections if s.is_code and s.name != '.bind']
+
+    def code_section_bounds(self, va: int):
+        """(start, end) of the code section holding `va`, or None."""
+        for start, end, _ in self._code_sections:
+            if start <= va < end:
+                return start, end
+        return None
+
+    def past_padding(self, va: int) -> int:
+        """The function a candidate in alignment padding stands in front of.
+
+        MSVC pads between functions with `nop` or `int3` up to a 16-byte
+        boundary. A raw-scan candidate (an `E8` byte inside another
+        instruction, a pointer-shaped dword) can land inside that run. Decoded
+        as a function, it walks the padding into the real function after it
+        and owns its instructions, so the real start counts as `covered` and
+        no later scan -- not even a data table pointing exactly at it -- gets
+        to make it an entry. Yuri's Revenge lost 66 functions this way, among
+        them a static constructor and a method only a data table names.
+
+        So: a candidate whose bytes up to the next 16-byte boundary are all
+        padding, with something other than padding at the boundary, is that
+        boundary. Anything else is returned unchanged.
+
+        Hand-written assembly pads differently: MASM's `align 16` fills with
+        multi-byte no-ops, `lea esp, [esp+0]` (4 or 7 bytes), `lea ebx,
+        [ebx+0]`, `lea ecx, [ecx+0]`, and `mov edi, edi` for the last two
+        bytes. That `8B FF` before `55 8B EC` reads as a hot-patch prologue
+        (prologue_starts), so the function started two bytes early, and the
+        real entry a data table names had no function. Yuri's Revenge's voxel
+        rasterizers sit behind such a table, and the common one never ran:
+        every vehicle was invisible. The `lea` fillers count as padding, and
+        `mov edi, edi` does when one comes right before it; after `int3` or
+        `nop` (a real hot-patch function) it stays the start. MSVC uses the
+        same `lea` fillers inside functions, to align a loop head it jumps to
+        and in front of a switch's jump table, so past one the boundary has to
+        open with `push ebp; mov ebp, esp` as well.
+        """
+        if va & 15 == 0:
+            return va
+        nxt = (va + 15) & ~15
+        pad = self.read_bytes(va, nxt - va + 8)          # up to the boundary, and 8 past it
+        if not pad or len(pad) != nxt - va + 8:
+            return va
+        behind = self.read_bytes(va - 7, 7) if va - 7 >= self.image_base else b''
+        lea = bool(behind) and any(behind.endswith(f) for f in _MASM_FILL)
+        p, end, masm = 0, nxt - va, lea
+        while p < end:
+            if pad[p] in (0x90, 0xCC):
+                p, lea = p + 1, False
+                continue
+            f = next((f for f in _MASM_FILL if pad.startswith(f, p)), None)
+            if f:
+                p, lea, masm = p + len(f), True, True
+                continue
+            if lea and pad.startswith(b'\x8B\xFF', p):
+                p, lea = p + 2, False
+                continue
+            return va
+        if p != end or pad[end] in (0x90, 0xCC) or any(pad.startswith(f, end) for f in _MASM_FILL):
+            return va
+        if masm and pad[end:end + 3] != b'\x55\x8B\xEC':
+            return va
+        return nxt
+
+    def probes_as_function_body(self, va: int, window: int = 4096) -> bool:
+        """Read-only: does the instruction stream at `va` look like code?
+
+        Corroboration for a candidate that came out of a raw byte scan rather
+        than out of an instruction we actually decoded. `find_data_code_pointers`
+        reads four bytes at every offset of every data section and calls each
+        value in the code range a function; `find_branch_targets` does the same
+        for every `E8`/`E9` byte. Both therefore accept anything that merely
+        *looks* like an address -- a float, a string fragment, the middle of a
+        wider immediate. On Trespasser that was 2,905 function starts invented
+        out of data, each of which lifts to garbage.
+
+        The test is whether the bytes decode as a run of instructions that
+        reaches a `ret` or a tail `jmp`. Data almost never does; code almost
+        always does. Alignment was the obvious alternative and is not good
+        enough -- a real MSVC function start is only aligned when the linker had
+        a reason to pad it, and the optimised accessors this repo keeps losing
+        are exactly the ones it does not pad.
+
+        Decoding cleanly for a whole `window` without terminating counts as a
+        pass: garbage does not stay decodable for four kilobytes. Running off
+        the end of the *section* without terminating does not -- real code does
+        not end by falling out of .text.
+
+        Nothing here is recorded. The probe uses its own detail-free decoder and
+        touches no state, so running it cannot change what the sweep produces.
+        """
+        bounds = self.code_section_bounds(va)
+        if bounds is None:
+            return False
+        sec_end = bounds[1]
+
+        size = min(window, sec_end - va)
+        data = self.read_bytes(va, size)
+        if not data:
+            return False
+
+        end = va
+        for insn in decode(self._probe_md, data, va):
+            if insn.mnemonic in RETS or insn.mnemonic in UNCOND_JUMPS:
+                return True
+            if insn.mnemonic in NOT_COMPILED:
+                return False
+            end = insn.address + insn.size
+
+        # The decode stopped short of the window: a byte that is not an
+        # instruction, which is the signature of data read as code.
+        #
+        # Except at the very end, where the window itself truncates the last
+        # instruction and capstone stops for a reason that has nothing to do
+        # with the bytes. An x86 instruction is at most 15 bytes, so anything
+        # stopping inside that much of the end ran out of window rather than
+        # out of code. Without this a function longer than the window is
+        # rejected for being long: Trespasser 0x005D4DE0 decodes 1,031
+        # instructions, consumes 4,092 of 4,096 bytes, and needs 5 more for
+        # the call it stopped on.
+        if end < va + size - 15:
+            return False
+        # It consumed everything we gave it. Clean for a full window is a pass;
+        # clean right up to the section end without a terminator is not.
+        return va + size < sec_end
+
+    def is_code_address(self, va: int) -> bool:
+        """Check if a VA falls within a code section."""
+        for start, end, _ in self._code_sections:
+            if start <= va < end:
+                return True
+        return False
+
+    def is_data_address(self, va: int) -> bool:
+        """Check if a VA falls within any non-code section."""
+        rva = va - self.image_base
+        for s in self.sections:
+            if not s.is_code and s.virtual_address <= rva < s.virtual_address + s.virtual_size:
+                return True
+        return False
+
+    def _va_to_offset(self, va: int) -> Optional[int]:
+        """Convert VA to file offset within code sections."""
+        for start, end, adj in self._code_sections:
+            if start <= va < end:
+                return va + adj
+        return None
+
+    def read_bytes(self, va: int, size: int) -> Optional[bytes]:
+        """Read raw bytes at a VA."""
+        offset = self._va_to_offset(va)
+        if offset is None:
+            # Try data sections too
+            rva = va - self.image_base
+            for s in self.sections:
+                if s.virtual_address <= rva < s.virtual_address + s.raw_size:
+                    fo = s.raw_offset + (rva - s.virtual_address)
+                    return self.pe_data[fo:fo + size]
+            return None
+        return self.pe_data[offset:offset + size]
+
+    def disassemble_at(self, va: int, max_bytes: int = 4096):
+        """Yield instructions starting at VA.
+
+        A generator on purpose, and it must stay one. Every caller breaks out of
+        its loop at the first branch, ret, or known block leader -- usually
+        within a handful of instructions. Materialising the window first built
+        an Instruction, with capstone detail operands, for every one of up to
+        8 KB of decoded bytes and then threw nearly all of them away.
+
+        That was this tool's dominant cost, measured rather than guessed: ~4 ms
+        per byte of code, near-linear at O(code^1.10), which is 2.6 hours for a
+        2.4 MB image. Yielding makes each caller pay only for what it consumes.
+
+        Yielding alone did not do it, though: see decode().
+
+        Callers must iterate the result at most once.
+        """
+        data = self.read_bytes(va, max_bytes)
+        if data is None:
+            return
+
+        for insn in decode(self.md, data, va):
+            yield Instruction(
+                address=insn.address,
+                size=insn.size,
+                mnemonic=insn.mnemonic,
+                op_str=insn.op_str,
+                bytes=bytes(insn.bytes),
+                operands=list(insn.operands) if insn.operands else [],
+            )
+
+    def jump_table_targets(self, insn, limit: int = 256) -> list:
+        """Entries of the jump table an indirect `jmp` dispatches through.
+
+        MSVC puts the table in .text beside the function. Nothing names the arms
+        but this one instruction, so recursive descent cannot reach them and they
+        surface at runtime as unresolved dispatches. Stop at the first entry that
+        is not a code address -- that is where the table ends.
+        """
+        if not insn.operands:
+            return []
+        op = insn.operands[0]
+        if op.type != X86_OP_MEM or op.mem.scale != 4 or not op.mem.index:
+            return []
+        return table_entries(self.read_bytes, op.mem.disp & 0xFFFFFFFF,
+                             self.is_code_address, limit)
+
+    def disassemble_function(self, start_va: int, iat_map: dict = None) -> Optional[Function]:
+        """
+        Disassemble a complete function using recursive descent from start_va.
+        Returns a Function with fully built basic blocks and CFG.
+        """
+        if not self.is_code_address(start_va):
+            return None
+
+        func = Function(address=start_va, name=f"sub_{start_va:08X}")
+        visited = set()
+        work = [start_va]
+        block_leaders = {start_va}
+
+        # Pass 1: discover all block leaders
+        while work:
+            addr = work.pop()
+            if addr in visited or not self.is_code_address(addr):
+                continue
+            visited.add(addr)
+
+            insns = self.disassemble_at(addr, max_bytes=SCAN_WINDOW)
+            last = None
+            for insn in insns:
+                last = insn
+                if insn.is_call:
+                    target = insn.get_branch_target()
+                    if target and self.is_code_address(target):
+                        func.calls_to.add(target)
+                    # After call, next instruction is a new leader (fallthrough)
+                    # but within the same function
+                    continue
+
+                if insn.is_cond_jump:
+                    target = insn.get_branch_target()
+                    if target and self.is_code_address(target):
+                        # Target within reasonable distance is likely same function
+                        if abs(target - start_va) < 0x100000:
+                            block_leaders.add(target)
+                            if target not in visited:
+                                work.append(target)
+                    # Fallthrough is also a leader
+                    fallthrough = insn.end_address
+                    block_leaders.add(fallthrough)
+                    if fallthrough not in visited:
+                        work.append(fallthrough)
+                    break  # end this linear scan
+
+                if insn.is_uncond_jump:
+                    target = insn.get_branch_target()
+                    if target and self.is_code_address(target):
+                        if abs(target - start_va) < 0x100000:
+                            block_leaders.add(target)
+                            if target not in visited:
+                                work.append(target)
+                    elif target is None:
+                        func.jump_targets.update(self.jump_table_targets(insn))
+                        # `jmp dword ptr [table + idx*4]` -- a switch. The arms
+                        # belong to THIS function: they are its loop body, not
+                        # tail calls, so they have to become blocks here. Lift
+                        # them as separate functions and a `continue` inside the
+                        # switch turns into mutual recursion that never ends.
+                        for arm in func.jump_targets:
+                            block_leaders.add(arm)
+                            if arm not in visited:
+                                work.append(arm)
+                    break  # end this linear scan
+
+                if insn.is_ret:
+                    break  # end this linear scan
+
+                # Check for int 3 (padding/alignment)
+                if insn.mnemonic == 'int3':
+                    break
+            else:
+                # The window ran out before a branch, ret or int3: straight-line
+                # code longer than SCAN_WINDOW. Carry on from where it stopped,
+                # as a leader, or everything after it is lost. KotOR registers
+                # its script commands in ~7 KB of `mov [reg+disp], offset`; cut
+                # at the window, ~300 command functions were never harvested
+                # and their dispatches went unresolved.
+                if last is not None and last.end_address not in visited:
+                    block_leaders.add(last.end_address)
+                    work.append(last.end_address)
+
+        # Pass 2: build basic blocks
+        all_leaders = sorted(block_leaders)
+        for leader in all_leaders:
+            if not self.is_code_address(leader):
+                continue
+
+            block = BasicBlock(start=leader, end=leader)
+            # The same window as pass 1, so a block always reaches the leader
+            # pass 1 left at the end of its window.
+            insns = self.disassemble_at(leader, max_bytes=SCAN_WINDOW)
+
+            for insn in insns:
+                # If we hit another block leader (not our start), stop
+                if insn.address != leader and insn.address in block_leaders:
+                    block.successors.append(insn.address)
+                    break
+
+                block.instructions.append(insn)
+                block.end = insn.end_address
+
+                if insn.is_ret:
+                    block.is_exit = True
+                    break
+
+                if insn.is_cond_jump:
+                    target = insn.get_branch_target()
+                    if target:
+                        block.successors.append(target)
+                    block.successors.append(insn.end_address)  # fallthrough
+                    break
+
+                if insn.is_uncond_jump:
+                    target = insn.get_branch_target()
+                    if target:
+                        block.successors.append(target)
+                    else:
+                        # Indirect jump - could be switch table
+                        pass
+                    break
+
+                if insn.mnemonic == 'int3':
+                    block.is_exit = True
+                    break
+
+            if block.instructions:
+                func.blocks[leader] = block
+
+        # Calculate function end
+        if func.blocks:
+            func.end = max(b.end for b in func.blocks.values())
+            func.size = func.end - func.address
+
+        return func
+
+    def find_branch_targets(self, start_va: int, end_va: int) -> set:
+        """
+        Linear scan through code for direct rel32 branch targets -- both
+        `call` (E8) and `jmp` (E9). A quick heuristic seed pass before
+        recursive descent.
+
+        The `jmp` half is not optional. An optimising compiler turns
+        `call f; ret` into `jmp f`, so a small method that is only ever
+        tail-called is named by no CALL anywhere in the image. Seeding E8
+        alone left those functions undiscovered unless recursive descent
+        happened to reach the caller first -- and if the caller was itself
+        only tail-called, the whole chain stayed dark.
+
+        Measured on an 8.8 MB MSVC C++ binary with a linker map for ground
+        truth: seeding E8 only missed 7,331 real functions, 89% of which were
+        reached by `jmp rel32` and nothing else. 95% were C++ mangled names
+        and 61% were 8 bytes or smaller -- optimised __thiscall accessors with
+        no `push ebp; mov ebp, esp` prologue to match on either. Adding E9
+        recovers 6,550 of them.
+        """
+        targets = set()
+        data = self.read_bytes(start_va, end_va - start_va)
+        if data is None:
+            return targets
+
+        offset = 0
+        while offset < len(data) - 5:
+            # E8 xx xx xx xx = near call, E9 xx xx xx xx = near jmp
+            if data[offset] in (0xE8, 0xE9):
+                rel = struct.unpack_from('<i', data, offset + 1)[0]
+                target = (start_va + offset + 5 + rel) & 0xFFFFFFFF
+                if self.is_code_address(target):
+                    targets.add(target)
+                offset += 5
+            else:
+                offset += 1
+
+        return targets
+
+    def find_data_code_pointers(self, code_start: int, code_end: int,
+                                covered: set, queued: set,
+                                interior: bytearray = None) -> set:
+        """Function pointers that exist only in data.
+
+        A vtable slot, a callback table or a message-handler array can hold the
+        only reference to a function: no CALL names it, so recursive descent
+        never reaches it and it surfaces at runtime as an unresolved ICALL.
+        Scan every byte offset of each non-code section for values landing in
+        the code range and not already part of decoded code. Unaligned on
+        purpose: packed struct arrays put function pointers at odd addresses
+        (GTA1's handler table starts at 0x4B4AD1), and an aligned-only scan
+        misses them entirely.
+
+        `interior` is a byte per address in the code range, non-zero where a
+        byte is INSIDE an instruction some already-decoded function owns. A
+        pointer landing there is not a function start and cannot be one: the
+        decode from that byte is a different instruction stream than the one
+        the program runs. It still passes probes_as_function_body, because
+        garbage that decodes cleanly to a `ret` is exactly what the middle of
+        real code looks like -- on Mario Kart, 0x007BBF1B is the second byte of
+        `mov ebp, esp`, decodes as `in al, dx`, reaches a `ret` forty bytes
+        later, and killed the boot when a truncated neighbour fell into it.
+
+        Every hit is then corroborated by decoding it -- see
+        probes_as_function_body. Without that the scan accepts any four bytes
+        that happen to look like a code address: a float, a string fragment,
+        the middle of a wider immediate. Measured against Trespasser's linker
+        map, the unchecked scan invented 2,905 function starts. Calling those
+        harmless because they lift to dead code was the wrong trade: they
+        poison the precision number, bury the real misses in noise, and spend
+        codegen on decoded garbage.
+        """
+        found = set()
+        probed = rejected = mid = padded = 0
+        for s in self.sections:
+            if s.is_code:
+                continue
+            base = self.image_base + s.virtual_address
+            data = self.read_bytes(base, s.raw_size)
+            if not data:
+                continue
+            for off in range(len(data) - 3):
+                va = int.from_bytes(data[off:off + 4], 'little')
+                if not (code_start <= va < code_end):
+                    continue
+                if va in queued or va in found:
+                    continue
+                if va in covered:
+                    # An instruction some body already decoded. Normally a
+                    # label in that body; but when it is 16-aligned right
+                    # after alignment padding, the body ran on past a call
+                    # that never returns, through the padding, into the next
+                    # function. UT's UWeb.dll: a static constructor named only
+                    # by the _initterm table, behind `call <throw>; nop x12`.
+                    if va % 16 == 0 and self.read_bytes(va - 1, 1) in (b'\x90', b'\xcc'):
+                        padded += 1
+                        found.add(va)
+                    continue
+                if interior is not None and interior[va - code_start]:
+                    mid += 1
+                    continue
+                probed += 1
+                if not self.probes_as_function_body(va):
+                    rejected += 1
+                    continue
+                found.add(va)
+        if padded:
+            print(f"[*] Data scan: {padded} pointer targets start a function after padding "
+                  f"that another body ran through")
+        if probed or mid:
+            print(f"[*] Data scan: probed {probed} pointer targets, "
+                  f"rejected {rejected} that do not decode as code "
+                  f"and {mid} that land inside an instruction")
+        return found
+
+    def find_functions(self, code_start: int, code_end: int, iat_map: dict = None,
+                       seeds=(), release_operands: bool = False) -> dict:
+        """
+        Find all functions in the code section.
+        Uses call target analysis + common prologue patterns.
+
+        `seeds` are addresses that are functions whether or not anything here
+        recognises them -- the PE entry point above all. Nothing calls it, and
+        a CRT startup does not have to open with `push ebp; mov ebp, esp`, so
+        both heuristics can miss the one function the program begins with.
+
+        `release_operands` frees each instruction's capstone operand list once
+        this pass has finished with it. It saves a great deal of memory on a
+        large image, and it is safe ONLY if the caller is going to export the
+        catalog rather than lift it in process -- the lifter reads operands.
+
+        Returns dict of addr -> Function.
+        """
+        print(f"[*] Scanning for call targets in 0x{code_start:08X}-0x{code_end:08X}...")
+        call_targets = self.find_branch_targets(code_start, code_end)
+        print(f"[*] Found {len(call_targets)} potential call targets")
+
+        # Also look for common function prologues
+        data = self.read_bytes(code_start, code_end - code_start)
+        prologue_targets = prologue_starts(data, code_start) if data else set()
+
+        print(f"[*] Found {len(prologue_targets)} prologue patterns")
+
+        # Every slot of an incremental-link thunk table is a function start,
+        # with the same standing as a seed (thunk_tables).
+        tables = thunk_tables(data, code_start) if data else []
+        slots = {a for lo, hi in tables for a in range(lo, hi, 5)}
+        if tables:
+            print(f"[*] {len(slots)} thunk-table slots in {len(tables)} table(s)")
+        seeds = set(seeds) | slots
+
+        # Merge targets
+        all_targets = call_targets | prologue_targets | set(seeds)
+        # Filter to code range
+        all_targets = {t for t in all_targets if code_start <= t < code_end}
+        print(f"[*] Total unique function candidates: {len(all_targets)}")
+
+        # Disassemble each function. Then iterate to a fixpoint, following
+        # unconditional-jmp and call targets that land on code not yet covered by
+        # any discovered function (tail calls and jmp-thunk chains reach functions
+        # that no direct CALL targets and that lack a standard prologue, e.g. a
+        # thunk `jmp X` -> X, where X starts with `cmp`/`test`). Without this they
+        # are silently missing and show up at runtime as unresolved ITAIL/ICALL.
+        functions = {}
+        covered = set()          # every instruction start address across all funcs
+        interior = bytearray(max(0, code_end - code_start))   # ...and every byte within one
+        owner = {}               # instruction address -> the function that decoded it
+        alias_entries = set()    # entry points inside another function's body
+        weak = set()             # entries only a pointer-shaped value vouches for
+        queue = list(all_targets)
+        queued = set(all_targets)
+
+        def _add_func(addr, entry_kind="start"):
+            real = self.past_padding(addr)
+            if real != addr:
+                # Not a function: the one after the padding is. Queued rather
+                # than decoded here, so it goes through the same round logic.
+                if real not in queued:
+                    queued.add(real)
+                    queue.append(real)
+                return None
+            func = self.disassemble_function(addr, iat_map)
+            if not (func and func.blocks):
+                return None
+            func.entry_kind = entry_kind
+            functions[addr] = func
+            if len(func.blocks) == 1:
+                block = next(iter(func.blocks.values()))
+                if len(block.instructions) == 1 and block.instructions[0].is_uncond_jump:
+                    func.is_thunk = True
+            for b in func.blocks.values():
+                for ins in b.instructions:
+                    covered.add(ins.address)
+                    owner.setdefault(ins.address, addr)
+                    # Every byte after the first is inside this instruction, and
+                    # so cannot be the start of anything. A bytearray and not a
+                    # set: an image this size has tens of millions of interior
+                    # bytes and a set of them costs more than the image.
+                    for k in range(ins.address + 1, ins.address + ins.size):
+                        if code_start <= k < code_end:
+                            interior[k - code_start] = 1
+            return func
+
+        round_no = 0
+        data_scanned = False
+        while True:
+          while queue:
+              round_no += 1
+              sorted_targets = sorted(queue)
+              queue = []
+              total = len(sorted_targets)
+              if round_no == 1:
+                  print(f"[*] Disassembling {total} initial candidates...")
+              else:
+                  print(f"[*] Discovery round {round_no}: {total} new jmp/call targets...")
+              new_funcs = []
+              for i, addr in enumerate(sorted_targets):
+                  if round_no == 1 and i % 1000 == 0 and i > 0:
+                      print(f"[*] Disassembling function {i}/{total}...")
+                  if addr in functions:
+                      continue
+                  f = _add_func(addr, "alias" if addr in alias_entries else "start")
+                  if f is not None:
+                      new_funcs.append(f)
+
+              # Harvest jmp/call immediate targets from the functions decoded in
+              # THIS round -- not from every function decoded so far.
+              #
+              # Re-walking the whole catalog each round was quadratic and bought
+              # nothing: a function is harvested in the round it is decoded, and
+              # every target that harvest accepts lands in `queued`, which the
+              # first test below skips forever after. The only other exit from
+              # the loop body skips without queuing, and its conditions
+              # (`tgt in functions`, `owner[tgt] == func.address`) never go from
+              # true back to false. So a re-walk can only re-skip what it already
+              # skipped. Harvesting once also means an instruction's capstone
+              # operands stop being live state, which is what lets them be freed
+              # below.
+              for func in new_funcs:
+                  for b in func.blocks.values():
+                      for ins in b.instructions:
+                          if not (ins.is_uncond_jump or ins.is_call):
+                              continue
+                          tgt = ins.get_branch_target()
+                          if tgt is None or tgt in queued:
+                              continue
+                          if not self.is_code_address(tgt):
+                              continue
+                          if tgt in covered:
+                              # A jump INTO another function's body -- a shared
+                              # epilogue, or a switch arm the table scan reached
+                              # first. It has no label in the jumping function, so
+                              # the lifter tail-dispatches to it; make it a real
+                              # entry point or that dispatch is unresolved at
+                              # runtime. Safe now that ebp is a global register:
+                              # the caller's frame carries through.
+                              if tgt in functions or owner.get(tgt) == func.address:
+                                  continue
+                              # It is an entry point, but it is NOT a function
+                              # start and the catalog must not say it is.
+                              alias_entries.add(tgt)
+                          queued.add(tgt)
+                          queue.append(tgt)
+
+              # Callbacks: a function passed as an argument is named only by the
+              # immediate that pushes its address (`push 0x48d4e0` ahead of a
+              # DirectDraw EnumDisplayModes). Nothing CALLs it and it sits in no
+              # data table, so neither the call scan nor the data scan finds it;
+              # it surfaces at runtime as a callback that cannot be dispatched.
+              for func in new_funcs:
+                  # The body's own span: an immediate into a hole inside it
+                  # is the function's data, a table it jumps over (Theme
+                  # Park's `mov edi, offset keys; repne scasw` switch).
+                  own = {i.address for b in func.blocks.values() for i in b.instructions}
+                  own_lo, own_hi = (min(own), max(own)) if own else (0, 0)
+                  for b in func.blocks.values():
+                      for ins in b.instructions:
+                          if ins.is_call or ins.is_jump or not ins.operands:
+                              continue
+                          for op in ins.operands:
+                              if op.type != X86_OP_IMM:
+                                  continue
+                              tgt = op.imm & 0xFFFFFFFF
+                              if tgt in queued or tgt in functions:
+                                  continue
+                              if not self.is_code_address(tgt):
+                                  continue
+                              if own_lo < tgt < own_hi and tgt not in own:
+                                  continue
+                              # Data kept in code is loaded the same way: Theme
+                              # Park's startup does `mov edx, offset "con"` for
+                              # a device name in its code object, and decoding
+                              # that as a body straddled the real entry.
+                              if not self.probes_as_function_body(tgt):
+                                  continue
+                              if tgt in covered:
+                                  # Inside another body: a function after a
+                                  # noreturn call it did not know about. CRT
+                                  # __endthreadex ends in ExitThread and fell
+                                  # into __threadstartex, whose only reference
+                                  # is `push offset` ahead of CreateThread;
+                                  # dropped as covered, the thread start was
+                                  # never lifted (The Movies). Same treatment
+                                  # as a jump into a body: an alias entry.
+                                  alias_entries.add(tgt)
+                              queued.add(tgt)
+                              weak.add(tgt)      # a pointer-shaped value, like the data scan's
+                              queue.append(tgt)
+
+              # Both harvests are done with these instructions. Each retained
+              # operand list pins a whole capstone cs_detail struct, and holding
+              # them for an entire image is what took a 2.4 MB input past 4 GB
+              # and killed a run -- so a caller that only wants the catalog can
+              # say so and get them dropped.
+              #
+              # It is opt-in because "nothing downstream reads operands" is only
+              # true of the JSON path. Every project here drives the lifter in
+              # process (run_pipeline.py -> Lifter.lift_function), and lift32
+              # reads insn.operands directly: with them dropped, each handler's
+              # `if len(ops) == 2` is false and the instruction vanishes, no
+              # error. That lifts an image to a third of its real size, with the
+              # gotos and every instruction that has an operand quietly missing.
+              if release_operands:
+                  for func in new_funcs:
+                      for b in func.blocks.values():
+                          for ins in b.instructions:
+                              ins.operands = None
+
+          if data_scanned:
+              break
+          data_scanned = True
+          ptrs = self.find_data_code_pointers(code_start, code_end, covered, queued,
+                                              interior)
+          if not ptrs:
+              break
+          print(f"[*] Data scan: {len(ptrs)} functions reachable only via data pointers...")
+          queued |= ptrs
+          weak |= ptrs
+          queue = sorted(ptrs)
+
+        print(f"[*] Successfully disassembled {len(functions)} functions"
+              f" ({round_no} discovery rounds)")
+        # Nothing starts inside a thunk slot, so an entry off the slot grid is
+        # a decode the table disproves.
+        torn = [a for a in functions for lo, hi in tables if lo <= a < hi and (a - lo) % 5]
+        for a in torn:
+            del functions[a]
+        if torn:
+            print(f"[*] Dropped {len(torn)} entries inside a thunk-table slot")
+        sizes = {a: f.size for a, f in functions.items()}
+        callers = {}
+        for a, f in functions.items():
+            for t in f.calls_to:
+                callers.setdefault(t, set()).add(a)
+        # Seeds stay: an export or a vtable slot is a start on outside evidence,
+        # so a body that decodes over one is the wrong one (the self-test has
+        # Killing Floor's case).
+        gone = drop_mid_instruction_entries(
+            lambda va, n: self.read_bytes(va, n), sizes, code_start, code_end,
+            keep=set(seeds) & set(sizes), callers=callers, weak=weak & set(sizes))
+        for a in list(functions):
+            if a not in sizes:
+                del functions[a]
+
+        # An entry on int3 is alignment padding that a pointer-shaped constant
+        # happened to name (330 in SimCity 2000). The probe passed it because
+        # the padding runs into the next function, which does reach a `ret`.
+        pad = [a for a, f in functions.items()
+               if a not in callers and a not in seeds and self.read_bytes(a, 1) == bytes([0xCC])]
+        for a in pad:
+            del functions[a]
+        if pad:
+            print(f"[*] Dropped {len(pad)} entries that start in int3 padding")
+
+        inner = interior_starts(functions, protected=set(callers) | set(seeds), weak=weak)
+        eh = {a for a in eh_entries(self.read_bytes, code_start, code_end)
+              if a in functions and a not in seeds and functions[a].entry_kind == "start"}
+        for a in inner | eh:
+            functions[a].entry_kind = "alias"
+        if inner:
+            print(f"[*] {len(inner)} scan candidates are labels inside another body: aliases")
+        if eh - inner:
+            print(f"[*] {len(eh - inner)} C++ EH stubs and funclets: aliases of the function that installs them")
+
+        moved = clamp_extents(functions, code_end)
+        if moved:
+            print(f"[*] Clamped {moved} function extents to the next function start")
+
+        # Clamping cut some bodies short of their own branch targets, and the
+        # lifter dispatches to a target outside the extent: each needs a body.
+        sizes = {a: f.size for a, f in functions.items()}
+        added = set()
+        close_dispatch_targets(lambda va, n: self.read_bytes(va, n), sizes,
+                               code_start, code_end, aliases=added,
+                               inside=lambda va: interior[va - code_start] == 1)
+        for t in sorted(added):
+            f = _add_func(t, "alias")
+            if f is not None:
+                f.end, f.size = t + sizes[t], sizes[t]
+                # [sc2-partout patch] Same release as the discovery rounds: these
+                # alias bodies are never harvested, and on SC2.exe (15.7 MB) the
+                # 7,718 of them kept ~650 MB of capstone operand detail alive,
+                # taking the process from 7.33 GB to the 8 GB `ulimit -v` cap --
+                # MemoryError or SIGSEGV inside capstone/ctypes (4 runs).
+                # Opt-in exactly like the rounds: without release_operands
+                # (the in-process lifter path) nothing changes.
+                if release_operands:
+                    for b in f.blocks.values():
+                        for ins in b.instructions:
+                            ins.operands = None
+        return functions
+
+
+def eh_entries(read, code_start, code_end):
+    """MSVC C++ exception-handling code: handler stubs and unwind funclets.
+
+    A function with destructors to run on unwind installs a handler stub,
+    `mov eax, offset FuncInfo; jmp ___CxxFrameHandler`, and FuncInfo's unwind
+    map and catch blocks name the funclets (`mov ecx, [ebp-0x14]; jmp ~T`).
+    All of it sits after the function's `ret` and is reachable only through
+    those tables, so it has to be an entry -- but it is part of the function
+    that installed the handler, not a function of its own. In SimCity 2000
+    1,933 of 2,220 "starts inside another function" were exactly this.
+
+    Found by shape: B8 imm32 E9 rel32 whose immediate points at a FuncInfo
+    magic (0x19930520-0x19930522). Returns the stubs and funclets.
+    """
+    text = read(code_start, code_end - code_start) or b""
+    def dword(va):
+        raw = read(va, 4)
+        return int.from_bytes(raw, "little") if raw and len(raw) == 4 else 0
+    out = set()
+    for m in re.finditer(rb"\xB8(.{4})\xE9", text, re.S):
+        fi = int.from_bytes(m.group(1), "little")
+        if dword(fi) not in (0x19930520, 0x19930521, 0x19930522):
+            continue
+        out.add(code_start + m.start())
+        max_state, unwind, n_try, tries = dword(fi + 4), dword(fi + 8), dword(fi + 12), dword(fi + 16)
+        acts = [dword(unwind + 8 * k + 4) for k in range(min(max_state, 4096))]
+        for t in range(min(n_try, 256)):
+            n_catch, catches = dword(tries + 20 * t + 12), dword(tries + 20 * t + 16)
+            acts += [dword(catches + 16 * c + 12) for c in range(min(n_catch, 64))]
+        out.update(a for a in acts if code_start <= a < code_end)
+    return out
+
+
+def interior_starts(functions, protected=frozenset(), weak=frozenset()):
+    """Starts that are really labels inside another function's body.
+
+    The linear scan seeds every `jmp rel32` target and every `push ebp; mov
+    ebp, esp` as a function start, to catch tail calls and uncalled
+    functions. In a big function both fire on ordinary code: SimCity 2000's
+    CRT `__output` jumps back to its switch head 0x0049464E from ten places,
+    and 0x00405106's `push ebp` follows the SEH prologue's `mov eax, fs:[0]`.
+    Each false start then clamps the real function short, so the switch in
+    the first piece dispatches to arms nothing lifted.
+
+    A candidate is a label, not a function, when another body reaches it
+    the way only a function's own code does: its previous instruction falls
+    straight into it, or a conditional jump in that body targets it. An
+    unconditional `jmp` alone is not enough -- that is what a tail call or a
+    jump thunk looks like (0x00401820: jmp 0x00413520, a real function).
+    A fallthrough after a `call` is not either: the call may not return.
+
+    Nor is a function's own switch arm, whatever else vouches for it: the
+    data scan reads the jump table beside the body as code pointers, and
+    MFC's dispatcher 0x004A4B70 came out in five pieces that way.
+
+    `protected` holds entries with their own evidence (called, seeded);
+    those stay starts. `weak` ones, named only by a pointer-shaped value,
+    stay starts too unless they are an arm of the body's own switch.
+    Returns the addresses to make aliases:
+    they keep their bodies, so nothing that jumps to them breaks, but they no
+    longer cut the function around them.
+    """
+    arms = {a for a, f in functions.items()
+            if f.entry_kind == "start" and a not in protected}
+    cands = arms - set(weak)
+    inner = set()
+    for a, f in functions.items():
+        inner |= {t for t in f.jump_targets if t != a and t in arms}
+        ins = sorted((i for b in f.blocks.values() for i in b.instructions),
+                     key=lambda i: i.address)
+        for prev, nxt in zip(ins, ins[1:]):
+            if nxt.address != a and nxt.address in cands and                prev.address + prev.size == nxt.address and                not (prev.is_terminator or prev.is_call or prev.mnemonic == "int3"):
+                inner.add(nxt.address)
+        for i in ins:
+            if i.is_cond_jump and i.op_str.startswith("0x"):
+                t = int(i.op_str, 16)
+                if t != a and t in cands:
+                    inner.add(t)
+    return inner
+
+
+def drop_mid_instruction_entries(read_va, functions, code_start, code_end,
+                                 max_rounds=4, verbose=True, keep=frozenset(), callers=None,
+                                 weak=frozenset()):
+    """Remove catalog entries that are not instruction boundaries.
+
+    An address inside an instruction cannot be the start of anything: decoding
+    from it produces a stream the program never runs. On Mario Kart Arcade GP
+    DX, 0x0081C100 is the third byte of `fld dword ptr [0x8E0848]` and decodes
+    as `dec eax; or byte ptr [esi - 0x3be22700], cl; hlt` - which lifts,
+    compiles, and kills the game a thousand calls into its boot.
+
+    find_functions already refuses these when the containing function was
+    decoded first. Two candidates from the SAME data-scan batch never see each
+    other, and a C++ initialiser table produces exactly that: the initialiser
+    and a false pointer into its middle arrive in the same round.
+
+    So this runs afterwards, over the whole catalog at once, and iterates - a
+    dropped entry's own bogus decode has to stop marking bytes interior, or it
+    can take a real function down with it. Two rounds is normally enough.
+
+    `functions` is {addr: size}, edited in place. Returns how many went.
+
+    `keep` holds entries with direct evidence -- the targets of decoded `call`
+    instructions -- which are never dropped. The evidence against an entry is
+    only that some other body's decode straddles it, and that body can be the
+    false one: in The Movies a data-scan hit inside a jump table (0x00C1016D)
+    decoded over 0x00C10170, a function called directly, and the real one went.
+
+    `callers` maps a call target to the bodies whose decoded `call` names it.
+    Such a target is kept only while one of those bodies is still an entry, so
+    this is re-derived every round: a garbage body's `call` is no evidence once
+    the garbage body is itself dropped. Bunghole in One: 0x10002E99, dropped as
+    mid-instruction, decoded a `call 0x10001026`; that kept 0x10001026, which
+    is inside `call dword ptr [0x1001c004]` of the real 0x10001000, and the real
+    function was clamped short there. The engine calls it through a registered
+    handler, and the game stalled at the end of the first hole's fly-through.
+
+    `weak` holds entries only a pointer-shaped value vouches for (the data scan,
+    the code-immediate harvest). Keeping the called entry leaves the straddling
+    decode in the catalog as well; when that decode is weak it is the false one
+    for certain, so it is dropped, and it marks nothing that round. Bunghole in
+    One: `push 0x41c0c0` hands DirectInput a data-format table that sits in
+    .text; decoded as code it is `add bh, bh` across 0x0041C0D8, the `jmp
+    [DirectInputCreateA]` thunk that real code calls.
+    """
+    from capstone import Cs, CS_ARCH_X86, CS_MODE_32
+    md = Cs(CS_ARCH_X86, CS_MODE_32)
+    dropped = 0
+    gone = set()
+
+    # Decode to a terminator, NOT to the recorded size, and this is the whole
+    # subtlety. clamp_extents has already cut each function at the next start -
+    # including at the false one - so the recorded extent stops exactly where
+    # the evidence would have been. Walking to the `ret` the function really
+    # ends at is what puts the bogus entry back inside an instruction.
+    #
+    # Stopping at the terminator also keeps this from marking the NEXT
+    # function's bytes and dropping a real start: over-marking is the only way
+    # this can do harm, and a `ret` is where over-marking would begin.
+    ENDS = ("ret", "retn", "retf", "iret", "iretd")
+    WINDOW = 0x2000
+
+    # No function is bigger than this, and a branch further than this is a tail
+    # call into somewhere else - which is not ours to mark.
+    REACH = 0x10000
+
+    def body_instructions(addr):
+        """Walk a function's real extent as a graph, not as a line.
+
+        Stopping at a `jmp` was the obvious rule and is wrong: MSVC emits them
+        inside a function constantly - around a loop, out of a switch arm, to a
+        shared tail - and stopping there ends the walk in the middle of the
+        body. `0x00768220` ends at `jmp 0x76825F` twenty-three instructions in,
+        so a false entry at `0x00768279` was never reached and survived two
+        passes.
+
+        Stopping at `ret` is wrong for exactly the same reason, and it is the
+        more common one: a `ret` ends a PATH, not a function. Any function with
+        an early exit - a guard clause, a failed check, `if (!ok) return false;`
+        - has its whole real body after the first `ret`, and a linear walk
+        never sees a byte of it.
+
+        `0x007464E0` in Mario Kart Arcade GP DX is thirteen instructions of
+        error path ending in `ret` at `0x00746516`, and a hundred more after
+        it. Three false entries sat inside the `call __security_check_cookie`
+        at `0x0074656F`, were never marked interior, survived every round, and
+        the lifter emitted a "function" whose entire body was `or byte ptr
+        [eax], al` decoded from the middle of that call's operand. It faulted
+        on the first frame the game tried to draw.
+
+        So: a worklist. Follow both edges of a conditional branch, follow an
+        unconditional one, end a path at `ret` or an indirect jump, then take
+        the next pending target.
+
+        A switch is an indirect jump, but its arms are still this body: follow
+        its table. SimCity 2000's CRT `__output` (0x0049443F) dispatches every
+        printf directive through `jmp [eax*4 + 0x494BF0]`. Ending the path
+        there never reached the arm holding `mov [ebp-0x18], -1` at 0x004944DD,
+        so a scan hit on its last byte (0x004944E3) survived as a start,
+        clamped `__output` to 164 bytes, and the lift's switch dispatched into
+        an address nothing lifted: the game stalled before its first frame. Bounded by REACH and a visited set, because
+        over-marking is the only way this can do harm - marking a real function
+        start as interior would drop it.
+        """
+        pending = [addr]
+        seen = set()
+        n = 0
+        while pending and n < 8192:
+            va = pending.pop()
+            while va is not None and n < 8192:
+                if va in seen:
+                    break
+                seen.add(va)
+                try:
+                    code = read_va(va, min(WINDOW, code_end - va))
+                except Exception:
+                    break
+                if not code:            # read_bytes: None outside the image
+                    break
+                advanced = False
+                for ins in decode(md, code, va):
+                    advanced = True
+                    n += 1
+                    va = ins.address + ins.size
+                    yield ins
+                    m = ins.mnemonic.split()[-1]
+                    if m in ENDS:
+                        va = None
+                        break
+                    # A call returns, so its target is somebody else's body but
+                    # the instruction after it is still ours.
+                    if m != "call" and m.startswith("j"):
+                        op = ins.op_str.strip()
+                        t = int(op, 16) if op.startswith("0x") else None
+                        sw = _TABLE_JMP.search(op) if m == "jmp" and t is None else None
+                        if sw:
+                            for arm in table_entries(read_va, int(sw.group(1), 16),
+                                                     lambda v: code_start <= v < code_end):
+                                if addr <= arm < code_end and arm - addr < REACH \
+                                   and arm not in seen:
+                                    pending.append(arm)
+                        if t is not None and addr <= t < code_end and \
+                           t - addr < REACH and t not in seen:
+                            pending.append(t)
+                        if m == "jmp":
+                            va = None    # unconditional: this path ends here
+                            break
+                    if va in seen:
+                        break
+                if not advanced:
+                    break
+
+    static_keep = set(keep)
+    for _ in range(max_rounds):
+        # A call is evidence only while the body making it is still an entry:
+        # a garbage decode's `call` protected garbage (see `callers`).
+        keep = static_keep | {t for t, cs in (callers or {}).items()
+                              if any(c in functions for c in cs)}
+        evict = {a for a in set(weak) & set(functions)
+                 if a not in keep and functions[a] > 0 and any(
+                     k in keep and k in functions
+                     for ins in body_instructions(a)
+                     for k in range(ins.address + 1, ins.address + ins.size))}
+        def interior_of(skip):
+            marks = bytearray(max(0, code_end - code_start))
+            for addr in functions:
+                if functions[addr] <= 0 or addr in skip:
+                    continue
+                for ins in body_instructions(addr):
+                    for k in range(ins.address + 1, ins.address + ins.size):
+                        if code_start <= k < code_end:
+                            marks[k - code_start] = 1
+            return marks
+
+        def inside(marks):
+            return {a for a in functions
+                    if code_start <= a < code_end and marks[a - code_start] and a not in keep}
+
+        # Only bodies that survive this round count as evidence. SimCity 2000:
+        # 0x004021C9, inside the jump thunk 0x004021C6, decoded `add cl, ch`
+        # over the next thunk 0x004021CB -- a real one, named by `push offset`
+        # to the vector-constructor iterator -- and both went together. The game
+        # then called a function nothing had lifted.
+        first = inside(interior_of(evict))
+        bogus = sorted(evict | (first & inside(interior_of(evict | first))))
+        if not bogus:
+            break
+        for a in bogus:
+            del functions[a]
+        gone.update(bogus)
+        dropped += len(bogus)
+        if verbose:
+            print("[*] Dropped %d entries that are not instruction boundaries"
+                  % len(bogus))
+
+    # Re-open the neighbours the dropped entries had truncated.
+    #
+    # clamp_extents cut each real function at the next start, and for these the
+    # next start was the false one - so a function whose extent ends exactly at
+    # a dropped address is a function that was cut short to make room for
+    # something that does not exist. Left alone it ends in a fallthrough to an
+    # address nothing lifts, which is a worse failure than the one this
+    # function just fixed: before, the game ran a wrong instruction; now it
+    # would stop dead at a dispatch.
+    if gone:
+        import bisect
+        starts = sorted(functions)
+        for addr in list(functions):
+            if addr + functions[addr] in gone:
+                i = bisect.bisect_right(starts, addr)
+                functions[addr] = (starts[i] if i < len(starts) else code_end) - addr
+    return dropped
+
+
+def close_dispatch_targets(read_va, functions, code_start, code_end,
+                           aliases=None, max_rounds=3, verbose=True, inside=None):
+    """Make every direct branch target dispatchable.
+
+    The lifter turns a `jcc`/`jmp`/`call` into a `goto` when the target is
+    inside the function being lifted and into a `dispatch()` when it is not.
+    So every target that leaves its own extent has to BE an entry, or the game
+    stops on "no lifted function at ...".
+
+    Clamping is what creates these. A shared epilogue is a legitimate entry -
+    several functions jump to it - but recording it as a *start* cuts the
+    function that contains it in half, and the second half's branch targets
+    suddenly point outside the extent. Mario Kart stopped on 0x007B96F3, an
+    ordinary `mov eax, [ebp+0x18]` in the middle of a function that had been
+    truncated at the `pop/pop/pop/ret` five bytes earlier.
+
+    New entries are aliases: they overlap whatever contains them on purpose,
+    and must not be used as clamp limits. Their addresses are added to
+    `aliases` if one is given. Returns how many were added.
+
+    The extents are decoded linearly, so a table or constant inside one reads
+    as branches to anywhere. `inside(va)`, if given, says va is inside a known
+    instruction; such a target is never added. SimCity 2000 got 0x0041E956,
+    the third byte of `mov eax, 0x4D75A8`, as an entry whose decode reached
+    `push es` -- and its instructions landed in the code map over the real ones.
+    """
+    from capstone import Cs, CS_ARCH_X86, CS_MODE_32
+    import bisect
+    md = Cs(CS_ARCH_X86, CS_MODE_32)
+    md.detail = True
+    BRANCH = ("jmp", "call", "je", "jne", "jz", "jnz", "ja", "jae", "jb", "jbe",
+              "jg", "jge", "jl", "jle", "js", "jns", "jo", "jno", "jp", "jnp",
+              "jcxz", "jecxz", "loop", "loope", "loopz", "loopne", "loopnz")
+    added_total = 0
+
+    for _ in range(max_rounds):
+        wanted = set()
+        for addr, size in list(functions.items()):
+            if size <= 0:
+                continue
+            try:
+                code = read_va(addr, size)
+            except Exception:
+                continue
+            end = addr + size
+            for ins in md.disasm(code, addr):
+                if ins.mnemonic.split()[-1] not in BRANCH:
+                    continue
+                sw = _TABLE_JMP.search(ins.op_str) if ins.mnemonic == "jmp" else None
+                if sw:
+                    # A switch arm past a clamp is a dispatch too (MFC's
+                    # 0x004A4B70, cut by chunks it calls, lost 0x004A5025).
+                    for t in table_entries(read_va, int(sw.group(1), 16),
+                                           lambda v: code_start <= v < code_end):
+                        if not (addr <= t < end or t in functions or (inside and inside(t))):
+                            wanted.add(t)
+                for op in ins.operands:
+                    if op.type != X86_OP_IMM:
+                        continue
+                    t = op.imm & 0xFFFFFFFF
+                    # Inside this extent the lifter emits a goto, and an
+                    # address that is already an entry is already dispatchable.
+                    if addr <= t < end or t in functions:
+                        continue
+                    if code_start <= t < code_end and not (inside and inside(t)):
+                        wanted.add(t)
+        if not wanted:
+            break
+        starts = sorted(functions)
+        for t in sorted(wanted):
+            i = bisect.bisect_right(starts, t)
+            nxt = starts[i] if i < len(starts) else code_end
+            functions[t] = nxt - t
+            if aliases is not None:
+                aliases.add(t)
+        added_total += len(wanted)
+        if verbose:
+            print("[*] Added %d branch targets that had no dispatchable body"
+                  % len(wanted))
+    return added_total
+
+
+def clamp_extents(functions, code_end, starts=None):
+    """No function extends past the next function's entry. Returns how many
+    had to be shortened.
+
+    `func.end` comes out of recursive descent as `max(block.end)`, and descent
+    follows unconditional jumps - so one `jmp` to a shared epilogue, or a jump
+    table whose arms are scattered, puts `end` far past the body and everything
+    in between is counted as part of this function. The lifter then reads
+    `size` bytes LINEARLY from the entry, so it lifts every unrelated function
+    in the gap into this one, over and over.
+
+    Measured on Mario Kart Arcade GP DX: 28,597 recovered functions claiming
+    **89.5 MB of bodies for a 4.3 MB code range** - 271 of them over 64 KB and
+    one at 1.3 MB - which lifted to 18.8 million lines and 1.9 GB of C that no
+    compiler will take. Clamping brings the claim to 6.7 MB. The 1.55x that
+    remains is the 3,619 alias entries, which overlap their host function
+    deliberately and are the reason this clamps only against `entry_kind ==
+    "start"`: clamping against an alias would truncate the function containing
+    it.
+
+    A real function whose body is genuinely split around another one - MSVC
+    does move cold blocks away - loses its far blocks here. That shows up as a
+    named, findable unresolved dispatch at run time, which is much better than
+    a lift nobody can build.
+
+    Accepts the {addr: Function} that find_functions returns, or the plain
+    {addr: size} a project keeps in a catalog. In the second shape there is no
+    entry_kind to read, so pass `starts` - the addresses that are function
+    starts - or every entry acts as a limit for every other and an alias
+    truncates the function it sits inside. Mutates and returns in place.
+    """
+    import bisect
+
+    if starts is None:
+        starts = [a for a, f in functions.items()
+                  if getattr(f, "entry_kind", "start") == "start"]
+    starts = sorted(starts)
+    moved = 0
+    for addr, func in functions.items():
+        size = func.size if hasattr(func, "size") else func
+        if size <= 0:
+            continue
+        i = bisect.bisect_right(starts, addr)
+        limit = starts[i] if i < len(starts) else code_end
+        if addr + size <= limit:
+            continue
+        new = max(0, limit - addr)
+        if hasattr(func, "size"):
+            func.size = new
+            func.end = addr + new
+        else:
+            functions[addr] = new
+        moved += 1
+    return moved
+
+
+# ---------------------------------------------------------------------------
+# Command-line interface
+#
+# Usage:
+#   python disasm32.py GAME.EXE --output functions.json
+#   python disasm32.py GAME.EXE --pe-json pe_analysis.json --output functions.json
+#
+# Recursive-descent disassembly of every code section. Recovers function
+# boundaries from CALL targets + standard prologues, builds per-function basic
+# blocks and a direct call graph, and writes a JSON catalog for the next phase
+# (classification / lifting). Part of the pcrecomp toolbox.
+# ---------------------------------------------------------------------------
+def _func_to_dict(func, full: bool = False) -> dict:
+    """Serialize a Function to a plain dict for JSON output."""
+    d = {
+        "address": func.address,
+        "address_hex": f"0x{func.address:08X}",
+        "name": func.name,
+        "end": func.end,
+        "size": func.size,
+        "num_blocks": len(func.blocks),
+        "num_instructions": func.num_instructions,
+        "is_thunk": func.is_thunk,
+        "entry_kind": func.entry_kind,
+        "calls_to": sorted(func.calls_to),
+    }
+    if full:
+        d["blocks"] = [
+            {
+                "start": b.start,
+                "end": b.end,
+                "is_exit": b.is_exit,
+                "successors": sorted(set(b.successors)),
+                "instructions": [
+                    {"address": i.address, "mnemonic": i.mnemonic, "op_str": i.op_str,
+                     "bytes": i.bytes.hex()}
+                    for i in b.instructions
+                ],
+            }
+            for b in sorted(func.blocks.values(), key=lambda x: x.start)
+        ]
+    return d
+
+
+def demo():
+    """One runnable check for probes_as_function_body: code passes, data does not.
+
+    A fake single-section image, so the probe is exercised without needing a PE
+    on disk. Every assertion below is a decision the probe has to get right for
+    the data-pointer scan to stop inventing functions.
+    """
+    class _Sec:
+        def __init__(self, name, va, raw_off, raw_size, is_code):
+            self.name, self.virtual_address = name, va
+            self.raw_offset, self.raw_size = raw_off, raw_size
+            self.virtual_size, self.is_code = raw_size, is_code
+
+    BASE = 0x400000
+    body = (b"\x55"                      # push ebp
+            b"\x8b\xec"                  # mov ebp, esp
+            b"\x33\xc0"                  # xor eax, eax
+            b"\xc3")                     # ret
+    tail = (b"\x8b\x44\x24\x04"          # mov eax, [esp+4]
+            b"\xe9\x00\x00\x00\x00")     # jmp rel32 -- a tail call terminates too
+    junk = b"\x0f\xff" * 4               # 0F FF is not an x86 instruction
+    text = body + tail + junk
+    text += b"\x90" * (0x200 - len(text))   # nops out to the section end
+
+    d = Disassembler(b"\x00" * 0x400 + text, BASE,
+                     [_Sec(".text", 0x1000, 0x400, 0x200, True)])
+
+    a_body = BASE + 0x1000
+    a_tail = a_body + len(body)
+    a_junk = a_tail + len(tail)
+
+    # past_padding: a candidate in the nops before a 16-byte boundary is the
+    # function at the boundary; one already aligned, or with real code before
+    # the boundary, is left alone. The section here is all nops past 0x100D.
+    pd = Disassembler(b"\x00" * 0x400 + b"\xc3" + b"\x90" * 15 + b"\x55\x8b\xec\xc3" + b"\x90" * 0x1EC,
+                      BASE, [_Sec(".text", 0x1000, 0x400, 0x200, True)])
+    assert pd.past_padding(BASE + 0x100E) == BASE + 0x1010
+    assert pd.past_padding(BASE + 0x1001) == BASE + 0x1010
+    assert pd.past_padding(BASE + 0x1010) == BASE + 0x1010, "aligned is a start already"
+    assert pd.past_padding(BASE + 0x1000) == BASE + 0x1000, "ret is not padding"
+    assert pd.past_padding(BASE + 0x1015) == BASE + 0x1015, "padding up to more padding is not a start"
+
+    # MASM's `align 16`: lea fillers and a closing `mov edi, edi` are padding
+    # (Yuri's Revenge's rasterizers); after int3, `mov edi, edi` is a hot-patch
+    # function's first instruction and stays its start.
+    masm = (b"\xc3" + b"\x8d\xa4\x24\x00\x00\x00\x00" + b"\x8d\x9b\x00\x00\x00\x00" + b"\x8b\xff"
+            + b"\x55\x8b\xec\xc3"                                    # 0x1010: the real start
+            + b"\xc3" + b"\xcc" * 13 + b"\x8b\xff" + b"\x55\x8b\xec\xc3")   # 0x1014; hot-patch fn at 0x1022
+    pm = Disassembler(b"\x00" * 0x400 + masm + b"\x90" * (0x200 - len(masm)),
+                      BASE, [_Sec(".text", 0x1000, 0x400, 0x200, True)])
+    assert pm.past_padding(BASE + 0x100E) == BASE + 0x1010, "mov edi, edi after a lea filler"
+    assert pm.past_padding(BASE + 0x1001) == BASE + 0x1010
+    assert pm.past_padding(BASE + 0x1008) == BASE + 0x1010
+    assert pm.past_padding(BASE + 0x1022) == BASE + 0x1022, "hot-patch: the mov is the start"
+    assert pm.past_padding(BASE + 0x1015) == BASE + 0x1015, "int3 up to a hot-patch mov is not padding"
+    # MSVC's `lea ecx, [ecx]` before a switch's jump table (gamemd.exe
+    # 0x005A004D) or an aligned loop head (MoviesSE.exe 0x007F003D): no
+    # prologue at the boundary, so the candidate stays where it was.
+    for after, want in ((b"\x00\x10\x40\x00" * 8, 0x100D), (b"\x8b\x4c\x24\x40\xc3", 0x100D),
+                        (b"\x55\x8b\xec\xc3", 0x1010)):
+        jt = b"\x8b\xc1" * 5 + b"\xc2\x1c\x00" + b"\x8d\x49\x00" + after
+        pj = Disassembler(b"\x00" * 0x400 + jt + b"\x00" * (0x200 - len(jt)),
+                          BASE, [_Sec(".text", 0x1000, 0x400, 0x200, True)])
+        assert pj.past_padding(BASE + 0x100D) == BASE + want, hex(pj.past_padding(BASE + 0x100D))
+
+    # prologue_starts: a plain 55 8B EC starts there; after 8B FF (hot-patch)
+    # the function starts two bytes earlier, at the mov.
+    assert prologue_starts(b"\x90\x55\x8b\xec\xc3", 0x1000) == {0x1001}
+    assert prologue_starts(b"\x90\x8b\xff\x55\x8b\xec\xc3", 0x1000) == {0x1001}
+
+    assert d.probes_as_function_body(a_body), "a prologue reaching ret is code"
+    assert d.probes_as_function_body(a_tail), "a tail jmp is a terminator too"
+    assert not d.probes_as_function_body(a_junk), \
+        "bytes that do not decode are not a function body"
+    assert not d.probes_as_function_body(BASE + 0x9000), \
+        "an address outside every code section is not code"
+
+    # Nops decode cleanly forever. Running to the end of .text without ever
+    # reaching a terminator is still a reject: real code does not end by
+    # falling out of its section.
+    assert not d.probes_as_function_body(BASE + 0x11F0), \
+        "clean decode to the section end without a terminator is not a body"
+
+    # The same nops, when there is more section after them than the probe
+    # window, are a pass -- garbage does not stay decodable that long.
+    assert d.probes_as_function_body(BASE + 0x1100, window=16), \
+        "a full clean window counts as corroboration"
+
+    # A window that cuts its own last instruction in half stopped for a reason
+    # that has nothing to do with the bytes, and must not read as a reject.
+    # Here 6 bytes hold the 4-byte mov and only 2 of the 5-byte jmp after it.
+    # Getting this wrong rejects every function longer than the window: measured
+    # against Trespasser's linker map it cost exactly one real function start
+    # out of 34,159, which is the kind of defect that hides forever unless
+    # something is scoring against symbols.
+    assert d.probes_as_function_body(a_tail, window=6), \
+        "out of window is not out of code"
+
+    # drop_mid_instruction_entries: the real case in miniature. `fld dword ptr
+    # [0x8E0848]` is six bytes; an entry three bytes into it is not a function
+    # and decodes as something the program never runs.
+    blob = (bytes([0xD9, 0x05, 0x48, 0x08, 0x8E, 0x00]) +   # fld  [0x8E0848]
+            bytes([0xD9, 0x1D, 0xC4, 0x35, 0x95, 0x00]) +   # fstp [0x9535C4]
+            bytes([0xC3]))                                  # ret
+
+    def _read(va, n):
+        off = va - 0x1000
+        return blob[off:off + n] if 0 <= off < len(blob) else b""
+
+    cat = {0x1000: len(blob), 0x1002: len(blob) - 2}
+    gone = drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                        verbose=False)
+    assert gone == 1 and 0x1002 not in cat and 0x1000 in cat, (gone, cat)
+    # ...unless a decoded call names it: then the straddling body is the
+    # suspect, and the called entry stays.
+    cat = {0x1000: len(blob), 0x1002: len(blob) - 2}
+    gone = drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                        verbose=False, keep={0x1002})
+    assert gone == 0 and 0x1002 in cat, (gone, cat)
+    # A call is evidence only while its caller survives. The caller here is
+    # 0x1008, itself inside the `fstp`: once it goes, so does what it called.
+    cat = {0x1000: len(blob), 0x1002: len(blob) - 2, 0x1008: len(blob) - 8}
+    drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                 verbose=False, callers={0x1002: {0x1008}})
+    assert list(cat) == [0x1000], cat
+    # ...while a live caller keeps it, as before.
+    cat = {0x1000: len(blob), 0x1002: len(blob) - 2}
+    drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                 verbose=False, callers={0x1002: {0x1000}})
+    assert 0x1002 in cat, cat
+    # ...and when only a pointer-shaped value vouched for the straddling body,
+    # that body is the false decode and it goes.
+    cat = {0x1000: len(blob), 0x1002: len(blob) - 2}
+    gone = drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                        verbose=False, keep={0x1002}, weak={0x1000})
+    assert gone == 1 and list(cat) == [0x1002], (gone, cat)
+    # A weak body over an entry nothing calls changes nothing: the inner one goes.
+    cat = {0x1000: len(blob), 0x1002: len(blob) - 2}
+    gone = drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                        verbose=False, weak={0x1000})
+    assert gone == 1 and list(cat) == [0x1000], (gone, cat)
+
+    # ...and a neighbour that had been clamped onto the dropped entry gets its
+    # extent back. Left at 2 bytes it would end in a fallthrough to an address
+    # nothing lifts - a worse failure than the wrong instruction just removed.
+    cat = {0x1000: 2, 0x1002: len(blob) - 2}
+    assert drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                        verbose=False) == 1, cat
+    assert cat == {0x1000: len(blob)}, cat
+
+    # A real boundary is never dropped, and an entry never drops itself.
+    cat = {0x1000: len(blob), 0x1006: len(blob) - 6}
+    assert drop_mid_instruction_entries(_read, cat, 0x1000, 0x1000 + len(blob),
+                                        verbose=False) == 0, cat
+    assert len(cat) == 2, cat
+
+    # A `ret` ends a path, not a function. This is the shape that survived
+    # every round in Mario Kart: a guard clause returning early, the real body
+    # after it, and a false entry inside an instruction in that real body.
+    #
+    #   0x1000  test eax, eax
+    #   0x1002  jne  0x1006        -> the real body
+    #   0x1004  ret                -> the early exit a linear walk stops at
+    #   0x1005  nop
+    #   0x1006  fld dword [0x8E0848]   6 bytes; 0x1009 is inside it
+    #   0x100C  ret
+    early = (bytes([0x85, 0xC0]) +                          # test eax, eax
+             bytes([0x75, 0x02]) +                          # jne  0x1006
+             bytes([0xC3]) +                                # ret
+             bytes([0x90]) +                                # nop
+             bytes([0xD9, 0x05, 0x48, 0x08, 0x8E, 0x00]) +  # fld  [0x8E0848]
+             bytes([0xC3]))                                 # ret
+
+    def _read_early(va, n):
+        off = va - 0x1000
+        return early[off:off + n] if 0 <= off < len(early) else b""
+
+    cat = {0x1000: len(early), 0x1009: len(early) - 9}
+    gone = drop_mid_instruction_entries(_read_early, cat, 0x1000,
+                                        0x1000 + len(early), verbose=False)
+    assert gone == 1 and 0x1009 not in cat and 0x1000 in cat, (gone, cat)
+
+    # close_dispatch_targets: a branch that leaves its own extent needs an
+    # entry at the target, or the lifter emits a dispatch nothing answers.
+    jmpblob = (bytes([0x74, 0x02]) +                  # 0x1000: je 0x1004
+               bytes([0x33, 0xC0]) +                  # 0x1002: xor eax, eax
+               bytes([0xC3]) +                        # 0x1004: ret
+               bytes([0x8B, 0x45, 0x18]) +            # 0x1005: mov eax,[ebp+0x18]
+               bytes([0xC3]))                         # 0x1008: ret
+
+    def _readj(va, n):
+        off = va - 0x1000
+        return jmpblob[off:off + n] if 0 <= off < len(jmpblob) else b""
+
+    # Truncated at 0x1004, so the `je 0x1004` now leaves the extent.
+    cat, als = {0x1000: 4, 0x1005: 4}, set()
+    n = close_dispatch_targets(_readj, cat, 0x1000, 0x1000 + len(jmpblob),
+                               aliases=als, verbose=False)
+    assert n == 1 and 0x1004 in cat and 0x1004 in als, (n, cat, als)
+    # ...and the new entry runs to the next one, not past it.
+    assert cat[0x1004] == 1, cat
+
+    # interior_starts: a scan candidate that its neighbour's body falls into,
+    # or branches to conditionally, is a label; one reached only by `jmp`
+    # (a tail call, a thunk) or after a `call` stays a function.
+    def _fn(addr, *ins):
+        f = Function(address=addr)
+        f.blocks[addr] = BasicBlock(start=addr, end=ins[-1][0] + ins[-1][1],
+                                    instructions=[Instruction(a, n, m, o, b"") for a, n, m, o in ins])
+        return f
+    fns = {0x1000: _fn(0x1000, (0x1000, 6, "mov", "eax, dword ptr fs:[0]"),
+                       (0x1006, 1, "push", "ebp"),                 # falls in: a label
+                       (0x1007, 2, "ja", "0x1010"),                # jcc: a label
+                       (0x1009, 5, "call", "0x1030"),
+                       (0x100E, 2, "jmp", "0x1020"),               # jmp only: kept
+                       (0x1010, 1, "ret", "")),
+           0x1006: _fn(0x1006, (0x1006, 1, "push", "ebp"), (0x1007, 1, "ret", "")),
+           0x1010: _fn(0x1010, (0x1010, 1, "ret", "")),
+           0x1020: _fn(0x1020, (0x1020, 1, "ret", "")),
+           0x100E: _fn(0x100E, (0x100E, 1, "ret", ""))}           # after a call: kept
+    assert interior_starts(fns) == {0x1006, 0x1010}, interior_starts(fns)
+    assert interior_starts(fns, protected={0x1006}) == {0x1010}
+    # A pointer-shaped value protects a candidate from the fallthrough rule...
+    assert interior_starts(fns, weak={0x1006}) == {0x1010}
+    # ...but not when the value is the body's own switch table.
+    fns[0x1000].jump_targets = {0x1006}
+    assert interior_starts(fns, weak={0x1006}) == {0x1006, 0x1010}
+    assert interior_starts(fns, protected={0x1006}) == {0x1010}
+
+    # A body dropped this round is no evidence against another entry: two
+    # jump thunks, and a bogus entry inside the first whose `add ecx, imm32`
+    # runs over the second (SimCity 2000's 0x004021C9 / 0x004021CB).
+    thunks = bytes([0xE9, 0x00, 0x00, 0x81, 0xC1,        # 0x1000: jmp; 0x1003 reads add ecx, imm32
+                    0xE9, 0x00, 0x00, 0x00, 0x00,        # 0x1005: jmp 0x100A
+                    0xC3])                                # 0x100A: ret
+
+    def _readt(va, n):
+        off = va - 0x1000
+        return thunks[off:off + n] if 0 <= off < len(thunks) else b""
+    cat = {0x1000: 5, 0x1003: 6, 0x1005: 5}
+    drop_mid_instruction_entries(_readt, cat, 0x1000, 0x1000 + len(thunks), verbose=False)
+    assert sorted(cat) == [0x1000, 0x1005], cat
+
+    # thunk_tables: 16 slots back to back are a table, each slot a start;
+    # 15 are not, and a slot whose target leaves the code ends the run.
+    def _slots(n):
+        return b''.join(b'\xE9' + (0x10 - 5 * (k + 1)).to_bytes(4, 'little', signed=True)
+                        for k in range(n))
+    tbl = b'\x90' + _slots(16) + b'\xC3' * 0x40
+    assert thunk_tables(tbl, 0x1000) == [(0x1001, 0x1001 + 80)], thunk_tables(tbl, 0x1000)
+    assert thunk_tables(b'\x90' + _slots(15) + b'\xC3' * 0x40, 0x1000) == []
+    out = _slots(16) + b'\xE9\x00\x00\x00\x40' + b'\xC3' * 0x40     # 17th slot jumps out
+    assert thunk_tables(out, 0x1000) == [(0x1000, 0x1050)]
+
+    # eh_entries: a handler stub `mov eax, FuncInfo; jmp`, the FuncInfo's
+    # unwind action and catch handler, and nothing without the magic.
+    eh = {}
+    def _put(va, raw):
+        for k, b in enumerate(raw):
+            eh[va + k] = b
+    _put(0x1000, bytes([0xB8]) + (0x2000).to_bytes(4, "little") + bytes([0xE9, 0, 0, 0, 0]))
+    _put(0x100A, bytes([0xB8]) + (0x2100).to_bytes(4, "little") + bytes([0xE9, 0, 0, 0, 0]))
+    _put(0x2000, b"".join(v.to_bytes(4, "little") for v in
+                          (0x19930520, 1, 0x2040, 1, 0x2060)))          # FuncInfo
+    _put(0x2040, (0xFFFFFFFF).to_bytes(4, "little") + (0x1080).to_bytes(4, "little"))
+    _put(0x2060, b"".join(v.to_bytes(4, "little") for v in (0, 0, 1, 1, 0x2080)))
+    _put(0x2080, b"".join(v.to_bytes(4, "little") for v in (0, 0, 0, 0x1090)))
+    _put(0x2100, (0x12345678).to_bytes(4, "little"))                     # no magic
+
+    def _eh(va, n):
+        return bytes(eh.get(va + k, 0) for k in range(n))
+    assert eh_entries(_eh, 0x1000, 0x1100) == {0x1000, 0x1080, 0x1090}, eh_entries(_eh, 0x1000, 0x1100)
+
+    # A switch arm is still the body: the interior walk follows the table, so
+    # an entry on the last byte of an instruction in an arm is dropped
+    # (SimCity 2000's __output, 0x004944E3).
+    swblob = (bytes([0xFF, 0x24, 0x85, 0x10, 0x10, 0x00, 0x00]) +   # 0x1000: jmp [eax*4 + 0x1010]
+              bytes([0xCC] * 9) +                                     # 0x1007: padding
+              (0x1018).to_bytes(4, "little") * 2 +                    # 0x1010: the table
+              bytes([0xC7, 0x45, 0xE8, 0xFF, 0xFF, 0xFF, 0xFF]) +     # 0x1018: mov [ebp-0x18], -1
+              bytes([0xC3]))                                          # 0x101F: ret
+
+    def _reads(va, n):
+        off = va - 0x1000
+        return swblob[off:off + n] if 0 <= off < len(swblob) else b""
+
+    cat = {0x1000: 0x1E, 0x101E: 2}
+    gone = drop_mid_instruction_entries(_reads, cat, 0x1000, 0x1000 + len(swblob), verbose=False)
+    assert gone == 1 and list(cat) == [0x1000], (gone, cat)
+
+    # A switch arm past the extent gets a body too.
+    cat, als = {0x1000: 7}, set()
+    close_dispatch_targets(_reads, cat, 0x1000, 0x1000 + len(swblob), aliases=als, verbose=False)
+    assert als == {0x1018}, als
+    # ...unless it lands inside a known instruction.
+    cat, als = {0x1000: 7}, set()
+    close_dispatch_targets(_reads, cat, 0x1000, 0x1000 + len(swblob), aliases=als,
+                           verbose=False, inside=lambda va: va == 0x1018)
+    assert als == set(), als
+
+    # A branch that stays inside its own extent adds nothing.
+    cat = {0x1000: len(jmpblob)}
+    assert close_dispatch_targets(_readj, cat, 0x1000, 0x1000 + len(jmpblob),
+                                  verbose=False) == 0, cat
+
+    # clamp_extents: an over-extended function must be cut at the next START,
+    # an alias inside a function must NOT cut it, and a function that already
+    # ends before the next start must be left exactly alone. Plain {addr: size}
+    # bounds maps have to work too, because that is what a catalog holds.
+    fns = {
+        0x1000: Function(address=0x1000, end=0x9000, size=0x8000),   # over-extended
+        0x1200: Function(address=0x1200, end=0x1300, size=0x100),    # honest
+        0x1250: Function(address=0x1250, end=0x1280, size=0x30,      # alias inside it
+                         entry_kind="alias"),
+        0x2000: Function(address=0x2000, end=0x2010, size=0x10),
+    }
+    moved = clamp_extents(fns, 0x9000)
+    assert moved == 1, moved
+    assert fns[0x1000].size == 0x200, hex(fns[0x1000].size)   # cut at 0x1200
+    assert fns[0x1200].size == 0x100, "an honest extent was changed"
+    assert fns[0x1250].size == 0x30, "an alias was clamped"
+    assert fns[0x2000].size == 0x10
+    # ...and the alias at 0x1250 did not become the limit for 0x1200.
+    bounds = {0x1000: 0x8000, 0x1200: 0x100}
+    assert clamp_extents(bounds, 0x9000) == 1
+    assert bounds == {0x1000: 0x200, 0x1200: 0x100}, bounds
+
+    # A function longer than one scan window with no branch in it (KotOR's
+    # script-command table setup) is decoded through to its ret.
+    run = b"\xc7\x80\x00\x01\x00\x00" + (BASE + 0x1020).to_bytes(4, "little")   # mov [eax+0x100], imm32
+    straight = b"\x90" * 0x20 + run * 1300 + b"\xc3"        # 13 KB, past SCAN_WINDOW
+    sd = Disassembler(b"\x00" * 0x400 + straight + b"\x90" * (0x4000 - len(straight)),
+                      BASE, [_Sec(".text", 0x1000, 0x400, 0x4000, True)])
+    sf = sd.disassemble_function(BASE + 0x1000)
+    assert sf.end == BASE + 0x1000 + len(straight), hex(sf.end)
+    assert sum(len(b.instructions) for b in sf.blocks.values()) == 0x20 + 1300 + 1
+
+    # decode() must see exactly what one full md.disasm() does, across batch
+    # boundaries (200 nops + a long tail) and stopping at an undecodable byte.
+    md = Cs(CS_ARCH_X86, CS_MODE_32)
+    buf = b"\x90" * 200 + b"\x8b\x44\x24\x04\xc3" * 60 + b"\xff\xff\xc3"   # ff /7: invalid
+    want = [(i.address, i.size) for i in md.disasm(buf, 0x401000)]
+    got = [(i.address, i.size) for i in decode(md, buf, 0x401000)]
+    assert got == want, "decode() diverged from md.disasm()"
+    assert len(want) == 320     # 200 nops + 60 x (mov, ret), then ff ff stops it
+
+    # A seed is never dropped as mid-instruction: an export, the entry point
+    # or an RTTI vtable slot is a function start on outside evidence, and a
+    # body decoding over it is the one that is wrong. Killing Floor's Core:
+    # a throw the catalog took for a returning call, then a switch table read
+    # as code, straddled UStructProperty::ImportText -- an export, reached
+    # only through its vtable, and the game's first virtual call to it was an
+    # unresolved ICALL. Here the seed is the `ret` inside mov's immediate.
+    sk = (b"\x55\x8b\xec"               # push ebp; mov ebp, esp
+          b"\xb8\xc3\x90\x90\x90"       # mov eax, 0x909090C3 -- C3 at +4
+          b"\x5d\xc3")                  # pop ebp; ret
+    kd = Disassembler(b"\x00" * 0x400 + sk + b"\xcc" * (0x200 - len(sk)),
+                      BASE, [_Sec(".text", 0x1000, 0x400, 0x200, True)])
+    kf = kd.find_functions(BASE + 0x1000, BASE + 0x1200, {}, seeds={BASE + 0x1004})
+    assert BASE + 0x1000 in kf and BASE + 0x1004 in kf, sorted(map(hex, kf))
+
+    print("disasm32.py self-test OK")
+
+
+def main(argv=None):
+    import argparse, json, os, sys
+
+    # Allow running both as `python -m tools.disasm.disasm32` and as a loose script.
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "pe"))
+    from pe_analyze import analyze_pe, build_iat_map  # noqa: E402
+
+    ap = argparse.ArgumentParser(
+        description="Recursive-descent x86-32 disassembler + function recovery (pcrecomp).")
+    ap.add_argument("exe", nargs="?", help="Path to the 32-bit PE executable")
+    ap.add_argument("--selftest", action="store_true",
+                    help="Run the built-in checks and exit")
+    ap.add_argument("--output", "-o", help="Write function catalog as JSON to this path")
+    ap.add_argument("--pe-json", help="(optional) reserved: path to a pe_analyze JSON; "
+                                      "analysis is recomputed from the exe regardless")
+    ap.add_argument("--full", action="store_true",
+                    help="Include per-instruction detail in the JSON (large output)")
+    ap.add_argument("--min-size", type=int, default=0,
+                    help="Drop recovered functions smaller than N bytes from the catalog")
+    ap.add_argument("--seed-functions", metavar="FILE",
+                    help="JSON list of addresses that are functions whether or "
+                         "not the scans find them. Produced by seed_from_log.py "
+                         "from a run's unresolved dispatches; also fine to "
+                         "hand-write.")
+    args = ap.parse_args(argv)
+
+    # This pass takes hours on a multi-megabyte image and prints its progress as
+    # it goes. Redirected to a file or a pipe, stdout is block-buffered, so none
+    # of that progress is visible -- and if the run dies partway (a 2.4 MB image
+    # peaks past 4 GB), the buffer dies with it and the log is zero bytes. Ask
+    # for line buffering so the progress is worth having.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, OSError):
+        pass
+
+    if args.selftest:
+        demo()
+        return 0
+    if not args.exe:
+        ap.error("an executable is required (or --selftest)")
+
+    info = analyze_pe(args.exe)
+    iat = build_iat_map(info)
+    with open(args.exe, "rb") as f:
+        pe_data = f.read()
+
+    print(f"[*] {os.path.basename(args.exe)}: base=0x{info.image_base:08X} "
+          f"code=0x{info.code_start:08X}-0x{info.code_end:08X} "
+          f"imports(IAT)={len(iat)}")
+
+    # The entry point is the one function guaranteed to exist and not
+    # guaranteed to be found: nothing calls it, and a CRT startup need not open
+    # with `push ebp; mov ebp, esp`, so both heuristics can miss the address
+    # the program actually begins at. find_functions has taken seeds for this
+    # all along and main never passed any.
+    seeds = set()
+    if info.entry_point_rva:
+        seeds.add(info.image_base + info.entry_point_rva)
+
+    # Exports, for the same reason: a DLL's entry points are reached through
+    # GetProcAddress, so the only reference to one is its name. Bunghole in
+    # One's game DLL has two exports and nothing inside it calls either; both
+    # were missing, and the engine's first call into the module was an
+    # unresolved ICALL. An export into a code section only: a forwarder or an
+    # exported variable is not a function.
+    exported = {info.image_base + e.rva for e in info.exports
+                if info.code_start <= info.image_base + e.rva < info.code_end}
+    if exported:
+        print(f"[*] {len(exported)} exports seeded")
+    seeds |= exported
+
+    if args.seed_functions:
+        with open(args.seed_functions) as f:
+            doc = json.load(f)
+        for e in doc:
+            if isinstance(e, dict):
+                e = e.get("address", e.get("address_hex"))
+            seeds.add(int(e, 0) if isinstance(e, str) else e)
+        print(f"[*] {len(doc)} seeds from {args.seed_functions}")
+
+    dis = Disassembler(pe_data, info.image_base, info.sections)
+    # This CLI exports a catalog and never lifts, so it is the caller that can
+    # afford to let the operand lists go -- which is where the memory went on a
+    # multi-megabyte image.
+    functions = dis.find_functions(info.code_start, info.code_end, iat,
+                                   seeds=seeds, release_operands=True)
+
+    funcs = [f for f in functions.values() if f.size >= args.min_size]
+    funcs.sort(key=lambda x: x.address)
+
+    thunks = sum(1 for f in funcs if f.is_thunk)
+    leaves = sum(1 for f in funcs if not f.calls_to)
+    total_insns = sum(f.num_instructions for f in funcs)
+    code_bytes = info.code_end - info.code_start
+
+    # Honest byte coverage: union of per-function [address, end) intervals,
+    # each clamped to the code range. Recursive descent can follow a far jump
+    # and inflate an individual func.end, and functions can overlap shared tail
+    # code, so summing func.size would multi-count. Union + clamp avoids both.
+    intervals = sorted((f.address, min(f.end, info.code_end)) for f in funcs
+                       if f.end > f.address)
+    covered = 0
+    cur_lo = cur_hi = None
+    for lo, hi in intervals:
+        if cur_hi is None or lo > cur_hi:
+            if cur_hi is not None:
+                covered += cur_hi - cur_lo
+            cur_lo, cur_hi = lo, hi
+        else:
+            cur_hi = max(cur_hi, hi)
+    if cur_hi is not None:
+        covered += cur_hi - cur_lo
+
+    print(f"[*] Functions: {len(funcs)}  (thunks={thunks}, leaves={leaves})")
+    print(f"[*] Instructions: {total_insns:,}")
+    print(f"[*] Byte coverage: {covered:,} / {code_bytes:,} "
+          f"({100.0 * covered / code_bytes:.1f}% of code range)")
+
+    if args.output:
+        out = {
+            "exe": os.path.basename(args.exe),
+            "image_base": info.image_base,
+            "code_start": info.code_start,
+            "code_end": info.code_end,
+            "iat_count": len(iat),
+            "stats": {
+                "functions": len(funcs),
+                "thunks": thunks,
+                "leaves": leaves,
+                "instructions": total_insns,
+                "covered_bytes": covered,
+                "code_bytes": code_bytes,
+                "coverage_pct": round(100.0 * covered / code_bytes, 2),
+            },
+            "functions": [_func_to_dict(f, full=args.full) for f in funcs],
+        }
+        with open(args.output, "w") as f:
+            json.dump(out, f, indent=1)
+        print(f"[*] Wrote {args.output} ({os.path.getsize(args.output):,} bytes)")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
