@@ -22,6 +22,12 @@ avec **votre** jeu de l'ère D3D9.
 
 ## Est-ce que ça marche ? (octobre 2026)
 
+**Le jeu recompilé, en train de tourner sur un Galaxy Z Fold 8, sur l'appareil lui-même** —
+sélection au rectangle, sauts de caméra par la minicarte, puis le geste « home » vers
+l'écran d'accueil Android :
+
+![Gameplay sur un Galaxy Z Fold 8 : mission 1, sélections et déplacements de caméra, puis retour à l'écran d'accueil Android](docs/fold8-gameplay.gif)
+
 | | | |
 |---|---|---|
 | ![Menu campagne](docs/menu-glue-single-f1000-campagne.png)<br/>Menu de campagne, Vulkan | ![Menu + scène 3D](docs/menu-echap-f2500-scene-sans-ui.png)<br/>Menu et scène 3D | ![Chargement mission](docs/launch-f3600-liberation-day-chargee.png)<br/>Chargement de mission sur appareil |
