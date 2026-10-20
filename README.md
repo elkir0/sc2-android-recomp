@@ -20,6 +20,12 @@ toolchain, validated end-to-end, so you can do the same to **your** D3D9-era gam
 
 ## Does it work? (October 2026)
 
+**The recompiled game, running on a Galaxy Z Fold 8, on the device itself** — box-selecting
+units, hopping the camera through the minimap, then a gesture-home back to the Android
+launcher:
+
+![Gameplay on a Galaxy Z Fold 8: mission 1, selections and camera moves, then home to the Android launcher](docs/fold8-gameplay.gif)
+
 | | | |
 |---|---|---|
 | ![Campaign menu](docs/menu-glue-single-f1000-campagne.png)<br/>Campaign menu, Vulkan | ![Menu + 3D scene](docs/menu-echap-f2500-scene-sans-ui.png)<br/>Menu & 3D scene | ![Mission loading](docs/launch-f3600-liberation-day-chargee.png)<br/>Mission loading on device |
