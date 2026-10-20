@@ -119,6 +119,16 @@ l'ordre qui a payé*, calibration d'effort et liste des pièges — est dans
 | [docs/PACK-SPIRV.md](docs/PACK-SPIRV.md) | le format du pack SPIR-V |
 | [docs/BANC-MAC.md](docs/BANC-MAC.md) | la méthode du banc natif |
 
+## Veille des précédents
+
+Nous suivons le sort des projets comparables à celui-ci. L'analogue le plus proche —
+une recompilation statique d'un shooter de 2010 ([bo1z](http://vel.gg/bo1z)) — a été
+retiré (**HTTP 451**) en octobre 2026 : il distribuait du code et des binaires dérivés
+du jeu. Ce projet suit la politique inverse : méthode et outillage original seulement,
+**tout ce qui dérive du jeu reste sur la machine de l'utilisateur**
+([LEGAL.md](LEGAL.md)). Observer l'écosystème fait partie de la méthode — si ses règles
+changent, cette politique changera avec elles.
+
 ## Licence et aspect légal
 
 MIT pour l'outillage de ce dépôt — travail original, aucun contenu Blizzard. Bâti sur
