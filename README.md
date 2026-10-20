@@ -1,196 +1,119 @@
-# StarCraft II for Android — Static Recompilation Toolkit
+# StarCraft II on Android — Static Recompilation Toolkit
 
-**FR :** Ce dépôt fournit les **outils et la méthode** pour recompiler statiquement un moteur de jeu x86-32 vers ARM64 natif (Android / Apple Silicon), en s'appuyant sur la vague de recompilation statique assistée par IA de 2026 (pcrecomp). La démonstration cible est StarCraft II (Wings of Liberty, 2010) sur Android — mais **ce dépôt ne contient AUCUN code du jeu ni aucun asset**.
+**[Version française 🇫🇷](README.fr.md)**
 
-**EN:** This repository provides the **tooling and methodology** to statically recompile an x86-32 game engine to native ARM64 (Android / Apple Silicon), building on the 2026 AI-assisted static recompilation wave (pcrecomp). The showcase target is StarCraft II (Wings of Liberty, 2010) on Android — but **this repository contains NO game code and NO assets**.
+[![legal-scan](https://github.com/elkir0/sc2-android-recomp/actions/workflows/legal-scan.yml/badge.svg)](https://github.com/elkir0/sc2-android-recomp/actions/workflows/legal-scan.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![No game content](https://img.shields.io/badge/contains-no%20game%20code%20or%20assets-green)
 
-## ⚖️ Legal / Aspect légal — read this first / lisez ceci d'abord
+**From a 15.7 MB x86-32 Windows executable to a playable, signed Android APK with a
+native Vulkan renderer — via AI-assisted static recompilation.** One week of work took
+StarCraft II: Wings of Liberty (2010) from "it boots" to "the first campaign mission
+plays end-to-end at 28 FPS on a phone". This repository is the complete method and
+toolchain, validated end-to-end, so you can do the same to **your** D3D9-era game.
 
-- **You MUST own a legitimate copy of the game. / Vous DEVEZ posséder une copie légitime du jeu.**
-- All derived code (the lifted C, the recompiled runtime, extracted data) is **generated locally on your machine, from your own copy**. Nothing derived is distributed here. / Tout code dérivé est **généré localement sur votre machine, depuis votre propre copie**. Rien de dérivé n'est distribué ici.
-- No assets, no binaries, no data files from the game will ever be committed. A CI scanner enforces this on every commit. / Aucun asset, binaire ou fichier de données du jeu ne sera jamais commité. Un scanner CI l'impose à chaque commit.
-- Offline / single-player only. This project does not touch online services, matchmaking or any protection of access. / Hors-ligne / solo uniquement. Ce projet ne touche ni aux services en ligne, ni au matchmaking, ni à aucune protection d'accès.
-- StarCraft® and Blizzard Entertainment® are trademarks of Blizzard Entertainment, Inc. This is an independent, non-commercial, personal-use interoperability project. Not affiliated, not endorsed. / StarCraft® et Blizzard Entertainment® sont des marques de Blizzard Entertainment, Inc. Projet indépendant, non commercial, d'interopérabilité à usage personnel. Sans affiliation ni aval.
+> **It contains no game code and no assets — never will.** Everything derived from the
+> game is generated locally, from your own legitimate copy, by the tools published here.
+> A CI scanner enforces this on every commit. Offline / single-player only.
+> StarCraft® and Blizzard Entertainment® are trademarks of Blizzard Entertainment, Inc.
+> Independent, non-commercial, unaffiliated project. Details: [LEGAL.md](LEGAL.md).
 
-See / voir [LEGAL.md](LEGAL.md).
+## Does it work? (October 2026)
 
-## What's here / Ce qu'il y a ici
-
-| Path | Description (EN/FR) |
-|---|---|
-| `tools/difftest/` | **Per-function oracle**: runs any lifted function with an injected CPU/memory state on your host, replays the original bytes in Unicorn as the hardware reference, and diffs every register, flag and written byte. / **Oracle par fonction** : exécute toute fonction liftée avec un état CPU/mémoire injecté, rejoue les octets originaux dans Unicorn comme référence matérielle, et compare chaque registre, flag et octet écrit. |
-| `tools/d3d9-shaders/` | **D3D9 SM2/3 bytecode → SPIR-V offline translator**: decoder + translator + cache extractor + frame metric. 202/202 boot shaders validated by `spirv-val`. / **Traducteur hors-ligne bytecode D3D9 SM2/3 → SPIR-V** : décodeur, traducteur, extracteur de cache, métrique de frame. |
-| `tools/android-porting/` | **Bionic porting kit**: user-space fibers (ucontext for Android's libc, arm64 asm) + configure-time `cpu.h` atomics patch for delta-arena mode. / **Kit de portage bionic** : fibres user-space (ucontext pour la libc Android, asm arm64) + patch configure-time des atomiques `cpu.h` en mode arène delta. |
-| `tools/audio/` | **Audio import decoder & WAV proof checker**: `decode-msvc-audio-imports.py` decodes MSVC-decorated C++ import names (e.g. a whole FMOD Ex API) from a PE import table into a C dispatch table — stdcall stack words to pop, nature of every arg (value / double / in-pointer / out-scalar / out-object / string / callback); `wav-dump-stats.py` checks an audio dump WAV (duration, non-zero samples, peak, saturation, Shannon entropy per sample and per byte, RMS per second — a real sound is neither a flat line nor uniform noise). / **Décodeur d'imports audio & vérificateur de preuve WAV** : décode les noms d'imports C++ décorés MSVC (ex. toute une API FMOD Ex) d'une table d'imports PE en table C de dispatch — mots dépilés stdcall, nature de chaque argument ; vérifie un WAV d'audio (durée, échantillons non nuls, crête, saturation, entropie de Shannon par échantillon et par octet, RMS par seconde — un son réel n'est ni un aplat ni un bruit uniforme). |
-| `tools/mpq/` | **MPQ extract & list (StormLib), hardened against the partial-block EOF trap**: `SFileReadFile` returns FALSE + `ERROR_HANDLE_EOF` *with bytes read* on a final partial read — the naive `while (SFileReadFile(...) && nb > 0)` loop silently truncates any non-multiple of the 64 KiB buffer and empties anything smaller. `mpqget` = size-checked extraction (rc 0 ⟺ total == catalog size), `mpqlist` = full `(listfile)` read + `--tailles` catalog sizes. / **Extraction & listing MPQ (StormLib), durcis contre le piège EOF de bloc partiel** : `SFileReadFile` rend FALSE + `ERROR_HANDLE_EOF` *avec des octets lus* sur la dernière lecture partielle — la boucle naïve `while (SFileReadFile(...) && nb > 0)` tronque silencieusement tout non-multiple du tampon 64 KiB et vide tout fichier plus petit. `mpqget` = extraction à taille vérifiée, `mpqlist` = lecture complète du `(listfile)` + `--tailles` (tailles du catalogue). |
-| `tools/pcrecomp-closure/` | **Incremental closure extension for pcrecomp**: lifts only the functions missing from an existing lifted closure (roots + recursive direct-dispatch targets in `.text`), no global relift; self-contained PE32 reader. / **Extension incrémentale de closure** : ne lifte que les fonctions manquantes (racines + cibles directes récursives), sans relift global. |
-| `scripts/theora-android.sh` | **Ogg Theora decoder for Android aarch64**: downloads the official Xiph.Org libogg 1.3.5 + libtheora 1.1.1 sources (sha256-checked) and cross-compiles them with the NDK into deterministic static archives (`libtheoradec.a`, `libogg.a`) ready to link into a native `.so` — see *Bricks* below. / **Décodeur Ogg Theora pour Android aarch64** : télécharge les sources officielles Xiph.Org (sha256 vérifiés) et les compile avec le NDK en archives statiques déterministes, prêtes à lier dans une `.so` native — voir *Briques* plus bas. |
-| `scripts/video-transcode.sh` | **Local cinematic transcoder for hardware video decode**: turns the `.ogv` (Theora) files of *your own* install into H.264 Baseline `.mp4` siblings (or a parallel tree), one H.264 frame per Theora packet so frame *n* stays frame *n*; consumed by the runtime's optional AMediaCodec path (`SC2_VIDEO_AMC=1`). / **Transcodeur local des cinématiques pour le décodage vidéo matériel** : convertit les `.ogv` de *votre* installation en `.mp4` H.264 Baseline, une image par paquet Theora. |
-| `docs/METHOD.md` | The end-to-end methodology: PE analysis → lift (CPU-struct model) → host runtime → headless Vulkan backend → per-function differential testing. / La méthodologie de bout en bout. |
-| `.github/workflows/legal-scan.yml` | CI guard: rejects any commit containing binaries, assets or game-derived blobs. / Garde CI : rejette tout commit contenant binaires, assets ou blobs dérivés du jeu. |
-| `runtime/` | **The D3D9-on-Vulkan backend and host runtime** (original work, from scratch): fake-COM device living in the guest arena, standalone-testable Vulkan backend, presentation layer, software FMOD Ex reimplementation, Theora/AMediaCodec video path. / **Le backend D3D9-sur-Vulkan et le socle hôte** (œuvre originale, écrite from scratch) : device COM factice dans l'arène invitée, backend Vulkan testable seul, couche de présentation, réimplémentation logicielle de FMOD Ex, chemin vidéo Theora/AMediaCodec. |
-| `android/` | **The Android port**: NativeActivity glue, bionic fibers, swapchain presenter (`--wrap=dlsym`), reproducible APK build chain, install/validation tooling. / **Le portage Android** : glue NativeActivity, fibres bionic, présentateur swapchain, chaîne APK reproductible, outillage d'installation et de validation. |
-| `interfaces/` | Generated interface facts for one specific game build (PE layout, 755-slot IAT) + lift report counters. / Faits d'interface générés pour un build précis (géométrie PE, IAT 755 slots) + compteurs du lift. |
-| `docs/RENDU-D3D9-VERS-VULKAN.md` | **The complete D3D9→Vulkan translation method** — architecture, state model, descriptors, textures/BC, SM2/3→SPIR-V translation, shadows, Android presentation, transfers, 15 counter-intuitive decisions, transfer checklist. / **La méthode complète de traduction D3D9→Vulkan**. |
-| `docs/RETROSPECTIVE-RECOMPILATION.md` | **The 7-day engineering retrospective**: dated milestones (4.1→28.1 FPS), 14 major difficulties (symptom→measure→root cause→fix), the measurement discipline, the measured dead ends. / **La rétrospective d'ingénierie en 7 jours** : jalons, difficultés majeures, discipline de mesure, impasses mesurées. |
-| `docs/METHOD.md` | The end-to-end methodology: PE analysis → lift (CPU-struct model) → host runtime → headless Vulkan backend → per-function differential testing. / La méthodologie de bout en bout. |
-| `scripts/` (banc, A/B, transforms) | Measurement harnesses and lift-optimization transforms: `banc-mac.sh` (native bench), `fold-ab*.py|sh` (A/B/A on-device), `cinematique-fold.sh`, `registres-locaux.py` / `appels-directs.py` (guest registers as locals, direct calls). / Harnais de mesure et transforms d'optimisation du lift. |
-| `tools/lift/`, `tools/difftest/` | Incremental lift tooling (closure, dead flags, MMX inventory, relift guard) and the per-function oracle suite. / Outillage de lift incrémental et suite de l'oracle par fonction. |
-| `tools/pcrecomp-disasm32/` | disasm32 memory patch: release alias-function operands on very large binaries. / Patch mémoire de disasm32 (libération des opérandes d'alias sur très gros binaires). |
-
-## Status / État (2026-10)
-
-| Building block / Brique | State / État |
-|---|---|
-| Static recompilation (lift x86-32 → portable C) / recompilation statique | ✅ done — 86,653 functions, boots to the main loop on x86-64 and ARM64 / fait |
-| Vulkan renderer (D3D9 → Vulkan, shaders SM2/3 → SPIR-V) / rendu Vulkan | ✅ title screen, campaign menu 3D scene, mission terrain + HUD, minimap, unit sprites; cast shadows (opt-in) / écran-titre, menu 3D, terrain + HUD de mission, minicarte, unités ; ombres portées (opt-in) |
-| Android APK (NDK r28, NativeActivity, Vulkan swapchain) / APK Android | ✅ reproducible signed APK; runs on an Android ARM64 emulator (title screen, first mission loads) / APK signé reproductible ; tourne sur émulateur |
-| Audio (engine sound API → software mixer → AAudio) / audio | ✅ menu and in-mission audio play; mission soundtrack + voice reconstruction **bit-exact** (100 % of time-slices, frame-accurate voice), 3D attenuation path mapped / l'audio du menu et de mission joue ; reconstruction **bit-exact** de la bande-son de mission + voix (100 % des tranches, voix au frame près), voie d'atténuation 3D cartographiée |
-| Video (Ogg Theora cinematics) / vidéo | ✅ the intro cinematic now decodes **in real time on-device** (24.9 fps for a 24 fps video, by the *lifted* libtheora — the H.264 hardware path became unnecessary and is kept optional: `scripts/video-transcode.sh` + `SC2_VIDEO_AMC=1`) / la cinématique d'intro se décode **en temps réel sur l'appareil** (24,9 img/s pour 24, par la libtheora *liftée* — la voie H.264 matérielle est devenue inutile, gardée en option) |
-| Playable on a Galaxy Z Fold 8 / jouable sur Fold 8 | ✅ **first campaign mission fully played on real hardware** (BT keyboard+mouse, in-game HUD with text, objectives completed, deterministic crash diagnosed→fixed→replayed past it); mission 2 loads. Modest FPS — presentation blit + BC-hardware paths in flight / **première mission de campagne entièrement jouée sur le vrai matériel** (clavier+souris BT, HUD avec texte, objectifs remplis, crash déterministe diagnostiqué→corrigé→franchi en rejouant) ; la mission 2 charge. FPS modestes — blit de présentation et BC matériel en chantier |
-| Performance on device / performances sur l'appareil | ✅ **28.1 FPS in active play** on a Galaxy Z Fold 8 (from 4.1 at the first playable build — ×6.9); the frame is bound by the recompiled game code on the CPU (≈19 ms of the ≈35 ms frame), the GPU has headroom; the post-mission bar cinematic renders clean (2856-shader table) / **28,1 images/s en jeu actif** sur Galaxy Z Fold 8 (4,1 au premier build jouable — ×6,9) ; la frame est limitée par le code du jeu recompilé côté CPU (≈19 ms des ≈35 ms), le GPU a de la marge ; la cinématique du bar d'après mission est propre (table 2 856 shaders) |
-
-
-- [x] Full ISO inventory & extraction pipeline (over your own copy) / inventaire ISO complet
-- [x] 86,653 functions lifted to portable C (CPU-struct reentrant model) / fonctions liftées en C portable
-- [x] Boot to the game's main loop on x86-64 and ARM64 (qemu + Apple Silicon native) / boot jusqu'à la boucle principale
-- [x] Game data mounted (MPQ/StormLib), 194 real pixel shaders reachable / données du jeu montées
-- [x] First real pixels: D3D9→Vulkan headless backend (Lavapipe) / premiers pixels réels
-- [x] Per-function oracle: 76,650 functions swept against a hardware-reference emulator, 3,985 initial mismatches all explained as harness artifacts (simulated return frame, nulled IAT), 0 true divergence after fixes / oracle par fonction : 76 650 fonctions balayées, 3 985 écarts initiaux tous expliqués comme artefacts du harnais, 0 vraie divergence
-- [x] Shaders SM2/3 → SPIR-V translation: 75,797 distinct bytecodes extracted, 202/202 boot shaders `spirv-val`-validated, 5,771 real draws — **title screen renders** (2,570 distinct 16×16 blocks on frame 10) / traduction des shaders : **l'écran-titre s'affiche**
-- [x] Engine audio: the engine's sound API (FMOD Ex, C++ MSVC ABI) fully decoded from decorated import names — real system init, sounds created through the game's own file callbacks, Ogg Vorbis decode, 44.1 kHz mixing; verified by WAV dump (entropy > 0) with an exact revert switch / **audio du moteur** : API son du moteur décodée intégralement depuis les noms d'imports décorés — init réelle, sons créés via les rappels fichier du jeu, décodage Ogg Vorbis, mixage 44,1 kHz ; preuve par dump WAV (entropie > 0), commutateur de retour exact
-- [x] Audio output decoupled: consumer-callback API on the mixer (same buffer as the WAV dump, no double mixing) + deterministic audio clock for bit-identical bench runs (2 runs → same md5, ARM64 = x86 byte-exact) / **sortie audio découplée** : API à callback consommateur sur le mixeur (même tampon que le dump WAV, pas de double mixage) + horloge audio déterministe pour des runs de banc identiques au bit près (2 runs → même md5, ARM64 = x86 octet pour octet)
-- [x] Mission audio bit-exact: the mission soundtrack and voice-over, reconstructed from the game's own sound requests, are byte-identical to the bench reference (100 % of time-slices, frame-accurate voice) / **audio de mission bit-exact** : bande-son et voix reconstruites depuis les requêtes son du jeu, identiques à l'octet près à la référence de banc
-- [x] Presentation-path instrumentation with positive control: per-frame swapchain image fingerprints, A/B/T protocol (erase-all vs bands-only vs magenta witness bands) / **instrumentation de la chaîne de présentation** avec témoin positif : empreintes d'image de swapchain par frame, protocole A/B/T (effacement complet / bandes seules / bandes témoins magenta)
-- [x] Automated open-loop mission pilot: a scripted pilot plays the first campaign mission on the bench — objectives tracked, defeat screen rendered by the game's own UI / **pilote de mission en boucle ouverte** : un pilote scripté joue la première mission de campagne sur le banc — objectifs suivis, écran de défaite rendu par l'UI du jeu
-- [x] Android APK chain (NDK r28, NativeActivity, delta-arena, fibers for bionic): reproducible signed APK built locally, qemu bench (fake ART heap) reaches the game loop rc=0 / chaîne APK Android : APK signé reproductible, banc qemu jusqu'à la boucle du jeu
-- [x] GPU presentation on device: optional Vulkan swapchain presenter (`VK_KHR_android_surface`, own present queue, GPU blit, FIFO) → second reproducible APK; validated on a headless bench (150/150 frames presented by the GPU, 0 CPU-copy fallback) / présentation GPU sur appareil : présentateur swapchain Vulkan optionnel → second APK reproductible ; validé sur banc headless (150/150 frames présentées par le GPU)
-- [x] Full engine run on an **Android ARM64 emulator** (Android 14, Apple M4 host): boots to the game main loop, game data (MPQ) streamed, real draws through the classic-descriptor fallback (no `VK_KHR_push_descriptor` needed — both emulator GPUs lack it), 1,400+ frames at ~7 FPS, zero crashes / **moteur complet sur émulateur Android ARM64** : boot jusqu'à la boucle principale, données du jeu streamées, draws réels via le repli descripteurs classiques (aucun besoin de `VK_KHR_push_descriptor`, absent des 2 GPU d'émulation), 1 400+ frames à ~7 FPS, zéro crash
-- [x] Software audio engine linked into the Android runtime: the engine's own audio init now succeeds on device (the failing init loop — 4,495 re-inits — is gone, 0 errors), mixer output feeding an AAudio SPSC ring buffer (32,768 frames, lock-free) / **moteur audio logiciel lié au runtime Android** : l'init audio du moteur réussit sur appareil (la boucle d'init en échec — 4 495 réinits — a disparu, 0 erreur), sortie du mixeur vers un anneau SPSC AAudio (32 768 frames, sans verrou)
-- [x] **First game UI content displayed on an Android screen** (CPU-copy presenter APK): a structured sci-fi UI frame with glowing accents renders on the emulator display (stable, screenshot-verified), matching the headless bench frame metrics exactly; end-to-end touch input live — a physical tap becomes Win32 mouse messages delivered to the game's own window procedure / **premier contenu d'interface du jeu affiché sur un écran Android** (APK présentation par copie CPU) : un cadre d'interface structuré à accents lumineux s'affiche sur l'écran de l'émulateur (stable, vérifié par capture), conforme aux métriques de frame du banc headless ; entrée tactile de bout en bout — un tap physique devient des messages souris Win32 livrés à la procédure de fenêtre du jeu
-- [x] **Persistent Vulkan swapchain — the GPU-presented APK now displays the game**: on Android, `vkQueuePresentKHR` returns `VK_SUBOPTIMAL_KHR` on *every* present when the surface `preTransform` (IDENTITY) differs from the current rotation (native portrait held in landscape) — recreating on SUBOPTIMAL starves the compositor (1 creation ≈ 1 frame → black screen). Fix: recreate only on `VK_OUT_OF_DATE`, on SUBOPTIMAL *with a size change*, or on a platform-signalled resize; SUBOPTIMAL at unchanged size is ignored (logged once), rotation left to the compositor. On-device: exactly **1 swapchain creation** over a 2,800+ frame run (was 4,809) and the full title screen (logo, loading bar) renders on the emulator display, screenshot-verified / **swapchain Vulkan persistante — l'APK présenté par GPU affiche enfin le jeu** : sur Android, `vkQueuePresentKHR` rend `VK_SUBOPTIMAL_KHR` à *chaque* présentation quand le `preTransform` de la surface (IDENTITY) diffère de la rotation courante (portrait natif tenu en paysage) — recréer sur SUBOPTIMAL affame le compositeur (1 création ≈ 1 frame → écran noir). Correctif : recréer seulement sur `VK_OUT_OF_DATE`, sur SUBOPTIMAL *avec changement de taille*, ou sur un redimensionnement signalé par la plate-forme ; SUBOPTIMAL à taille inchangée ignoré (journalisé une fois), rotation laissée au compositeur. Sur appareil : exactement **1 création de swapchain** sur un run de 2 800+ frames (contre 4 809) et l'écran-titre complet (logo, barre de chargement) s'affiche sur l'écran de l'émulateur, vérifié par capture
-- [x] **The launcher shortcut works — the first campaign mission loads**: the gate was the game's own launcher handshake (shared-memory IPC, not Battle.net): simulating the launcher (env-gated, off by default; mode + map from the `-run` command line) drives the engine straight into the first mission's loading screen — on x86 (17 map files read, loading bar advancing, byte-identical loading-frame fingerprints across runs), on the ARM64 qemu bench (rc=0), and **on the Android emulator** (29 map files read, loading bar advancing ~4 minutes, screenshot-verified). Stop point characterized right after the guest arena spills above 2 GiB (6/6 failures of what looked like a race family: crash or hang; the atomicity pass below has since ruled a lost-update race out); default 600-frame bench fingerprints unchanged / **le raccourci lanceur fonctionne — la première mission de campagne se charge** : la porte était le poignée de main du lanceur du jeu (IPC en mémoire partagée, pas Battle.net) : simuler le lanceur (porte env-gated, inactive par défaut ; mode + carte depuis la ligne de commande `-run`) mène le moteur directement à l'écran de chargement de la première mission — en x86 (17 fichiers de carte lus, barre de chargement qui avance, empreintes des frames de chargement identiques entre runs), sur le banc ARM64 qemu (rc=0) et **sur l'émulateur Android** (29 fichiers de carte lus, barre qui avance ~4 minutes, vérifié par capture). Point d'arrêt caractérisé juste après le débordement de l'arène invitée au-dessus de 2 Gio (6/6 plantages de ce qui ressemblait à une famille de course : crash ou hang ; la passe atomicité ci-dessous a écarté la course de mise à jour perdue) ; empreintes du banc 600 frames par défaut inchangées
-- [x] **Lift atomicity — done, merged, race ruled out**: `xchg mem,reg` (338 sites), the `lock` read-modify-write forms and `cmpxchg8b` now lift to C atomics (generic lifter patch, published in `tools/pcrecomp-atomics/`; equivalence checked per function against a hardware-reference emulator, 20/20 on x86-64 and aarch64; a re-lift touches only the targeted sites and the default 600-frame bench stays byte-identical). Verdict: the mission-load stops are **not** a lost-update race — the investigation moves to the mission terrain-generation loop (next pass instruments it) / **atomicité du lift — faite, fusionnée, course écartée** : `xchg mem,reg` (338 sites), les formes `lock` lecture-modification-écriture et `cmpxchg8b` se liftent désormais en atomiques C (patch générique du lifter, publié dans `tools/pcrecomp-atomics/` ; équivalence vérifiée fonction par fonction contre un émulateur de référence matérielle, 20/20 en x86-64 et aarch64 ; un re-lift ne touche que les sites visés et le banc 600 frames par défaut reste identique à l'octet près). Verdict : les arrêts au chargement de mission ne sont **pas** une course de mise à jour perdue — l'enquête passe à la boucle de génération du terrain de la mission (la passe suivante l'instrumente)
-- [x] **In-game text renders + real textures on BC-less GPUs**: the game's glyph atlas (A8L8, its own FreeType/Eurostile fonts) is filled through per-glyph `LockRect(pRect)` sub-rectangles — the fake D3D9 device ignored `pRect` (every glyph smashed into (0,0)), so no text was legible; now the menu dialog shows readable strings and an OK button (raw loc keys — no enUS GameStrings in the reference install). For GPUs without BC (Adreno/emulators) a software DXTn fallback decodes on CPU → the title screen is a real, sharp image (±1 level per channel vs native BC) instead of a flat fill; mips, cubemaps and sampler states faithful; system fonts served through metric-compatible OFL substitutes. Runtime fingerprints: frames 1/10 unchanged, frame 100 re-baselined (dialog text) / **le texte du jeu s'affiche + textures réelles sur GPU sans BC** : l'atlas de glyphes du jeu (A8L8, ses propres polices FreeType/Eurostile) est rempli par sous-rectangles `LockRect(pRect)` glyphe par glyphe — le device D3D9 factice ignorait `pRect` (tous les glyphes écrasés en (0,0)), aucun texte n'était lisible ; le dialogue du menu affiche désormais des chaînes lisibles et un bouton OK (clés de loc brutes — pas de GameStrings enUS dans l'install de référence). Pour les GPU sans BC (Adreno/émulateurs), un repli logiciel DXTn décode sur CPU → l'écran-titre est une image réelle nette (±1 niveau par canal vs BC natif) au lieu d'un aplat ; mips, cubemaps et états de sampler fidèles ; polices système servies via des substituts métriquement compatibles (OFL). Empreintes runtime : frames 1/10 inchangées, frame 100 re-baselinée (texte du dialogue)
-- [x] **Campaign menu 3D scene renders — one-character lifter bug found & fixed**: `movhps`/`movhpd` (load into the **high** SSE lane) were lifted exactly like their low-lane twins because the lifter tested the wrong character of the mnemonic — every 4×4 matrix product built on them degenerated (rows `a,b,a,b`), collapsing all 3D triangles into a black screen while 2D/UI draws kept working. After the fix, the animated menu 3D scene (battlecruiser over a ringed planet, nebula, star-field) renders 100 % non-black frames where the previous build rendered black; generic lifter patch published in `tools/pcrecomp-movhps/` / **la scène 3D du menu de campagne s'affiche — bug d'un caractère du lifter trouvé et corrigé** : `movhps`/`movhpd` (chargement dans la voie SSE **haute**) étaient liftés exactement comme leurs jumeaux de voie basse car le lifter testait le mauvais caractère du mnémonique — tout produit de matrices 4×4 construit sur eux dégénérait (lignes `a,b,a,b`), effondrant tous les triangles 3D en écran noir tandis que les draws 2D/UI fonctionnaient. Après correctif, la scène 3D animée du menu (croiseur au-dessus d'une planète à anneaux, nébuleuse, champ d'étoiles) rend 100 % de frames non noires là où le build précédent rendait noir ; patch générique du lifter publié dans `tools/pcrecomp-movhps/`
-- [x] **MMX lifted — video color conversion unlocked**: mm0-mm7 lift as their own 64-bit CPU fields (~50 mnemonics, saturating/packing/mul lanes); whole functions previously left as TODOs (YCbCr 4:2:0->BGRA class) now lift and pass per-function equivalence 30/30 with a 200-function control at 0 fail; generic patch in `tools/pcrecomp-mmx/` (2 patches: shared base + MMX) / **MMX lifté — conversion couleur vidéo débloquée** : mm0-mm7 se liftent en champs CPU 64 bits propres (~50 mnémoniques, saturation/paquetage/lanes mul) ; les fonctions jusqu'ici laissées en TODO entier (classe YCbCr->BGRA) se liftent et passent l'équivalence par fonction 30/30, témoin 200 fonctions 0 échec ; patch générique dans `tools/pcrecomp-mmx/` (2 patches : base partagée + MMX)
-- [x] **The mission plays — 3D terrain renders and orders execute**: 1,066/1,068 shaders translated (167,503 real draws in a 1,000-frame run), the first mission's 3D terrain (canyon, road, night lighting) renders where only the HUD existed before, and a scripted input sequence drives the game for 3,600 frames with **zero "missing" faults** — unit selection, moves and minimap clicks all acknowledged by the engine / **la mission se joue — le terrain 3D s'affiche et les ordres s'exécutent** : 1 066/1 068 shaders traduits (167 503 draws réels sur un run de 1 000 frames), le terrain 3D de la première mission (canyon, route, éclairage nocturne) s'affiche là où seul le HUD existait, et une séquence d'entrées scriptée pilote le jeu 3 600 frames avec **zéro manques** — sélection d'unités, déplacements et clics minicarte tous acquittés par le moteur
-- [x] **Minimap renders + units drawn (render-target readback)**: the map's TGA minimap was silently dropped — the D3DX layer only accepted DDS textures; decoding TGA (all subformats, RLE) into the arena's DDS path made the minimap appear (39 distinct blocks vs 6 before, fog-of-war, camera-viewport marker), and making `GetRenderTargetData` actually read back (previously a no-op) is what lets the engine composite unit sprites — marines + the hero unit now drawn in the mission view (A/B proven); `StretchRect`/`ColorFill` implemented; per-target RTT instrumentation (sampling/draw stats) for diagnosis / **la minicarte s'affiche + unités dessinées (relecture de cible de rendu)** : la minicarte TGA de la carte était silencieusement jetée — la couche D3DX n'acceptait que les textures DDS ; le décodage TGA (tous sous-formats, RLE) vers le chemin DDS de l'arène fait apparaître la minicarte (39 blocs distincts contre 6 auparavant, brouillard de guerre, marqueur de vue caméra), et rendre `GetRenderTargetData` réellement lisible (auparavant no-op) est ce qui permet au moteur de composer les sprites d'unités — marines + unité héros désormais dessinées dans la vue de mission (prouvé A/B) ; `StretchRect`/`ColorFill` implémentés ; instrumentation RTT par cible (stats échantillonnage/draws) pour le diagnostic
-- [x] **Minimal campaign data set proven by pruning**: an A/B pruning methodology (remove one dataset, observe the exact breakage) certifies the minimal data the offline campaign needs (~7.5 GiB: engine + base + locale, campaign maps/assets/voice) versus what is never read (launcher, matchmaking MPQ, helper DLLs) — each removal breaks precisely the expected feature (no campaign maps → "unable to open map"; no base assets → fallback world; no baseline cache → black screen; fatal error without the core mod), so the on-device install list is proven complete; resumable adb-push tooling shipped / **jeu de données minimal de campagne prouvé par élagage** : une méthodologie d'élagage A/B (retirer un jeu de données, observer la casse exacte) certifie le minimum dont la campagne hors ligne a besoin (~7,5 Gio : moteur + base + locale, cartes/actifs/voix de campagne) contre ce qui n'est jamais lu (lanceur, MPQ de matchmaking, DLL d'aide) — chaque retrait casse précisément la fonctionnalité attendue (pas de cartes de campagne → « impossible d'ouvrir la carte » ; pas d'actifs de base → monde de repli ; pas de cache de référence → écran noir ; erreur fatale sans le mod principal), la liste d'installation sur appareil est prouvée complète ; outillage de push adb reprenable fourni
-- [x] **Unit selection fills the command UI, button-issued orders move the group**: a selection rectangle picks 6 marines + the hero (green rings); the bottom panels fill in — command card 1.7→26.8 % non-blank (Move/Stop/Hold/Patrol/Attack buttons), hero portrait, selection panel 0.4→6.9 % (group icons, after translating 5 missing selection shaders, table 1,639) — and a button-issued Move order drives the group across the map (reproduced twice, base fingerprints unchanged) / **la sélection d'unités remplit l'interface de commandement, un ordre donné au bouton déplace le groupe** : un rectangle de sélection prend 6 marines + le héros (anneaux verts) ; les panneaux bas se remplissent — carte de commande 1,7→26,8 % non vide (boutons Move/Stop/Hold/Patrol/Attack), portrait du héros, panneau de sélection 0,4→6,9 % (icônes du groupe, après traduction de 5 shaders de sélection manquants, table 1 639) — et un ordre Move donné au bouton conduit le groupe à travers la carte (reproduit ×2, empreintes de base inchangées)
-- [x] **Full campaign flow plays in-engine — intro cinematic, mid-mission hologram call, live in-game HUD**: a 2,200-frame verification run on merged main drives the whole opening — the intro cinematic renders the full 3D terrain (canyon with multi-level cliffs, terran bridge, marked road, ~6 marines + a flying unit, no HUD), an in-engine hologram cutscene plays mid-mission, and the in-game HUD is fully live (hero selected with portrait + ~10-button command card, objectives panel 0/25 survive + 0/30 destroy, fog-of-war minimap); 1,877,334 real draws in one run — the "terrain missing" hypothesis is refuted / **le flux de campagne complet se joue en moteur — cinématique d'intro, hologramme en pleine mission, HUD de jeu vivant** : un run de vérification de 2 200 frames sur le main fusionné pilote toute l'ouverture — la cinématique d'intro rend le terrain 3D complet (canyon à falaises multi-niveaux, pont terran, route marquée, ~6 marines + une unité volante, sans HUD), un hologramme en moteur joue en pleine mission, et le HUD de jeu est pleinement vivant (héros sélectionné avec portrait + carte de commandement ~10 boutons, panneau d'objectifs 0/25 survivre + 0/30 détruire, minicarte sous brouillard de guerre) ; 1 877 334 draws réels en un run — l'hypothèse « terrain manquant » est infirmée
-- [x] **In-mission audio plays; minimap-issued orders; the shadow path mapped end-to-end**: the full in-mission audio scene plays through the translated engine (39 sounds created, zero failures, 666 game-file reads ≈ 42 MiB, reference music correlated 94–99 % on the active windows), scripted clicks ON the minimap now issue real move orders (camera and units travel across the map), and the shadow pipeline is fully diagnosed with measurements: the engine never samples its D32 depth surface (format-refusal path A proven insufficient), so the fix is specified — a per-sampler runtime flag + PCF comparison at Vulkan sampler creation (next pass) / **l'audio de mission joue ; ordres donnés depuis la minicarte ; la chaîne d'ombres cartographiée de bout en bout** : la scène audio de mission complète joue dans le moteur traduit (39 sons créés, zéro échec, 666 lectures de fichiers du jeu ≈ 42 Mio, musique de référence corrélée à 94–99 % sur les fenêtres actives), des clics scriptés SUR la minicarte donnent désormais de vrais ordres de déplacement (caméra et unités traversent la carte), et la chaîne d'ombres est entièrement diagnostiquée avec mesures : le moteur n'échantillonne jamais sa surface de profondeur D32 (voie A par refus de format prouvée insuffisante) — le correctif est spécifié : drapeau runtime par sampler + comparaison PCF à la création du sampler Vulkan (passe suivante)
-- [x] **Cast shadows rendered (opt-in)**: the shadow-map pixel shaders are translated with a depth-compare variant (`sampler2DShadow`, `textureProj` with reference) selected per sampler at runtime, and the D3D9 depth-bias states are carried over to Vulkan (no shadow acne); A/B-proven shadows under units, bridge, trees; default output byte-identical when off / **ombres portées rendues (opt-in)** : les PS de la carte d'ombres sont traduits avec une variante à comparaison de profondeur choisie par sampler à l'exécution, et les biais de profondeur D3D9 passent à Vulkan (pas d'acné) ; ombres prouvées A/B ; sortie par défaut identique à l'octet quand désactivé
-- [x] **Video path: engine cinematics decode; Theora decoder linked into the APK**: the two video shaders (YCbCr → RGB) are translated so the engine's video quad draws for real; a measured diagnosis showed the texture-upload path was sound and the decoder was starved by an unimplemented audio-DSP clock — implementing the engine's DSP callbacks makes the menu cinematic decode and play on the x86 bench. On the Android side, `scripts/theora-android.sh` cross-compiles libogg + libtheora (decoder) and the APK now links them (build verified, on-device run pending) / **voie vidéo : les cinématiques du moteur se décodent ; décodeur Theora lié dans l'APK** : les deux shaders vidéo (YCbCr → RGB) sont traduits, le quad vidéo du moteur est réellement dessiné ; un diagnostic mesuré a montré que le chemin de téléversement des textures était sain et que le décodeur était affamé par une horloge DSP audio non implémentée — implémenter les rappels DSP du moteur fait se décoder et jouer la cinématique du menu sur le banc x86. Côté Android, `scripts/theora-android.sh` compile libogg + libtheora (décodeur) et l'APK les lie (build vérifié, run sur appareil à venir)
-- [x] **SSE lane moves lifted — `movhlps`/`movlhps` register-to-register**: the two register-only SSE lane-move forms (move the high/low 64-bit lane between XMM registers) now lift natively instead of leaving a lifter TODO that blocked every dependent function; generic lifter patch published in `tools/pcrecomp-movhlps/` (single patch, applies after the shared base in `tools/pcrecomp-mmx/`) / **déplacements de voie SSE liftés — `movhlps`/`movlhps` registre à registre** : les deux formes SSE de déplacement de voie en registre-à-registre (déplacer la voie 64 bits haute/basse entre registres XMM) se liftent nativement au lieu de laisser un TODO du lifter qui bloquait toutes les fonctions dépendantes ; patch générique du lifter publié dans `tools/pcrecomp-movhlps/` (patch unique, à appliquer après la base partagée de `tools/pcrecomp-mmx/`)
-- [x] **Performance pass — ≈ 4 → ≈ 28 FPS in active play on device, measured first**: every step was measured on the phone (per-frame CPU/backend/present split, `simpleperf` sampling of the game thread, Vulkan GPU timestamps per render pass) before and after. Levers that paid off: optimized build of the lifted code with O(1) dispatch and inlined flag helpers; no thread-local storage on the dispatch hot path (in a `dlopen`ed Android library every TLS access goes through the dynamic TLS resolver — even a cold-path read inlined into the dispatcher made the compiler hoist the resolver call to every dispatch); per-draw copies removed (unchanged shader constants reused, static vertex/index buffers kept GPU-side with a volatility guard); **two frames in flight** (per-slot fences instead of a queue wait-idle, semaphores with the presentation queue); a staging ring large enough for one submission per frame (an overflowing ring forced a mid-frame submit that waited for the previous frame and looked like a saturated GPU — the GPU was busy < 40 % of the frame); a persistent Vulkan pipeline cache (no shader compilation stalls after the first run). Lowering the render resolution did **not** help — a measured null result. / **Passe de performance — ≈ 4 → ≈ 24 images/s en jeu actif sur l'appareil, mesure d'abord** : chaque étape mesurée sur le téléphone (répartition CPU/backend/présentation par frame, échantillonnage `simpleperf` du fil du jeu, timestamps GPU Vulkan par passe) avant et après. Leviers gagnants : build optimisé du code lifté avec dispatch O(1) et aides de drapeaux intégrées ; plus de stockage par fil (TLS) sur le chemin chaud du dispatch (dans une bibliothèque Android chargée par `dlopen`, chaque accès TLS passe par le résolveur dynamique — même une lecture sur un chemin froid intégré au dispatcher faisait remonter l'appel au résolveur à chaque dispatch) ; plus de copies par dessin (constantes inchangées réutilisées, tampons de sommets/index statiques gardés côté GPU avec garde de volatilité) ; **deux frames en vol** (fences par emplacement au lieu d'une attente de file, sémaphores avec la file de présentation) ; un anneau de transfert assez grand pour une soumission par frame (un anneau qui déborde forçait une soumission en milieu de frame qui attendait la frame précédente et ressemblait à un GPU saturé — le GPU était occupé moins de 40 % de la frame) ; un cache de pipelines Vulkan persistant (plus d'à-coups de compilation de shaders après le premier lancement). Baisser la résolution de rendu n'a **pas** aidé — résultat nul mesuré. The later lift-optimization passes (transforms published in `scripts/`: guest registers as locals, direct calls + dispatch O(1), x87 stack as locals, volatile-range cache — each A/B/A-measured on the phone) took active play to **28.1 FPS**, with the recompiled-code share down from 236 to ≈19 ms/frame. / Les passes suivantes d'optimisation du lift (transforms publiées dans `scripts/` : registres invités en locaux, appels directs, pile x87 en locale, cache des plages volatiles — chacune mesurée A/B/A sur le téléphone) ont porté le jeu actif à **28,1 images/s**, la part de code recompilé passant de 236 à ≈19 ms/frame.
-- [x] Playable on a Galaxy Z Fold 8 / jouable sur Galaxy Z Fold 8
-
-## Screenshots / Captures
-
-Captured from our own legitimate copy of the game, published for documentation purposes
-only (see [LEGAL.md](LEGAL.md)). / Captures réalisées depuis notre propre copie
-légitime du jeu, publiées à seule fin de documentation (voir [LEGAL.md](LEGAL.md)).
-
-| Capture | What it shows / Ce qu'elle montre |
-|---|---|
-| ![menu campagne](docs/menu-glue-single-f1000-campagne.png) | Campaign menu rendered by the Vulkan backend / Menu de campagne rendu par le backend Vulkan |
-| ![menu + scène 3D](docs/menu-echap-f2500-scene-sans-ui.png) | Menu with the 3D scene (post-`movhps` fix) / Menu avec la scène 3D (après le correctif `movhps`) |
-| ![mission qui charge](docs/launch-f3600-liberation-day-chargee.png) | Mission loading on device / Chargement de mission sur l'appareil |
-| ![sélection de mission](docs/mission-selection-f2400-liberation-day.png) | Mission-selection console / Console de sélection de mission |
-| ![cinématique](docs/ok-normal-f1700-tstory01-raynor.png) | In-engine cinematic (clean bar render, 2856-shader table) / Cinématique en moteur (bar propre, table 2 856) |
-| ![dashboard](docs/tumor-b-f1500-mainui-dashboard.png) | Engine dashboard UI driven from the runtime / UI dashboard du moteur pilotée depuis le runtime |
-| ![install complet](docs/menu-install-complete-9v-f2500.png) | Full menu after complete install / Menu complet après installation complète |
-
-## Bricks / Briques
-
-### `scripts/theora-android.sh` — Ogg Theora decoder for Android aarch64
-
-**EN:** Builds the Theora **decoder** and libogg as static aarch64 libraries with the Android NDK (no assembly,
-`-O2 -fPIC`), from the official Xiph.Org release tarballs, which every user downloads themselves (nothing third-party
-is vendored here). Two runs produce identical sha256 (deterministic `llvm-ar`, `-ffile-prefix-map`).
-**FR :** Compile le **décodeur** Theora et libogg en bibliothèques statiques aarch64 avec le NDK Android (sans
-assembleur, `-O2 -fPIC`), depuis les archives officielles Xiph.Org que chaque utilisateur télécharge lui-même (aucune
-source tierce embarquée ici). Deux exécutions donnent les mêmes sha256.
-
-```sh
-ANDROID_NDK_HOME=/path/to/android-ndk-r28c ./scripts/theora-android.sh
-# → $OUT/lib/libtheoradec.a, $OUT/lib/libogg.a, $OUT/include/{ogg,theora}/, $OUT/EMPREINTES.txt (sha256)
-```
-
-| Variable | Default / Défaut | Role / Rôle |
+| | | |
 |---|---|---|
-| `ANDROID_NDK_HOME` (or `ANDROID_NDK`) | — (required / requis) | NDK root; tested with r28c (28.2.13676358) |
-| `ANDROID_API` | `26` | API level of the `aarch64-linux-android<API>-clang` target |
-| `THEORA_SRC` | `${XDG_CACHE_HOME:-~/.cache}/theora-android` | downloads + unpacked sources / téléchargements + sources |
-| `OUT` | `$THEORA_SRC/android-arm64` | output prefix / préfixe de sortie |
+| ![Campaign menu](docs/menu-glue-single-f1000-campagne.png)<br/>Campaign menu, Vulkan | ![Menu + 3D scene](docs/menu-echap-f2500-scene-sans-ui.png)<br/>Menu & 3D scene | ![Mission loading](docs/launch-f3600-liberation-day-chargee.png)<br/>Mission loading on device |
+| ![Mission selection](docs/mission-selection-f2400-liberation-day.png)<br/>Mission-selection console | ![Cinematic](docs/ok-normal-f1700-tstory01-raynor.png)<br/>In-engine cinematic | ![Engine dashboard](docs/tumor-b-f1500-mainui-dashboard.png)<br/>Engine UI driven from the runtime |
 
-Official sources, checked before use / sources officielles, vérifiées avant usage:
+*Captured from our own legitimate copy, for documentation purposes only.*
 
-| Tarball | sha256 |
+| At a glance | |
 |---|---|
-| `https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.xz` | `c4d91be36fc8e54deae7575241e03f4211eb102afb3fc0775fbbc1b740016705` |
-| `https://downloads.xiph.org/releases/theora/libtheora-1.1.1.tar.xz` | `f36da409947aa2b3dcc6af0a8c2e3144bc19db2ed547d64e9171c59c66561c61` |
+| Functions lifted to portable C | **86,653** (420 MB of C, builds on x86-64 Linux, Apple Silicon, aarch64 Android) |
+| Certified against a hardware-reference emulator | **76,650** functions, **0 true divergence** |
+| First campaign mission | **played end-to-end on a Galaxy Z Fold 8** (BT keyboard + mouse, live HUD, victory) |
+| Performance in active play | **28.1 FPS** (from 4.1 at the first playable build — ×6.9), GPU never limiting |
+| Audio | mission soundtrack + voice reconstructed **bit-exact** |
+| Video | intro cinematic decodes **in real time on-device** (the game's own lifted Theora decoder) |
+| Shaders translated | 2,856 of the 75,797 in the game's cache (growing — see roadmap) |
 
-Link order / ordre de lien : `libtheoradec.a` then `libogg.a` (the decoder calls the ogg bit-packer).
-In CMake: `target_include_directories(app PRIVATE $OUT/include)` +
-`target_link_libraries(app PRIVATE $OUT/lib/libtheoradec.a $OUT/lib/libogg.a)`.
+## Project status
 
-**Licences:** libogg and libtheora are © Xiph.Org Foundation under BSD-style (3-clause) licences — keep their
-copyright notices (`COPYING` in each tarball) when you redistribute a binary that links them. This repository only
-ships the build script (MIT). / libogg et libtheora sont © Xiph.Org Foundation sous licences de type BSD (3 clauses)
-— conservez leurs mentions (`COPYING` de chaque archive) si vous redistribuez un binaire qui les lie. Ce dépôt ne
-fournit que le script de build (MIT).
-
-### `scripts/video-transcode.sh` — H.264 video brick / brique vidéo H.264
-
-**EN:** Software Theora decoding of full-screen cinematics is expensive on a phone CPU. This script transcodes,
-**locally and only from your own legitimate copy**, every `.ogv` it finds into an H.264 Baseline `.mp4` that any
-Android hardware AVC decoder accepts (no B-frames, `yuv420p`, level 3.1, one key frame per second, `faststart` index).
-Video only: the engine keeps reading sound and timing from the original `.ogv`; the `.mp4` replaces the picture alone,
-frame *n* of the engine = picture *n* of the `.mp4` (constant frame rate, duplicated Theora packets kept). The script
-checks that the picture count equals the Theora packet count and warns otherwise. Originals are never modified;
-up-to-date outputs are skipped.
-**FR :** Le décodage logiciel Theora des cinématiques plein écran coûte cher au CPU d'un téléphone. Ce script
-transcode, **localement et uniquement depuis votre propre copie légitime**, chaque `.ogv` trouvé en `.mp4` H.264
-Baseline accepté par tout décodeur AVC matériel Android. Image seule : le moteur continue de lire le son et l'horloge
-dans le `.ogv` d'origine ; frame *n* du moteur = image *n* du `.mp4`. Les originaux ne sont jamais modifiés.
-
-```sh
-./scripts/video-transcode.sh /path/to/your/install            # .mp4 next to each .ogv / à côté de chaque .ogv
-SRC_DIR=/path/to/your/install OUT_DIR=/path/to/mp4-tree ./scripts/video-transcode.sh   # parallel tree / arbre parallèle
-```
-
-| Variable | Default / Défaut | Role / Rôle |
+| Subsystem | State | Notes |
 |---|---|---|
-| `SRC_DIR` | — | source folder when no argument is given (recursive `.ogv` scan) / dossier source sans argument |
-| `OUT_DIR` | — (sibling `.mp4`) | parallel output tree, same relative paths / arbre de sortie parallèle |
-| `FFMPEG`, `FFPROBE` | `ffmpeg`, `ffprobe` from `PATH` | binaries to use; ffmpeg must have `libx264` / binaires ; libx264 requis |
-| `CRF`, `PRESET` | `20`, `slow` | libx264 quality / speed |
-| `GOP` | source fps (1 s) | max distance between key frames / distance max entre images clés |
-| `AUDIO` | — | `aac` adds the audio track (not needed by the engine) / ajoute la piste son |
-| `FORCE` | `0` | `1` redoes up-to-date outputs / refait les sorties à jour |
+| Static recompilation (x86-32 → portable C) | ✅ done | CPU-struct reentrant model; generic lifter patches published (atomics, MMX, SSE lanes) |
+| Vulkan renderer (D3D9 → Vulkan) | ✅ core complete | title, menus, 3D scenes, terrain, HUD, minimap, units; shadows opt-in; MRT & sRGB pending |
+| Audio (FMOD Ex → software mixer → AAudio) | ✅ | bit-exact reconstruction, proof by WAV entropy |
+| Video (Theora) | ✅ | real-time on device; optional H.264 hardware path |
+| Input | ✅ | touch → Win32 mouse; BT keyboard/mouse; DeX |
+| Android packaging | ✅ | reproducible signed APK (NDK r28, NativeActivity) |
+| Performance | 🟡 in progress | 28.1 FPS, CPU-bound in the lifted code (~19 ms of a ~35 ms frame) |
+| Shader coverage | 🟡 in progress | 2,856 / 75,797; full pack generator & loader under construction |
+| Campaign progression | 🔴 next | saves wiped at launch; persistence is the next work item |
+| Campaign beyond mission 1 | 🟡 | mission 2 loads; automated sweep of all missions planned |
 
-**Runtime switch `SC2_VIDEO_AMC=1` / interrupteur d'exécution :** off by default (the engine's own Theora decoding
-runs unchanged). When set, each time the engine opens a cinematic the Android runtime looks for a `.mp4` with the same
-relative path (case-insensitive), or the same base name, under `SC2_VIDEO_AMC_DIR` — default: the install root — and
-decodes its pictures with the platform hardware decoder (`AMediaCodec`, NDK); sound and timing still come from the
-`.ogv`. So either keep the sibling `.mp4` files in the install, or point `SC2_VIDEO_AMC_DIR` at your `OUT_DIR` tree.
-No `.mp4`, an unsupported stream format or a decoder that fails to open → the cinematic plays through the engine's
-software Theora path; a decoder failure during playback keeps the last picture (the game never stops). On non-Android
-hosts the switch only logs that a `.mp4` was found. / désactivé par défaut ; s'il vaut `1`, le runtime Android cherche,
-à chaque ouverture de cinématique, un `.mp4` de même chemin relatif (casse ignorée) ou de même nom sous
-`SC2_VIDEO_AMC_DIR` (défaut : racine d'installation) et en décode les images avec le décodeur matériel ; le son et
-l'horloge restent ceux du `.ogv`. Absent ou non ouvrable → repli sur le décodage logiciel Theora du moteur ; un échec
-en cours de lecture garde la dernière image.
+The full dated milestone log (35+ entries with the measurement behind each claim):
+[docs/MILESTONES.md](docs/MILESTONES.md).
 
-**Licences:** the script only transforms files you already own, on your machine; **no game asset is distributed**,
-here or in any APK built from this toolkit — the `.mp4` files are derived from your copy and must stay with it.
-ffmpeg/libx264 are third-party tools you install yourself (libx264 is GPL; the script only invokes it, it does not
-ship it). / le script ne fait que transformer vos propres fichiers, localement ; **aucun asset n'est distribué** — les
-`.mp4` dérivent de votre copie et doivent y rester. ffmpeg/libx264 sont installés par vous (libx264 est GPL ; le script
-l'appelle, il ne le fournit pas).
+## Roadmap
 
-## License
+| # | Milestone | Why it matters |
+|---|---|---|
+| 1 | **Full SPIR-V pack** — translate all 75,797 cached shaders into an mmap pack (~2 GB, format specced in [docs/PACK-SPIRV.md](docs/PACK-SPIRV.md)) | any unplayed scene currently loses draws (stale render targets); this closes shader coverage forever |
+| 2 | **Save & progression persistence** | the emulated `C:\` is wiped at launch — campaign progress doesn't survive a reboot |
+| 3 | **Automated campaign sweep** — cheat-code-driven playthrough of every mission at the bench | turns "does mission N work?" into a table of missing functions, per mission |
+| 4 | **Real campaign menu entry** (no forced `-run`) | the proper player journey, fullscreen |
+| 5 | **Remaining CPU levers** — constant-block range upload (only the span the shader reads), SSE as locals | the last ~6 MB/frame of `memmove` and the path to 60 FPS |
 
-MIT for the tooling in this repository. The tooling is original work; it contains no content owned by Blizzard Entertainment. / MIT pour l'outillage de ce dépôt. L'outillage est un travail original ; il ne contient aucun contenu appartenant à Blizzard Entertainment.
+## Port YOUR D3D9 game — the recipe
+
+Everything above generalizes. The full step-by-step recipe — decision tree, inventory,
+static analysis, lift, host runtime, the D3D9 device, shader translation, presentation,
+the correctness oracle, the performance levers *in the order that paid*, effort
+calibration and a pitfall checklist — is in
+**[docs/D3D9-PORTING-GUIDE.md](docs/D3D9-PORTING-GUIDE.md)**. The short version:
+
+1. Hash & extract your own copy; prune A/B to find the minimal dataset.
+2. Ghidra headless: boot map + the import table as your API contract.
+3. Lift with pcrecomp (CPU-struct model); apply the generic patches we published.
+4. Host runtime: fibers, guest arena, traced IAT — **refuse, don't lie**.
+5. D3D9 device in three tiers; prove the plumbing with a degenerate triangle first.
+6. Translate the game's shader cache offline (decoder + translator here); validate
+   every SPIR-V; hash bytecode by FNV everywhere.
+7. Present headless → native bench → device; SUBOPTIMAL discipline; two frames in flight.
+8. Difftest every function against a hardware-reference emulator; fingerprint frames; A/B/A.
+9. Optimize in measured order: -O2 lift, O(1) dispatch, no TLS, fences, ring, locals.
+
+## What's in this repository
+
+| Path | What it is |
+|---|---|
+| `runtime/` | the **D3D9-on-Vulkan backend & host runtime** (original work): fake-COM device in the guest arena, guest-free Vulkan backend, presentation, software FMOD Ex, Theora/AMediaCodec video |
+| `tools/difftest/` | the **per-function oracle**: lifted function vs Unicorn hardware reference, every register/flag/byte diffed |
+| `tools/d3d9-shaders/` | **SM2/3 bytecode → SPIR-V**: decoder, translator, shader-cache extractor, frame metric |
+| `tools/pcrecomp-*/` | generic lifter patches: atomics, MMX, `movhps`/`movhpd`, `movhlps`/`movlhps`, disasm32 memory |
+| `tools/lift/` | incremental closure, dead-flag elimination, MMX inventory, relift guard |
+| `tools/mpq/`, `tools/audio/` | size-checked MPQ extract/repack; MSVC-decorated import decoder; WAV proof checker |
+| `scripts/` | measurement & optimization: native bench (`banc-mac.sh`), on-device A/B/A (`fold-ab*`), cinematic bench, lift transforms (locals, direct calls) |
+| `android/` | the port: NativeActivity glue, bionic fibers, swapchain presenter, reproducible APK chain, validation benches |
+| `interfaces/` | generated interface facts (PE layout, 755-slot IAT) + lift counters |
+
+## Documentation
+
+| Doc | Content |
+|---|---|
+| [docs/D3D9-PORTING-GUIDE.md](docs/D3D9-PORTING-GUIDE.md) | **the recipe to port your own D3D9 game** |
+| [docs/RENDU-D3D9-VERS-VULKAN.md](docs/RENDU-D3D9-VERS-VULKAN.md) 🇫🇷 | the complete D3D9→Vulkan translation method (state model, descriptors, textures, shaders, shadows, presentation, transfers, 15 counter-intuitive decisions) |
+| [docs/RETROSPECTIVE-RECOMPILATION.md](docs/RETROSPECTIVE-RECOMPILATION.md) 🇫🇷 | the 7-day engineering retrospective: milestones, 14 major difficulties, measurement discipline, measured dead ends |
+| [docs/METHOD.md](docs/METHOD.md) | the end-to-end pipeline in one page |
+| [docs/MILESTONES.md](docs/MILESTONES.md) | the full dated milestone log |
+| [docs/BRICKS.md](docs/BRICKS.md) | build bricks: Theora decoder cross-compile, local video transcode |
+| [docs/PACK-SPIRV.md](docs/PACK-SPIRV.md) 🇫🇷 | the SPIR-V pack format |
+| [docs/BANC-MAC.md](docs/BANC-MAC.md) 🇫🇷 | the native bench method |
+
+## License & legal
+
+MIT for the tooling in this repository — original work, no Blizzard content. Built on
+[pcrecomp](https://github.com/sp00nznet/pcrecomp) (MIT); see [LEGAL.md](LEGAL.md) for
+the full policy (what is published, what never will be, third-party credits) and the
+CI guard that enforces it.
