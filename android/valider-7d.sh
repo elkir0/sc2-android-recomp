@@ -66,7 +66,7 @@ apk)
 adb)
   cmd "adb devices"
   if command -v adb > /dev/null; then adb devices 2>&1 | sed 's/^/  /' | tee -a "$L"
-  else j "  adb absent du devbox : test émulateur hors de ce banc (protocole docs/PIPELINE-ANDROID.md §7)"; fi
+  else j "  adb absent du serveur Linux : test émulateur hors de ce banc (protocole docs/PIPELINE-ANDROID.md §7)"; fi
   ;;
 esac; done
 j "free -h APRÈS : $(free -h | awk '/Mem:/{print $3" utilisés / "$7" dispo"}')"

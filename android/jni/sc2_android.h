@@ -37,6 +37,9 @@ void sc2a_geo_invalider(void);
  * Present (sc2a_sortir → sc2_stop(0) → [BILAN] → exit(0)). */
 void sc2a_demander_sortie(void);
 int  sc2a_sortie_demandee(void);
+/* 21/10 : 1 = activité en arrière-plan → le fil du jeu s'arrête à son prochain Present (horloge du jeu gelée, son en
+ * pause) ; 0 = reprise. */
+void sc2a_suspendre(int suspendu);
 void sc2a_sortir(const char *ou) __attribute__((noreturn));
 
 /* Entrées (passe 7d, API runtime sc2_input.h) : pointeur unique = souris gauche, coordonnées CLIENT

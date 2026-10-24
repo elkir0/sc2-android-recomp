@@ -21,7 +21,7 @@ L="$B/valider.log"; j() { echo "$*" | tee -a "$L"; }
 if [ ! -x "$BIN" ]; then
   if [ -z "$(ls "$B/lifted-o/" 2>/dev/null)" ]; then
     [ -n "${BUILD_DE:-}" ] && [ -n "${SRC_LIFTE_DE:-}" ] || { echo "build-7v absent : donner BUILD_DE et SRC_LIFTE_DE"; exit 2; }
-    mkdir -p "$B/lifted-o"; cp -p "$BUILD_DE"/CMakeFiles/recomp-sc2.dir/src/lifted/recomp_*.c.o "$B/lifted-o/"
+    mkdir -p "$B/lifted-o"; cp -p "$BUILD_DE"/CMakeFiles/sc2_lifted.dir/src/lifted/recomp_*.c.o "$B/lifted-o/"   # V0.3 : objets du lift dans la cible sc2_lifted (en mode SC2_LIFTED_PREBUILT : ar x de l'archive de l'entrée)
     cp -p "$BUILD_DE/stormlib/libstorm.a" "$BUILD_DE/libsc2_win32.a" "$B/"; cp -p "$SRC_LIFTE_DE/recomp_sc2_list.h" "$R/src/lifted/"
   fi
   "$W/android/outils/relink-runtime.sh" build-7v || exit 2

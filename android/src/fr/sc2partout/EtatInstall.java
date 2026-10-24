@@ -16,7 +16,7 @@ import java.util.Map;
  *
  * Tailles attendues ({@link #ATTENDUS}) — d'où vient chaque constante :
  *   F = dernier déploiement connu du Fold : le jeu de données « 5,8 Go » (NOTES.md 17/10 22:50 AST « données 5,8 Go
- *       intactes » sur le Fold), poussé du M4 au devbox (extraction/install, sentinelle .POUSSE_FINI
+ *       intactes » sur le Fold), poussé du M4 au serveur Linux (extraction/install, sentinelle .POUSSE_FINI
  *       2026-10-17T05:19:14Z) et mesuré là, fichier par fichier, le 17/10 (find -printf %s) ;
  *   M = android/manifest-install.txt (installation de référence DVD, passes 6a/7h) pour les fichiers ABSENTS de ce
  *       déploiement — exigés par les missions (sans Liberty.SC2Mod/Base.SC2Data : dialogue « GameLaunchInvalidFiles »,
@@ -77,7 +77,7 @@ public final class EtatInstall {
         new Attendu(C_CAMPAGNES, "Campaigns/Liberty.SC2Campaign/Base.SC2Data", 964116L, CAMPAGNE, "F"),
         new Attendu(C_CAMPAGNES, "Campaigns/Liberty.SC2Campaign/Base.SC2Maps", 71836547L, CAMPAGNE, "F"),
         new Attendu(C_CAMPAGNES, "Campaigns/LibertyStory.SC2Campaign/Base.SC2Data", 2040300L, CAMPAGNE, "F"),
-        // passe 10d : locale enUS, OPTIONNELLE (tailles M : manifest-install.txt, absente du devbox comme du Fold)
+        // passe 10d : locale enUS, OPTIONNELLE (tailles M : manifest-install.txt, absente du serveur Linux comme du Fold)
         new Attendu(C_ENUS, "Mods/Core.SC2Mod/enUS.SC2Data", 885052L, OPTIONNEL, "M"),
         new Attendu(C_ENUS, "Mods/Core.SC2Mod/enUS.SC2Assets", 863964L, OPTIONNEL, "M"),
         new Attendu(C_ENUS, "Mods/Liberty.SC2Mod/enUS.SC2Data", 164576L, OPTIONNEL, "M"),

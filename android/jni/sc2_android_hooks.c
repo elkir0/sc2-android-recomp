@@ -35,6 +35,8 @@
 #include "sc2_vk_presente.h"
 #endif
 
+#ifndef __APPLE__   /* V3 (M0, 22/10) : sur macOS, la zone invitée est posée par zone_hote_init (sc2_runtime.c) et Vulkan
+                     * par charger_vk_apple (sc2_d3d9v.c) ; ld64 n'a pas de --wrap (renommages : mac/mac.cmake) */
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
 #endif
@@ -106,6 +108,7 @@ void *__wrap_dlopen(const char *nom, int mode)
 #endif
     return __real_dlopen(nom, mode);
 }
+#endif   /* !__APPLE__ */
 
 /* ---- frames ----------------------------------------------------------------------------- */
 
@@ -170,8 +173,44 @@ int __real_d3dv_present(int id, const char *chemin, double moy[3]);
 #ifdef SC2_SWAPCHAIN
 extern void d3dv_semaphore_rendu_demander(void);     /* recomp-sc2/runtime/sc2_d3d9v.h (passe 10r, v13) */
 #endif
+/* 21/10 : PAUSE en arrière-plan — l'activité passe en pause (APP_CMD_PAUSE) : le fil du jeu s'arrête à son Present
+ * suivant et attend la reprise ; la durée de l'arrêt est retirée de l'horloge du jeu (g_sc2_pause_ns, sc2_horloge.h) :
+ * aucun saut de temps à la reprise. Son en pause pendant ce temps. Une demande de sortie débloque toujours le jeu. */
+#include "sc2_horloge.h"
+#include "sc2_audio_android.h"
+static pthread_mutex_t g_susp_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_susp_cv = PTHREAD_COND_INITIALIZER;
+static int g_suspendu; static unsigned g_n_pauses; static double g_s_pauses;
+void sc2a_suspendre(int s)
+{
+    pthread_mutex_lock(&g_susp_mu);
+    if (g_suspendu != !!s) {
+        g_suspendu = !!s;
+        sc2aa_pause(g_suspendu);
+        if (!g_suspendu) pthread_cond_broadcast(&g_susp_cv);
+    }
+    pthread_mutex_unlock(&g_susp_mu);
+}
+static void attendre_si_suspendu(void)          /* fil du jeu, en tête de Present */
+{
+    pthread_mutex_lock(&g_susp_mu);
+    if (g_suspendu && !sc2a_sortie_demandee()) {
+        struct timespec a, b; clock_gettime(CLOCK_MONOTONIC, &a);
+        printf("[PAUSE] arrière-plan : jeu suspendu au Present n°%u\n", atomic_load(&g_presents) + 1);
+        while (g_suspendu && !sc2a_sortie_demandee()) pthread_cond_wait(&g_susp_cv, &g_susp_mu);
+        clock_gettime(CLOCK_MONOTONIC, &b);
+        int64_t d = (int64_t)(b.tv_sec - a.tv_sec) * 1000000000 + (b.tv_nsec - a.tv_nsec);
+        atomic_fetch_add(&g_sc2_pause_ns, d);
+        g_n_pauses++; g_s_pauses += d / 1e9;
+        printf("[PAUSE] reprise après %.1f s : horloge du jeu décalée d'autant (pauses : %u, %.1f s en tout)\n", d / 1e9,
+               g_n_pauses, g_s_pauses);
+    }
+    pthread_mutex_unlock(&g_susp_mu);
+}
+
 int __wrap_d3dv_present(int id, const char *chemin, double moy[3])
 {
+    attendre_si_suspendu();
     double t0 = pf_ms(), t1;
     if (g_pf_sortie) g_pf[PF_JEU] += t0 - g_pf_sortie;
     g_pf_n++;
@@ -231,7 +270,11 @@ fin:
 /* ---- sortie ----------------------------------------------------------------------------- */
 
 static atomic_int g_sortie;
-void sc2a_demander_sortie(void) { atomic_store(&g_sortie, 1); }
+void sc2a_demander_sortie(void)
+{
+    atomic_store(&g_sortie, 1);
+    pthread_mutex_lock(&g_susp_mu); pthread_cond_broadcast(&g_susp_cv); pthread_mutex_unlock(&g_susp_mu);   /* 21/10 */
+}
 int  sc2a_sortie_demandee(void) { return atomic_load(&g_sortie); }
 
 /* Sur le fil du jeu : bilan complet du runtime (sc2_stop → [BILAN] → exit(0)). */

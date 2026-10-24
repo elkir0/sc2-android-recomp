@@ -27,6 +27,12 @@ import java.util.List;
  * sc2.env : lignes KEY=VALEUR, lues par l'activité native au lancement (android/jni/sc2_android_main.c,
  * lire_env). Jouer une carte = lanceur simulé du runtime (passe 7h, voie -run de la passe 7p §3) :
  * SC2_RUN_SANS_BNET=1 et SC2_ARGS=-run Maps/Campaign/X.SC2Map (chemin complet relatif à l'install).
+ *
+ * V4.10 (23/10) — escarmouche contre l'IA : les cartes mêlée ne sont pas des fichiers mais des entrées du cache
+ * Battle.net pré-rempli de {@link #ARCHIVE_MELEE} ; le runtime les retrouve et les prépare lui-même
+ * (recomp-sc2/runtime/sc2_escarmouche.c). Le lanceur ne fait que choisir : {@link #CARTES_MELEE} (relevé par
+ * SC2_ESCARMOUCHE=liste, mêmes noms et mêmes n°), race, race de l'IA, difficulté → sc2.env
+ * ({@link #contenuEscarmouche}).
  */
 public final class Catalogue {
     public static final int MAX_CARTES = 200;
@@ -42,6 +48,45 @@ public final class Catalogue {
         "TTosh02", "TTosh03A", "TTosh03B", "TTutorial01", "TTychus01", "TTychus02", "TTychus03", "TTychus04",
         "TTychus05", "TValerian01", "TValerian02A", "TValerian02B", "TValerian03", "TZeratul01", "TZeratul02",
         "TZeratul03", "TZeratul04",
+    };
+
+    /** V4.10 : archive qui porte le cache Battle.net des cartes mêlée (BattlenetCache\(N)Nom.SC2Map\…s2ma). */
+    public static final String ARCHIVE_MELEE = "Mods/Liberty.SC2Mod/Base.SC2Data";
+
+    /** V4.10 : les 63 cartes mêlée du cache, dans l'ordre de « SC2_ESCARMOUCHE=liste » (joueurs, puis nom ; relevé au banc
+     *  le 23/10 sur l'installation de référence) — l'indice + 1 est le n° accepté par SC2_ESCARMOUCHE. */
+    static final String[] CARTES_MELEE = {
+        "AgriaValley", "BlisteringSands", "BurialGrounds", "Crossfire", "DesertOasis", "IncinerationZone", "JungleBasin",
+        "JunkYard", "NoviceBlisteringSands", "NoviceDesertOasis", "NoviceSteppesofWar", "ScrapStation", "SteppesofWar",
+        "WorldShip", "XelNagaCaverns",
+        "Elysium",
+        "AridWastes", "DebrisField", "DeltaQuadrant", "DiscordIV", "HighOrbit", "KulasRavine", "LostTemple", "Metalopolis",
+        "MonlythRidge", "NewAntioch", "Nightmare", "NoviceDiscordIV", "NoviceKulasRavine", "NoviceMetalopolis",
+        "NoviceMonlythRidge", "NoviceTerminus", "NoviceTwilightFortress", "RedStoneGulch", "SacredGround", "ScorchedHaven",
+        "ShakurasPlateau", "TarsonisAssault", "Terminus", "TwilightFortress", "WarZone",
+        "ArakanCitadel", "Colony426", "DigSite", "DirtSide", "Frontier", "Monsoon", "Quicksand", "TectonicRift", "TheBioLab",
+        "Typhon", "UlaanDeeps",
+        "Abyss", "Extinction", "ForbiddenPlanet", "HighGround", "LavaFlow", "Megaton", "Outpost", "Primeval", "SandCanyon",
+        "Tempest", "ToxicSlums",
+    };
+    /** Nombre de joueurs de chaque carte de {@link #CARTES_MELEE} : 15 à 2, 1 à 3, 25 à 4, 11 à 6, 11 à 8. */
+    static final int[] JOUEURS_MELEE = {
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+        3,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
+    };
+    /** Carte proposée par défaut (n° 13, la carte des essais du diagnostic V4.10). */
+    public static final String MELEE_DEFAUT = "SteppesofWar";
+    /** Races : {valeur de SC2_ESCARMOUCHE_RACE / _RACE_IA, libellé}. */
+    public static final String[][] RACES = {
+        { "terran", "Terran" }, { "zerg", "Zerg" }, { "protoss", "Protoss" }, { "aleatoire", "Aléatoire" },
+    };
+    /** Difficultés de l'IA : {valeur de SC2_ESCARMOUCHE_IA, libellé du jeu en français} — c_skirVeryEasy 0 … c_skirCheater 5. */
+    public static final String[][] DIFFICULTES = {
+        { "tres-facile", "Très facile" }, { "facile", "Facile" }, { "moyen", "Moyen" }, { "difficile", "Difficile" },
+        { "tres-difficile", "Très difficile" }, { "dement", "Démentiel" },
     };
 
     private Catalogue() {}
@@ -138,6 +183,77 @@ public final class Catalogue {
     public static String contenuCarte(String chemin) {
         String c = chemin.indexOf(' ') >= 0 ? "\"" + chemin + "\"" : chemin;
         return "SC2_RUN_SANS_BNET=1\nSC2_ARGS=-run " + c + "\n";
+    }
+
+    /** V4.10 : une carte mêlée du cache (nom, nombre de joueurs, n° de « SC2_ESCARMOUCHE=liste »). */
+    public static final class Melee {
+        public final String nom;
+        public final int joueurs, numero;
+        Melee(String nom, int joueurs, int numero) { this.nom = nom; this.joueurs = joueurs; this.numero = numero; }
+        /** Libellé du lanceur : « SteppesofWar (2 joueurs) ». */
+        public String libelle() { return nom + " (" + joueurs + " joueurs)"; }
+    }
+
+    /** V4.10 : les cartes mêlée, dans l'ordre de « SC2_ESCARMOUCHE=liste ». */
+    public static List<Melee> cartesMelee() {
+        List<Melee> l = new ArrayList<Melee>();
+        for (int i = 0; i < CARTES_MELEE.length; i++) l.add(new Melee(CARTES_MELEE[i], JOUEURS_MELEE[i], i + 1));
+        return l;
+    }
+
+    /** V4.10 : le cache des cartes mêlée est-il là ? (sinon le runtime journalise l'échec et lance le jeu normalement) */
+    public static boolean escarmoucheDisponible(File install) {
+        try {
+            return new File(install, ARCHIVE_MELEE).isFile();
+        } catch (SecurityException e) {
+            return false;
+        }
+    }
+
+    /** Indice de valeur dans t (colonne 0 si t est un tableau de paires), sans casse ; defaut si absente ou null. */
+    static int indice(String[][] t, String valeur, int defaut) {
+        if (valeur != null)
+            for (int i = 0; i < t.length; i++) if (t[i][0].equalsIgnoreCase(valeur.trim())) return i;
+        return defaut;
+    }
+
+    /** Indice de la carte mêlée nommée (sans casse), ou defaut. */
+    static int indiceMelee(String nom, int defaut) {
+        if (nom != null)
+            for (int i = 0; i < CARTES_MELEE.length; i++) if (CARTES_MELEE[i].equalsIgnoreCase(nom.trim())) return i;
+        return defaut;
+    }
+
+    /** Valeur de la clé dans un contenu sc2.env (dernière ligne « cle=… » : lire_env de l'activité native les applique
+     *  dans l'ordre), ou null ; null si contenu est null. Lignes « # » ignorées, comme dans lire_env. */
+    public static String valeurEnv(String contenu, String cle) {
+        if (contenu == null) return null;
+        String v = null;
+        for (String l : contenu.split("\\r?\\n")) {
+            if (l.startsWith("#")) continue;
+            int eg = l.indexOf('=');
+            if (eg > 0 && l.substring(0, eg).equals(cle)) v = l.substring(eg + 1);
+        }
+        return v;
+    }
+
+    /** V4.10 — escarmouche contre l'IA : lanceur simulé + carte mêlée préparée par le runtime (SC2_ESCARMOUCHE). Pas de
+     *  SC2_ARGS (un « -run » l'emporterait sur la carte d'escarmouche). race, raceIA : colonne 0 de {@link #RACES} ;
+     *  difficulte : colonne 0 de {@link #DIFFICULTES}. */
+    public static String contenuEscarmouche(String carte, String race, String raceIA, String difficulte) {
+        return "SC2_RUN_SANS_BNET=1\nSC2_ESCARMOUCHE=" + carte + "\nSC2_ESCARMOUCHE_RACE=" + race
+             + "\nSC2_ESCARMOUCHE_RACE_IA=" + raceIA + "\nSC2_ESCARMOUCHE_IA=" + difficulte + "\n";
+    }
+
+    /** V5 : chargement de sauvegardes pris en charge par le runtime depuis le lot L3 (24/10, SC2_SAUVEGARDE) — l'écran
+     *  « Charger une partie » n'est plus gardé. */
+    public static final boolean CHARGEMENT_PRET = true;
+
+    /** V5 — charger une sauvegarde : lanceur simulé + SC2_SAUVEGARDE (L3, docs/VARIABLES.md : le runtime démarre le jeu
+     *  directement sur la sauvegarde, mode 4 du lanceur simulé). cheminRelatifAuxDocuments : chemin du .SC2Save relatif
+     *  aux documents du jeu (SC2_DOCUMENTS), séparateurs « / », p. ex. « Saves/Campaign/The Outlaws.SC2Save ». */
+    public static String contenuSauvegarde(String cheminRelatifAuxDocuments) {
+        return "SC2_RUN_SANS_BNET=1\nSC2_SAUVEGARDE=" + cheminRelatifAuxDocuments.replace('\\', '/') + "\n";
     }
 
     /** Écrit sc2.env : fichier temporaire voisin puis renommage (jamais de sc2.env à moitié écrit). */

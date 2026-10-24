@@ -22,6 +22,18 @@
 #ifdef __ANDROID__
 #define VK_USE_PLATFORM_ANDROID_KHR
 #include <android/native_window.h>
+#elif defined(__APPLE__)
+/* V3, lot M5 (22/10 ; v3-critique.md §3.4, v3-conception-A.md §2.3) — branche macOS (MoltenVK). Chaque ajout est sous
+ * __APPLE__ : « unifdef -U__APPLE__ » redonne le fichier d'Android et du banc Linux. Sur Mac, ce fichier est compilé
+ * dans recomp-sc2 par mac/mac.cmake, avec des renommages au lieu des --wrap (ld64 n'en a pas).
+ *   surface   CAMetalLayer (sc2v_fenetre(layer, w, h), app) par VK_EXT_metal_surface ; sans écran (sc2v_fenetre(NULL,
+ *             w, h), banc SC2_SWAPCHAIN=1) par VK_EXT_headless_surface. Jamais la surface NSView de MoltenVK ni le
+ *             minutage d'affichage : ses seuls chemins vers une attente synchrone du fil principal (v3-critique n° 1).
+ *   défauts   SC2_PRESENT absente → mailbox (repli FIFO) ; SC2_BARRE absente → jamais (=1 la force).
+ *   ajouts    sc2v_dladdr (journal [VK] bibliothèque juste malgré l'interposition), sc2v_visible (fenêtre occultée :
+ *             présentation sautée), sc2v_presentees, sc2v_liberer_essai (sortie sans attente du verrou). Déclarés dans
+ *             mac/sc2_mac.h. Pas de copie CPU sur Mac : une bascule fige l'image jusqu'au réarmement par la fenêtre. */
+#define VK_USE_PLATFORM_METAL_EXT
 #endif
 #include <dlfcn.h>
 #include <pthread.h>
@@ -34,6 +46,7 @@
 
 #include "sc2_vk_presente.h"
 #include "sc2_geo.h"
+#include "sc2_barre.h"         /* 21/10 : clavier de raccourcis dans la bande libre */
 #include "sc2_trace_present.h"
 #include "sc2_android.h"
 
@@ -57,7 +70,7 @@ static PFN_vkDestroyImage r_DestroyImage;
     X(vkCmdBlitImage) X(vkQueueSubmit) X(vkQueueWaitIdle) X(vkCreateSemaphore) X(vkDestroySemaphore) \
     X(vkCreateFence) X(vkWaitForFences) X(vkResetFences) X(vkResetCommandBuffer) X(vkCreateBuffer) \
     X(vkGetBufferMemoryRequirements) X(vkAllocateMemory) X(vkBindBufferMemory) X(vkMapMemory) \
-    X(vkCmdCopyImageToBuffer) X(vkCmdCopyBufferToImage)
+    X(vkCmdCopyImageToBuffer) X(vkCmdCopyBufferToImage) X(vkDestroyBuffer) X(vkFreeMemory)   /* 21/10 : tampon de la barre */
 #define DECL(f) static PFN_##f p_##f;
 VKI(DECL) VKD(DECL)
 
@@ -99,6 +112,29 @@ static struct {
     unsigned rearmements; double ood_t0;
 } P;
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* 21/10 : barre de raccourcis (sc2_barre.h). État partagé entre le fil de l'activité (touchers, choix tactile/physique)
+ * et le fil du jeu (disposition et dessin à chaque Present), sous g_barre_mu. SC2_BARRE=0 : jamais ; =1 : toujours,
+ * même avec souris ou clavier ; absente : affichée au toucher, masquée dès qu'une souris ou un clavier physique sert. */
+static pthread_mutex_t g_barre_mu = PTHREAD_MUTEX_INITIALIZER;
+static barre_etat g_be;
+static barre_geo g_bgeo;                 /* disposition du dernier Present : image du jeu ET barre */
+static int g_bvoulue = -1, g_bforce;     /* -1 : SC2_BARRE pas encore lue ; g_bforce -1 jamais, 1 toujours, 0 auto */
+static uint64_t g_n_barre_appuis;
+static struct { VkBuffer b; VkDeviceMemory m; void *p; VkDeviceSize t; unsigned version; int32_t w, h; int bgr, pret; } B;
+static int barre_voulue_lire(void)       /* sous g_barre_mu */
+{
+    if (g_bvoulue < 0) {
+        const char *e = getenv("SC2_BARRE");
+#ifdef __APPLE__
+        g_bforce = e && *e == '1' ? 1 : -1;  /* M5 : pas de tactile sur Mac — absente (ou 0) = jamais, 1 = toujours */
+#else
+        g_bforce = e && *e == '0' ? -1 : e && *e == '1' ? 1 : 0;
+#endif
+        g_bvoulue = g_bforce >= 0;
+    }
+    return g_bvoulue;
+}
 #define ECHECS_SUITE_MAX 5                /* passe 10a : au-delà, bascule copie CPU (jamais de boucle sans fin) */
 #define OOD_TOLERANCE_S 10.0              /* passe 10o : … et seulement si la série dure depuis au moins 10 s */
 #define REARMEMENTS_MAX 8                 /* passe 10o : réarmements de la swapchain sur nouvelle fenêtre */
@@ -124,6 +160,9 @@ static int ext_presente(const VkExtensionProperties *e, uint32_t n, const char *
 
 #ifdef __ANDROID__
 #define EXT_SURFACE_PLATEFORME VK_KHR_ANDROID_SURFACE_EXTENSION_NAME
+#elif defined(__APPLE__)
+/* M5 : CAMetalLayer de la fenêtre (app) ; VK_EXT_headless_surface en plus si MoltenVK l'annonce (banc, sans écran). */
+#define EXT_SURFACE_PLATEFORME VK_EXT_METAL_SURFACE_EXTENSION_NAME
 #else
 /* Banc Linux : le Lavapipe de Debian 12 (Mesa 22.3) n'a pas VK_EXT_headless_surface ; on présente
  * dans une vraie fenêtre X (Xvfb lancé par android/valider-7b-vk.sh) par VK_KHR_xcb_surface. libxcb
@@ -144,6 +183,9 @@ typedef VkResult (VKAPI_PTR *sc2_PFN_vkCreateXcbSurfaceKHR)(VkInstance, const sc
 
 #ifdef __ANDROID__
 static PFN_vkCreateAndroidSurfaceKHR p_vkCreateAndroidSurfaceKHR;
+#elif defined(__APPLE__)
+static PFN_vkCreateMetalSurfaceEXT p_vkCreateMetalSurfaceEXT;          /* M5 : NULL si l'extension n'est pas annoncée */
+static PFN_vkCreateHeadlessSurfaceEXT p_vkCreateHeadlessSurfaceEXT;
 #else
 static sc2_PFN_vkCreateXcbSurfaceKHR p_vkCreateXcbSurfaceKHR;
 static xcb_connection_t *g_xcb; static uint32_t g_xwin;
@@ -158,6 +200,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL m_CreateInstance(const VkInstanceCreateInf
     if (!enumi || enumi(NULL, &n, e) < 0) n = 0;
     const char *ext[64]; uint32_t k = 0;
     for (uint32_t i = 0; i < ci->enabledExtensionCount && k < 60; i++) ext[k++] = ci->ppEnabledExtensionNames[i];
+#ifdef __APPLE__
+    /* M5 : chacune ajoutée si elle est annoncée ; il en faut au moins une (Metal : la fenêtre ; sans écran : le banc) */
+    int metal = ext_presente(e, n, VK_EXT_METAL_SURFACE_EXTENSION_NAME);
+    int sans_ecran = ext_presente(e, n, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+    int ok = ext_presente(e, n, VK_KHR_SURFACE_EXTENSION_NAME) && (metal || sans_ecran);
+    if (!ok) {
+        char l[1024] = ""; size_t o = 0;
+        for (uint32_t i = 0; i < n && o < sizeof l - 80; i++) o += (size_t)snprintf(l + o, sizeof l - o, " %s", e[i].extensionName);
+        sc2_log("[VKP] instance : %s, ou %s et %s, absentes — swapchain indisponible (annoncées :%s)",
+                VK_KHR_SURFACE_EXTENSION_NAME, VK_EXT_METAL_SURFACE_EXTENSION_NAME, VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME, l);
+    }
+    if (ok) {
+        ext[k++] = VK_KHR_SURFACE_EXTENSION_NAME;
+        if (metal) ext[k++] = VK_EXT_METAL_SURFACE_EXTENSION_NAME;
+        if (sans_ecran) ext[k++] = VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME;
+    }
+#else
     int ok = ext_presente(e, n, VK_KHR_SURFACE_EXTENSION_NAME) && ext_presente(e, n, EXT_SURFACE_PLATEFORME);
     if (!ok) {
         char l[1024] = ""; size_t o = 0;
@@ -166,6 +225,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL m_CreateInstance(const VkInstanceCreateInf
                 VK_KHR_SURFACE_EXTENSION_NAME, EXT_SURFACE_PLATEFORME, l);
     }
     if (ok) { ext[k++] = VK_KHR_SURFACE_EXTENSION_NAME; ext[k++] = EXT_SURFACE_PLATEFORME; }
+#endif
     VkInstanceCreateInfo c2 = *ci; c2.enabledExtensionCount = k; c2.ppEnabledExtensionNames = ext;
     VkResult r = r_CreateInstance(&c2, al, out);
     if (r && ok) { sc2_log("[VKP] instance refusée avec les extensions de surface (%d) : sans swapchain", (int)r); ok = 0;
@@ -176,10 +236,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL m_CreateInstance(const VkInstanceCreateInf
         VKI(CHG_I)
 #ifdef __ANDROID__
         p_vkCreateAndroidSurfaceKHR = (PFN_vkCreateAndroidSurfaceKHR)r_gipa(P.inst, "vkCreateAndroidSurfaceKHR");
+#elif defined(__APPLE__)
+        if (metal) p_vkCreateMetalSurfaceEXT = (PFN_vkCreateMetalSurfaceEXT)r_gipa(P.inst, "vkCreateMetalSurfaceEXT");
+        if (sans_ecran)
+            p_vkCreateHeadlessSurfaceEXT = (PFN_vkCreateHeadlessSurfaceEXT)r_gipa(P.inst, "vkCreateHeadlessSurfaceEXT");
 #else
         p_vkCreateXcbSurfaceKHR = (sc2_PFN_vkCreateXcbSurfaceKHR)r_gipa(P.inst, "vkCreateXcbSurfaceKHR");
 #endif
+#ifdef __APPLE__
+        sc2_log("[VKP] instance : %s%s%s ajoutées", VK_KHR_SURFACE_EXTENSION_NAME,
+                metal ? " + " VK_EXT_METAL_SURFACE_EXTENSION_NAME : "",
+                sans_ecran ? " + " VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME : "");
+#else
         sc2_log("[VKP] instance : %s + %s ajoutées", VK_KHR_SURFACE_EXTENSION_NAME, EXT_SURFACE_PLATEFORME);
+#endif
     }
     return r;
 }
@@ -258,6 +328,16 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL m_gipa(VkInstance inst, const ch
     if (!strcmp(nom, "vkGetDeviceProcAddr")) { r_gdpa = (PFN_vkGetDeviceProcAddr)f; return (PFN_vkVoidFunction)m_gdpa; }
     return f;
 }
+#ifdef __APPLE__
+
+/* M5 (point 10) : le backend appelle dladdr(gipa) pour journaliser la bibliothèque qui le fournit (-Ddladdr=sc2v_dladdr,
+ * mac/mac.cmake). Interposé, gipa vaut m_gipa, qui est dans l'exécutable : on rend la bibliothèque du vrai gipa. */
+int sc2v_dladdr(const void *a, Dl_info *i)
+{
+    if (r_gipa && a == (const void *)m_gipa) a = (const void *)r_gipa;
+    return dladdr(a, i);
+}
+#endif
 
 void *__real_dlsym(void *h, const char *nom);
 void *__wrap_dlsym(void *h, const char *nom)
@@ -356,6 +436,29 @@ void sc2v_fenetre(void *fenetre, uint32_t w, uint32_t h)
     P.fenetre = fenetre; P.fw = w; P.fh = h; P.fenetre_changee = 1;
     pthread_mutex_unlock(&g_mu);
 }
+#ifdef __APPLE__
+
+/* M5 — sortie (gestionnaire atexit de l'hôte, mac/sc2_mac_hote.c) : comme sc2v_fenetre(NULL, 0, 0), mais SANS attendre
+ * le verrou. Une faute dans la présentation laisse g_mu tenu par le fil fautif, qui exécute lui-même les gestionnaires
+ * de sortie (sc2_stop → exit) : l'attendre bloquerait la sortie. 0 = libérées ; -1 = verrou tenu, rien n'est touché. */
+int sc2v_liberer_essai(void)
+{
+    if (pthread_mutex_trylock(&g_mu)) return -1;
+    if (P.inst_ok && P.dev_ok) surface_liberer();
+    P.fenetre = NULL; P.fw = P.fh = 0; P.fenetre_changee = 1;
+    pthread_mutex_unlock(&g_mu);
+    return 0;
+}
+
+/* M5 — fenêtre occultée (fil principal, M7) : 0 → la présentation est sautée au Present suivant (sémaphore « rendu »
+ * consommé, ni échec ni bascule ; nextDrawable d'un calque invisible peut attendre). Atomique, sans verrou. */
+static atomic_int g_visible = 1;
+static unsigned g_n_sautees, g_serie_sautees;           /* fil du jeu, sous g_mu */
+void sc2v_visible(int visible) { atomic_store(&g_visible, !!visible); }
+
+/* M5 — frames réellement présentées par la swapchain (fil du jeu) : l'hôte n'arme sa sortie qu'après la 1re. */
+uint64_t sc2v_presentees(void) { return P.presentes; }
+#endif
 
 static int surface_creer(void)           /* sous g_mu */
 {
@@ -364,6 +467,22 @@ static int surface_creer(void)           /* sous g_mu */
     VkAndroidSurfaceCreateInfoKHR si = { .sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR,
                                          .window = (ANativeWindow *)P.fenetre };
     r = p_vkCreateAndroidSurfaceKHR ? p_vkCreateAndroidSurfaceKHR(P.inst, &si, NULL, &P.surf) : VK_ERROR_EXTENSION_NOT_PRESENT;
+#elif defined(__APPLE__)
+    /* M5 (point 5) : CAMetalLayer (fil du jeu : MoltenVK n'appelle le fil principal que pour une NSView) ; sinon surface
+     * sans écran à P.fw × P.fh (currentExtent indéfini : la taille vient de sc2v_fenetre). */
+    const char *genre;
+    if (P.fenetre) {
+        VkMetalSurfaceCreateInfoEXT si = { .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
+                                           .pLayer = (const CAMetalLayer *)P.fenetre };
+        r = p_vkCreateMetalSurfaceEXT ? p_vkCreateMetalSurfaceEXT(P.inst, &si, NULL, &P.surf) : VK_ERROR_EXTENSION_NOT_PRESENT;
+        genre = "Metal (CAMetalLayer)";
+    } else {
+        VkHeadlessSurfaceCreateInfoEXT si = { .sType = VK_STRUCTURE_TYPE_HEADLESS_SURFACE_CREATE_INFO_EXT };
+        r = p_vkCreateHeadlessSurfaceEXT ? p_vkCreateHeadlessSurfaceEXT(P.inst, &si, NULL, &P.surf)
+                                         : VK_ERROR_EXTENSION_NOT_PRESENT;
+        genre = "sans écran (VK_EXT_headless_surface)";
+    }
+    if (!r) sc2_log("[VKP] surface %s créée (%ux%u selon sc2v_fenetre)", genre, P.fw, P.fh);
 #else
     if (!g_xcb) {                                         /* fenêtre X de P.fw × P.fh sur $DISPLAY */
         void *x = dlopen("libxcb.so.1", RTLD_NOW);
@@ -410,6 +529,13 @@ static int surface_creer(void)           /* sous g_mu */
 /* Passe 7o (perf Fold) : SC2_PRESENT=fifo (défaut : vsync, seul mode garanti par Vulkan, cadence de
  * l'écran) | mailbox (latence basse, pas de déchirure, si supporté) | immediate | fifo_relaxed. Un mode non
  * supporté par la surface retombe sur FIFO ; le choix est journalisé une fois. */
+#ifdef __APPLE__
+static const char *mode_nom(VkPresentModeKHR m)          /* M5 (point 9) : le journal donne le mode réel */
+{
+    return m == VK_PRESENT_MODE_FIFO_KHR ? "fifo" : m == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox"
+         : m == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : m == VK_PRESENT_MODE_FIFO_RELAXED_KHR ? "fifo_relaxed" : "?";
+}
+#endif
 static VkPresentModeKHR mode_presentation(void)
 {
     static const struct { const char *nom; VkPresentModeKHR m; } N[] = {
@@ -417,6 +543,9 @@ static VkPresentModeKHR mode_presentation(void)
         { "immediate", VK_PRESENT_MODE_IMMEDIATE_KHR }, { "fifo_relaxed", VK_PRESENT_MODE_FIFO_RELAXED_KHR } };
     const char *e = getenv("SC2_PRESENT");
     VkPresentModeKHR voulu = VK_PRESENT_MODE_FIFO_KHR, m[16]; uint32_t nm = 16;
+#ifdef __APPLE__
+    if (!e) voulu = VK_PRESENT_MODE_MAILBOX_KHR;           /* M5 (point 7) : défaut mailbox sur Mac, repli FIFO plus bas */
+#endif
     for (unsigned i = 0; e && i < sizeof N / sizeof N[0]; i++) if (!strcmp(e, N[i].nom)) voulu = N[i].m;
     if (!p_vkGetPhysicalDeviceSurfacePresentModesKHR || p_vkGetPhysicalDeviceSurfacePresentModesKHR(P.pd, P.surf, &nm, m)) nm = 0;
     int ok = voulu == VK_PRESENT_MODE_FIFO_KHR;
@@ -430,10 +559,19 @@ static VkPresentModeKHR mode_presentation(void)
     }
     VkPresentModeKHR r = ok ? voulu : VK_PRESENT_MODE_FIFO_KHR;
     static int dit;
+#ifdef __APPLE__
+    static char dite[96];                           /* M5 : journalisé à chaque nouvelle liste (surface Metal ≠ sans écran) */
+    if (!dit++ || strcmp(dite, liste)) {
+        snprintf(dite, sizeof dite, "%s", liste);
+        sc2_log("[VKP] mode de présentation %s (SC2_PRESENT=%s%s ; supportés : %s)", mode_nom(r), e ? e : "(défaut mailbox)",
+                r != voulu ? " : non supporté, repli fifo" : "", nm ? liste : "?");
+    }
+#else
     if (!dit++)
         sc2_log("[VKP] mode de présentation %s (SC2_PRESENT=%s ; supportés : %s)",
                 r == VK_PRESENT_MODE_FIFO_KHR ? "fifo" : r == VK_PRESENT_MODE_MAILBOX_KHR ? "mailbox"
                 : r == VK_PRESENT_MODE_IMMEDIATE_KHR ? "immediate" : "fifo_relaxed", e ? e : "(défaut fifo)", nm ? liste : "?");
+#endif
     return r;
 }
 
@@ -479,11 +617,22 @@ static int swapchain_creer(void)         /* sous g_mu */
     P.nimg = 8; p_vkGetSwapchainImagesKHR(P.dev, P.sc, &P.nimg, P.img);
     P.a_refaire = 0; P.tr_cree = tr;
     P.n_crees++;
+#ifdef __APPLE__
+    /* M5 (point 9) : le mode réel (Android garde son texte : les fixtures de verdict-fold lisent « FIFO ») ; currentExtent
+     * brut (0xFFFFFFFF : taille indéfinie, celle de sc2v_fenetre est prise) */
+    sc2_log("[VKP] swapchain %ux%u, format %d, %u images, %s — création n°%llu (%s ; currentExtent 0x%X×0x%X ; rotation "
+            "courante 0x%X, preTransform 0x%X ; usages supportés 0x%X, demandés 0x%X ; compositeAlpha supportés 0x%X, "
+            "choisi 0x%X)", e.width, e.height, (int)choix.format, P.nimg, mode_nom(ci.presentMode),
+            (unsigned long long)P.n_crees, P.motif ? P.motif : "initiale", cap.currentExtent.width, cap.currentExtent.height,
+            (unsigned)cap.currentTransform, (unsigned)tr, (unsigned)cap.supportedUsageFlags, (unsigned)u,
+            (unsigned)cap.supportedCompositeAlpha, (unsigned)ca);
+#else
     sc2_log("[VKP] swapchain %ux%u, format %d, %u images, FIFO — création n°%llu (%s ; rotation courante 0x%X, preTransform 0x%X ; "
             "usages supportés 0x%X, demandés 0x%X ; compositeAlpha supportés 0x%X, choisi 0x%X)",
             e.width, e.height, (int)choix.format, P.nimg, (unsigned long long)P.n_crees, P.motif ? P.motif : "initiale",
             (unsigned)cap.currentTransform, (unsigned)tr, (unsigned)cap.supportedUsageFlags, (unsigned)u,
             (unsigned)cap.supportedCompositeAlpha, (unsigned)ca);
+#endif
     P.motif = NULL;
     return 0;
 }
@@ -591,6 +740,10 @@ static void sous_optimal(const char *ou)
  *   SC2_SWAPCHAIN_TEST_REDIM=<frame> : la fenêtre X passe de P.fw×P.fh à 1920×1080 à cette frame
  *   (redimensionnement réel → une recréation attendue). */
 static int test_subopt = -1, test_redim = -1, test_echec = 1;   /* test_echec 1 : variable pas encore lue */
+#ifdef __APPLE__
+/* M5 (point 6) : pas de fenêtre X sur Mac (SC2_SWAPCHAIN_TEST_REDIM sans effet) ; _SUBOPTIMAL et _ECHEC restent actifs */
+static void banc_redimensionner(unsigned n) { (void)n; (void)test_redim; }
+#else
 static void banc_redimensionner(unsigned n)
 {
     if (test_redim < 0) { const char *e = getenv("SC2_SWAPCHAIN_TEST_REDIM"); test_redim = e ? atoi(e) : 0; }
@@ -604,6 +757,7 @@ static void banc_redimensionner(unsigned n)
     sc2v_taille_changee();                                              /* = APP_CMD_WINDOW_RESIZED de l'APK */
     sc2_log("[VKP] banc : SC2_SWAPCHAIN_TEST_REDIM — fenêtre X redimensionnée en 1920x1080 à la frame %u", n);
 }
+#endif
 #endif
 
 /* ---- passe 10r (v13) : deux frames en vol côté backend (sc2_d3d9v.c) ------------------------------------------------
@@ -649,6 +803,54 @@ void sc2v_consommer_rendu(void)                       /* __wrap_d3dv_present : p
     pthread_mutex_unlock(&g_mu);
 }
 
+void sc2v_barre_voulue(int v)
+{
+    pthread_mutex_lock(&g_barre_mu);
+    barre_voulue_lire();
+    if (!g_bforce && g_bvoulue != !!v) {
+        g_bvoulue = !!v;
+        sc2_log("[BARRE] %s", v ? "affichée (toucher)" : "masquée (souris ou clavier physique)");
+    }
+    pthread_mutex_unlock(&g_barre_mu);
+}
+int sc2v_barre_geo(barre_geo *g)
+{
+    pthread_mutex_lock(&g_barre_mu); *g = g_bgeo; pthread_mutex_unlock(&g_barre_mu);
+    return g->jeu.w ? 0 : -1;
+}
+int sc2v_barre_appuyer(int32_t sx, int32_t sy, uint16_t *vk, uint8_t *bas, int max)
+{
+    int n = -1;
+    pthread_mutex_lock(&g_barre_mu);
+    if (barre_dedans(&g_bgeo, sx, sy)) {
+        int k = barre_toucher(&g_bgeo, g_be.page, sx, sy);
+        n = 0;
+        if (k >= 0) { n = barre_appuyer(&g_be, barre_def_de(g_be.page, k), vk, bas, max); g_n_barre_appuis++; }
+    }
+    pthread_mutex_unlock(&g_barre_mu);
+    return n;
+}
+/* Tampon hôte de la barre, redessiné seulement quand elle change (état, taille, ordre des canaux). Sous g_mu, APRÈS
+ * fence_precedente : la copie de la frame d'avant est finie, le tampon peut être réécrit. 0 = prêt. */
+static int barre_preparer(const barre_geo *g, const barre_etat *e)
+{
+    VkDeviceSize t = (VkDeviceSize)g->barre.w * (VkDeviceSize)g->barre.h * 4;
+    int bgr = P.sfmt == VK_FORMAT_B8G8R8A8_UNORM;
+    if (t > B.t) {
+        if (B.b) { p_vkDestroyBuffer(P.dev, B.b, NULL); p_vkFreeMemory(P.dev, B.m, NULL); B.b = VK_NULL_HANDLE; }
+        B.t = 0; B.pret = 0;
+        if (tampon_hote(t, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &B.b, &B.m, &B.p)) return -1;
+        B.t = t;
+        sc2_log("[BARRE] tampon %dx%d (%llu octets), bande %s", g->barre.w, g->barre.h, (unsigned long long)t,
+                g->verticale ? "à droite" : "en bas");
+    }
+    if (!B.pret || B.version != e->version || B.w != g->barre.w || B.h != g->barre.h || B.bgr != bgr) {
+        barre_dessiner((uint8_t *)B.p, g, e, bgr);
+        B.pret = 1; B.version = e->version; B.w = g->barre.w; B.h = g->barre.h; B.bgr = bgr;
+    }
+    return 0;
+}
+
 int sc2v_presenter(int id, unsigned n)
 {
     if (!sc2v_actif() || id < 0 || id >= 256 || !P.c[id].img) return -1;
@@ -657,6 +859,18 @@ int sc2v_presenter(int id, unsigned n)
     VkSemaphore rendu = (VkSemaphore)(uintptr_t)d3dv_semaphore_rendu();   /* passe 10r (v13) : consommé sur tous les chemins */
     int en_vol = d3dv_en_vol();
     if (fence_precedente(n)) goto fin;                  /* passe 10r (v13) : la frame précédente, plus la nôtre */
+#ifdef __APPLE__
+    if (!atomic_load(&g_visible)) {                     /* M5 : fenêtre occultée — rien d'acquis, « rendu » consommé à fin */
+        g_n_sautees++;
+        if (!g_serie_sautees++) sc2_log("[AFFICHAGE] présentation suspendue (fenêtre occultée) au Present n°%u", n);
+        rc = 0; goto fin;
+    }
+    if (g_serie_sautees) {
+        sc2_log("[AFFICHAGE] présentation reprise au Present n°%u après %u Present sautés (fenêtre occultée)", n,
+                g_serie_sautees);
+        g_serie_sautees = 0;
+    }
+#endif
     static VkFormat verifie; static int blit_ok;
     if (verifie != P.c[id].fmt) {                            /* le blit exige BLIT_SRC sur le format du back buffer */
         VkFormatProperties fp; p_vkGetPhysicalDeviceFormatProperties(P.pd, P.c[id].fmt, &fp);
@@ -696,7 +910,13 @@ int sc2v_presenter(int id, unsigned n)
     /* rectangle de destination : rapport du back buffer conservé, centré (bandes noires) */
     uint32_t sw = P.c[id].w, sh = P.c[id].h, dw = P.ext.width, dh = P.ext.height, rw, rh;
     int32_t ox, oy;
-    sc2_geo_ajuster(sw, sh, dw, dh, &ox, &oy, &rw, &rh);   /* passe 7o : le calcul que vers_jeu inverse */
+    /* passe 7o : le calcul que vers_jeu inverse ; 21/10 : image calée en haut ou à gauche quand la barre occupe la bande */
+    pthread_mutex_lock(&g_barre_mu);
+    barre_geo bg = barre_disposer(sw, sh, dw, dh, barre_voulue_lire());
+    g_bgeo = bg; barre_etat be = g_be;
+    pthread_mutex_unlock(&g_barre_mu);
+    ox = bg.jeu.x; oy = bg.jeu.y; rw = (uint32_t)bg.jeu.w; rh = (uint32_t)bg.jeu.h;
+    int barre = bg.active && !barre_preparer(&bg, &be);
     atomic_store(&g_rect, ((uint64_t)sw << 48) | ((uint64_t)sh << 32) | ((uint64_t)dw << 16) | dh);
 
     VkImage dst = P.img[k];
@@ -731,6 +951,12 @@ int sc2v_presenter(int id, unsigned n)
                        .srcOffsets = { { 0, 0, 0 }, { (int32_t)sw, (int32_t)sh, 1 } },
                        .dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
                        .dstOffsets = { { ox, oy, 0 }, { ox + (int32_t)rw, oy + (int32_t)rh, 1 } } };
+    if (barre) {                     /* 21/10 : la barre dans sa bande (hors du rectangle du blit : pas de barrière) */
+        VkBufferImageCopy bc = { .bufferRowLength = (uint32_t)bg.barre.w, .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+                                 .imageOffset = { bg.barre.x, bg.barre.y, 0 },
+                                 .imageExtent = { (uint32_t)bg.barre.w, (uint32_t)bg.barre.h, 1 } };
+        p_vkCmdCopyBufferToImage(P.cb, B.b, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bc);
+    }
     /* Le back buffer est en GENERAL (backend 5c/5d) et le backend a attendu sa file : lisible. */
     p_vkCmdBlitImage(P.cb, P.c[id].img, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &bl, VK_FILTER_LINEAR);
     /* mêmes frames que les PPM du backend (1, 10, 100, 200…) : comparaison canal par canal */
@@ -868,8 +1094,13 @@ void sc2v_bilan(char *o, size_t cap)
     else snprintf(etat, sizeof etat, "%s", sc2v_actif() ? "active" : P.voulu ? "DEMANDÉE mais indisponible" : "inactive");
     snprintf(o, cap, "swapchain %s : %llu frames présentées par le GPU, %llu repli(s) sur la copie CPU ; créée %llu fois "
              "(OUT_OF_DATE %llu, redimensionnements %llu), SUBOPTIMAL ignorés %llu ; bandes seules %llu ; vkWaitForFences en échec %llu ; "
-             "acquisitions en échec %llu ; réarmements après bascule %u", etat,
+             "acquisitions en échec %llu ; réarmements après bascule %u ; barre de raccourcis : %llu appui(s)", etat,
              (unsigned long long)P.presentes, (unsigned long long)P.echecs, (unsigned long long)P.n_crees,
              (unsigned long long)P.n_ood, (unsigned long long)P.n_redim, (unsigned long long)P.n_subopt_ignores,
-             (unsigned long long)P.n_bandes, (unsigned long long)P.n_fence_ko, (unsigned long long)P.n_acq_ko, P.rearmements);
+             (unsigned long long)P.n_bandes, (unsigned long long)P.n_fence_ko, (unsigned long long)P.n_acq_ko, P.rearmements,
+             (unsigned long long)g_n_barre_appuis);
+#ifdef __APPLE__
+    size_t l = cap ? strlen(o) : 0;                      /* M5 : sc2v_visible(0) */
+    if (l + 1 < cap) snprintf(o + l, cap - l, " ; présentations sautées (fenêtre occultée) %u", g_n_sautees);
+#endif
 }

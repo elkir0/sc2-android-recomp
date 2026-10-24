@@ -15,7 +15,8 @@ import java.util.List;
  *         android/src/test/CatalogueTest.java          (EtatInstall : vérif 9, passe 10g ; ou bash android/test-javac.sh)
  *   java -cp <classes> fr.sc2partout.CatalogueTest android/src/test/reference <dossier de travail vide>
  *
- * Références (android/src/test/reference/) écrites à la main (printf), au format de android/DONNEES-INSTALL.md §4 :
+ * Références (android/src/test/reference/) écrites à la main (printf), au format de android/DONNEES-INSTALL.md §4
+ * (V4.10 : sc2.env.escarmouche, escarmouche contre l'IA) :
  * sc2.env produit comparé OCTET À OCTET. Sortie : une ligne OK/ÉCHEC par vérification, code 1 au moindre échec.
  */
 public final class CatalogueTest {
@@ -86,7 +87,7 @@ public final class CatalogueTest {
         verifier(l3.cartes.size() == 33 && l3.cartes.get(10).chemin.equals("Maps/Campaign/TRaynor01.SC2Map") && l3.cartes.get(10).dansArchive,
                  "archive : 33 cartes, TRaynor01 → Maps/Campaign/TRaynor01.SC2Map");
 
-        // 4. robustesse : install absente (et /sdcard absent du devbox) → liste vide + message, pas d'exception
+        // 4. robustesse : install absente (et /sdcard absent du serveur Linux) → liste vide + message, pas d'exception
         Catalogue.Liste l4 = Catalogue.lister(new File(w, "absente"));
         verifier(l4.cartes.isEmpty() && l4.message != null, "install absente : liste vide + message (« " + l4.message + " »)");
         Catalogue.Liste l5 = Catalogue.lister(new File("/sdcard/SC2Partout/install"));
@@ -170,6 +171,45 @@ public final class CatalogueTest {
                 ? " : COMPLET, menu et cartes autorisés, 33 cartes de l'archive, sc2.env TRaynor01 = référence"
                 : " : PARTIEL, menu autorisé, cartes grisées (Liberty + LibertyMulti Base.SC2Data absents), 33 cartes, sc2.env = référence"));
         }
+
+        // 10. V4.10 — escarmouche contre l'IA : catalogue des 63 cartes mêlée (ordre et n° de SC2_ESCARMOUCHE=liste), sc2.env
+        //     écrit = référence octet à octet, présélection relue dans un sc2.env, garde sur l'archive du cache.
+        List<Catalogue.Melee> m = Catalogue.cartesMelee();
+        int[] parJoueurs = new int[9];
+        for (Catalogue.Melee x : m) parJoueurs[x.joueurs]++;
+        System.out.println("  mêlée : " + m.size() + " cartes, " + m.get(0).libelle() + " … " + m.get(m.size() - 1).libelle()
+            + " ; n° 13 = " + m.get(12).nom + " ; par joueurs 2/3/4/6/8 = " + parJoueurs[2] + "/" + parJoueurs[3] + "/"
+            + parJoueurs[4] + "/" + parJoueurs[6] + "/" + parJoueurs[8]);
+        verifier(m.size() == 63 && Catalogue.JOUEURS_MELEE.length == Catalogue.CARTES_MELEE.length
+                 && m.get(0).nom.equals("AgriaValley") && m.get(62).nom.equals("ToxicSlums") && m.get(62).numero == 63,
+                 "mêlée : 63 cartes, AgriaValley … ToxicSlums (n° 63)");
+        verifier(m.get(12).nom.equals(Catalogue.MELEE_DEFAUT) && m.get(12).joueurs == 2 && m.get(12).numero == 13
+                 && m.get(22).nom.equals("LostTemple") && m.get(22).joueurs == 4,
+                 "mêlée : n° 13 SteppesofWar (2 joueurs, défaut), n° 23 LostTemple (4 joueurs)");
+        verifier(parJoueurs[2] == 15 && parJoueurs[3] == 1 && parJoueurs[4] == 25 && parJoueurs[6] == 11 && parJoueurs[8] == 11,
+                 "mêlée : 15 cartes à 2, 1 à 3, 25 à 4, 11 à 6, 11 à 8");
+        boolean ordre = true;
+        for (int i = 1; i < m.size(); i++) {
+            Catalogue.Melee pr = m.get(i - 1), sv = m.get(i);
+            ordre &= pr.joueurs < sv.joueurs || (pr.joueurs == sv.joueurs && pr.nom.compareToIgnoreCase(sv.nom) < 0);
+        }
+        verifier(ordre, "mêlée : ordre (joueurs, nom) de SC2_ESCARMOUCHE=liste");
+        Catalogue.ecrire(env, Catalogue.contenuEscarmouche("SteppesofWar", "terran", "zerg", "facile"));
+        verifier(memesOctets(env, new File(ref, "sc2.env.escarmouche")), "sc2.env escarmouche = référence octet à octet (sans SC2_ARGS)");
+        String lu = Catalogue.lireEnv(env);
+        verifier("SteppesofWar".equals(Catalogue.valeurEnv(lu, "SC2_ESCARMOUCHE")) && "zerg".equals(Catalogue.valeurEnv(lu, "SC2_ESCARMOUCHE_RACE_IA"))
+                 && Catalogue.valeurEnv(lu, "SC2_ARGS") == null && Catalogue.valeurEnv(null, "SC2_ESCARMOUCHE") == null,
+                 "valeurEnv : valeurs relues, clé absente ou contenu null → null");
+        verifier("b".equals(Catalogue.valeurEnv("CLE_X=a\r\n# CLE_X=c\nCLE_X=b\n", "CLE_X")), "valeurEnv : la dernière ligne l'emporte, # ignoré, CRLF");
+        verifier(Catalogue.indiceMelee("lostTEMPLE", 0) == 22 && Catalogue.indiceMelee("Inconnue", 12) == 12 && Catalogue.indiceMelee(null, 5) == 5,
+                 "indiceMelee : sans casse, défaut si inconnue ou null");
+        verifier(Catalogue.indice(Catalogue.RACES, "Protoss", 0) == 2 && Catalogue.indice(Catalogue.RACES, "orc", 3) == 3
+                 && Catalogue.indice(Catalogue.DIFFICULTES, "dement", 1) == 5 && Catalogue.DIFFICULTES.length == 6,
+                 "indice : races et difficultés (6 niveaux, dement = 5)");
+        File i10 = new File(w, "install10");
+        verifier(!Catalogue.escarmoucheDisponible(i10), "cache des cartes mêlée absent → escarmouche indisponible");
+        creux(new File(i10, Catalogue.ARCHIVE_MELEE), 1024);
+        verifier(Catalogue.escarmoucheDisponible(i10), "cache des cartes mêlée présent → escarmouche disponible");
 
         System.out.println("== " + oks + " OK, " + echecs + " échec(s)");
         System.exit(echecs == 0 ? 0 : 1);

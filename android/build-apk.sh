@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# android/build-apk.sh — passe 9m : APK du devbox aux drapeaux canon du M4 (build-apk-mac.sh) :
+# android/build-apk.sh — passe 9m : APK du serveur Linux aux drapeaux canon du M4 (build-apk-mac.sh) :
 #   lib native sous lib/arm64-v8a/ et rangée SANS compression (zip -X -0, « Stored »), comme l'APK du Fold.
 # Construit par scripts/build-apk.sh (inchangé : .so, gardes lift, manifest, assets, signature, contrôles), puis
-# réemballe la .so en Stored, réaligne (zipalign -P 16, 4), re-signe (keystore de debug) et revérifie.
+# réemballe la .so en Stored, réaligne (zipalign -P 16, 4), re-signe (clé de debug) et revérifie.
 #
 #   SC2_APK_SWAPCHAIN=1 android/build-apk.sh          variante swapchain (android/build-vk/)
 #   SC2_APK_LIFT_OPT / SC2_APK_API / SC2_APK_LDFLAGS : variantes, voir scripts/apk-variante.sh

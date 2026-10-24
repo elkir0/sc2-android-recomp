@@ -84,7 +84,7 @@ apk)
 adb)
   cmd "adb devices"
   if command -v adb > /dev/null; then adb devices 2>&1 | sed 's/^/  /' | tee -a "$L"
-  else j "  adb absent du devbox : test émulateur (logcat [AUDIO] FMOD logiciel + flux AAudio) par la supervision"; fi
+  else j "  adb absent du serveur Linux : test émulateur (logcat [AUDIO] FMOD logiciel + flux AAudio) par la supervision"; fi
   ;;
 esac; done
 j "free -h APRÈS : $(free -h | awk '/Mem:/{print $3" utilisés / "$7" dispo"}')"

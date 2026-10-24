@@ -22,7 +22,7 @@
 #   - pas de -z stacksize : le fil du jeu est créé avec 16 Mo de pile (la fibre de boot en a 64).
 # =============================================================================
 
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)   # V0.3 : $<LINK_LIBRARY:WHOLE_ARCHIVE,…> (3.24)
 project(sc2-partout-android VERSION 0.7.0 LANGUAGES C CXX ASM)
 
 set(CMAKE_C_STANDARD 17)
@@ -46,9 +46,12 @@ set(RUNTIME_SOURCES
     ${R}/runtime/sc2_iat_p4.c
     ${R}/runtime/sc2_d3d9.c
     ${R}/runtime/sc2_d3d9v.c
+    ${R}/runtime/sc2_spv_pack.c     # passe 10t : pack SPIR-V externe sc2-spirv.pak (mmap), consulté si la table embarquée manque un shader
     ${R}/runtime/win32_compat.c
     ${R}/runtime/stubs_sc2.c
     ${R}/runtime/sc2_input_sim.c     # passe 7d : entrées (API 5f) — le tactile y est injecté
+    ${R}/runtime/sc2_documents.c     # passe 10t : Banks/ et Saves/ persistants (SC2_DOCUMENTS)
+    ${R}/runtime/sc2_escarmouche.c   # V4.10 : escarmouche contre l'IA (SC2_ESCARMOUCHE), carte mêlée dérivée (StormLib)
     # passe 7e : FMOD Ex logiciel du runtime (5e/5g) — sans lui, le jeu reboucle sur
     # FMOD_System_Create → FMOD_ERR_OUTPUT_INIT (logcat émulateur M4, retest 7c)
     ${R}/runtime/sc2_audio_fmod.c
@@ -70,19 +73,16 @@ else()
     set(SC2_VIDEO_OGV OFF)
     message(WARNING "vidéo .ogv (passe 7x2) : ${THEORA_ANDROID}/lib/lib{theoradec,ogg}.a absentes (scripts/theora-android.sh) — sc2_video.c non compilé")
 endif()
-# Passe 10r : réécritures optionnelles du lift dans le dossier de build (SC2_APPELS_DIRECTS…), cmake/passes_lift.cmake.
-include(${R}/cmake/passes_lift.cmake)
-sc2_passes_lift(${R} ${CMAKE_CURRENT_SOURCE_DIR}/.. LIFTED_SOURCES)
-if(NOT LIFTED_SOURCES)
-    message(FATAL_ERROR "aucun ${R}/src/lifted/recomp_*.c")
-endif()
-
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/cpu_delta.cmake)
 sc2_cpu_delta(${R} CPU_DELTA)
 
-set(SC2_LIFTED_OPT "-O0" CACHE STRING "Optimisation du code lifté (comme le build Linux)")
-set_source_files_properties(${LIFTED_SOURCES} PROPERTIES COMPILE_OPTIONS
-    "-w;${SC2_LIFTED_OPT};-include;${R}/runtime/sc2_lifted.h;-include;${CPU_DELTA}")
+# Passe 10r : réécritures optionnelles du lift dans le dossier de build (SC2_APPELS_DIRECTS…), cmake/passes_lift.cmake.
+# V0.3 : objets du lift dans la bibliothèque statique sc2_lifted (${R}/cmake/lift_drapeaux.cmake : SC2_LIFTED_OPT, -O0 par
+# défaut comme le build Linux ; -include sc2_lifted.h puis cpu.h delta-propre ; -fsigned-char ; PIC), compilée ici ou
+# prise dans le cache Android partagé (-DSC2_LIFTED_PREBUILT=<entrée>/libsc2_lifted.a : scripts/cache-lift.sh construire
+# android, que android/build-apk-mac.sh consomme), contrôlée par scripts/garde-lift.sh cache.
+include(${R}/cmake/lift_objets.cmake)
+sc2_lift_objets(${R} ${CMAKE_CURRENT_SOURCE_DIR}/.. PLATEFORME android CPU_DELTA ${CPU_DELTA})
 # Runtime écrit à la main : bionic sans ucontext complet → déclarations forcées.
 # -O2 explicite (le build Linux de référence est à -O0 ; -O3 de Release est évité).
 set(SC2_RUNTIME_OPT "-O2" CACHE STRING "Optimisation du runtime écrit à la main")
@@ -98,7 +98,8 @@ set(STORM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${STORMLIB_DIR} stormlib EXCLUDE_FROM_ALL)
 target_compile_options(storm PRIVATE -w)
-set_property(SOURCE ${R}/runtime/sc2_mpq.c ${R}/runtime/sc2_audio_mpq.c ${R}/runtime/sc2_video.c APPEND PROPERTY INCLUDE_DIRECTORIES "${STORMLIB_DIR}/src")
+set_property(SOURCE ${R}/runtime/sc2_mpq.c ${R}/runtime/sc2_audio_mpq.c ${R}/runtime/sc2_video.c ${R}/runtime/sc2_escarmouche.c
+             APPEND PROPERTY INCLUDE_DIRECTORIES "${STORMLIB_DIR}/src")
 # décodeur Ogg Vorbis tiers (stb_vorbis) : avertissements coupés, comme dans le build Linux
 set_property(SOURCE ${R}/runtime/sc2_audio_stb_vorbis.c APPEND PROPERTY COMPILE_OPTIONS "-w")
 
@@ -115,7 +116,6 @@ add_library(SC2Partout SHARED
     ${J}/sc2_ucontext_aarch64.S
     ${J}/sc2_audio_android.c         # passe 7e : sortie AAudio (anneau + rappel)
     ${RUNTIME_SOURCES}
-    ${LIFTED_SOURCES}
 )
 # src/shaders : table SPIR-V des shaders du jeu (passe 5d, générée hors git) ; absente → draws « lumière ».
 target_include_directories(SC2Partout PRIVATE ${J} ${R}/src ${R}/runtime ${R}/src/lifted ${R}/src/shaders)
@@ -123,6 +123,8 @@ if(NOT EXISTS "${R}/src/shaders/sc2_shaders_spv.h")
     message(WARNING "${R}/src/shaders/sc2_shaders_spv.h absente : l'APK n'aura que les draws « lumière » (cf. src/shaders/README.md)")
 endif()
 target_compile_options(SC2Partout PRIVATE $<$<COMPILE_LANGUAGE:C>:-Wall>)
+# V0.3 : archive du lift liée EN ENTIER (--whole-archive : mêmes objets qu'avant, dans l'ordre des sources)
+target_link_libraries(SC2Partout PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,sc2_lifted>")
 target_link_libraries(SC2Partout PRIVATE native_app_glue StormLib::storm android log dl m aaudio)   # aaudio : API 26+
 if(SC2_VIDEO_OGV)   # passe 7x2 : ordre theoradec puis ogg (theoradec appelle oggpack_*)
     target_include_directories(SC2Partout PRIVATE ${THEORA_ANDROID}/include)
@@ -137,6 +139,9 @@ target_link_options(SC2Partout PRIVATE
     -Wl,-z,max-page-size=16384                     # appareils à pages de 16 Ko (Android 15+)
     -Wl,--no-undefined
 )
+# V0.3 : édition de liens de la .so sous le verrou edl (2 jetons, scripts/verrou.sh), recomp-sc2/cmake/verrous.cmake.
+include(${R}/cmake/verrous.cmake)
+sc2_verrou_edl(${CMAKE_CURRENT_SOURCE_DIR}/.. SC2Partout)
 
 # ---- passe 9s : cinématiques H.264 matérielles (runtime/video_amc.c, AMediaCodec), option ---------------------
 # ON par défaut : compilé et lié, INACTIF tant que sc2.env ne pose pas SC2_VIDEO_AMC=1 (chaque accroche appelle alors
@@ -146,7 +151,8 @@ option(SC2_VIDEO_AMC "Cinématiques H.264 décodées par AMediaCodec (SC2_VIDEO_
 if(SC2_VIDEO_AMC)
     set(VIDEO_AMC_FONCTIONS L_00C73940 L_01093B70 L_01093C60 L_01093CB0 L_01093810)
     foreach(f ${VIDEO_AMC_FONCTIONS})
-        execute_process(COMMAND grep -lq "^void ${f}(CPU [*]c)" ${LIFTED_SOURCES} RESULT_VARIABLE r OUTPUT_QUIET ERROR_QUIET)
+        # SC2_LIFTED_SOURCES (cmake/lift_objets.cmake) : lift transformé, ou canonique en mode précompilé
+        execute_process(COMMAND grep -lq "^void ${f}(CPU [*]c)" ${SC2_LIFTED_SOURCES} RESULT_VARIABLE r OUTPUT_QUIET ERROR_QUIET)
         if(NOT r EQUAL 0)
             message(FATAL_ERROR "SC2_VIDEO_AMC : ${f} absente du lift (${R}/src/lifted) — relifter ou -DSC2_VIDEO_AMC=OFF")
         endif()

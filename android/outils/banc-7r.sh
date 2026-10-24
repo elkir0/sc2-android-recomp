@@ -2,7 +2,7 @@
 # Passe 7r — banc ÉMULATEUR complet (AVD sc2partout du Mac mini M4) ou appareil (Fold) : APK neuf, données,
 # run « menu » (titre → menu de campagne) et run « mission » (-run TRaynor01 : titre → chargement), captures
 # aux phases, FPS PAR PHASE (baseline du Fold), [BILAN] du runtime, rapport. À lancer CÔTÉ MAC (adb ; le
-# devbox n'en a pas). Compatible bash 3.2 (macOS) et Linux.
+# serveur Linux n'en a pas). Compatible bash 3.2 (macOS) et Linux.
 #
 #   android/outils/banc-7r.sh <apk> [sortie=./banc-7r-<date>]
 #

@@ -12,5 +12,7 @@
 int  sc2aa_demarrer(void);
 /* Arrêt propre (idempotent) : consommateur retiré, flux fermé, bilan [AUDIO] Android imprimé. */
 void sc2aa_arreter(void);
+/* 21/10 : 1 = flux de sortie en pause (jeu suspendu en arrière-plan), 0 = repris. */
+void sc2aa_pause(int pause);
 
 #endif

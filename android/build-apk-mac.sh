@@ -1,6 +1,6 @@
 #!/bin/bash
 # build-apk-mac.sh — chaîne APK 100 % locale M4 (écrite par Reverso-SC2 le 16/10
-# après l'asphyxie réseau du devbox). Remplace build-apk.sh (devbox) pour le Mac.
+# après l'asphyxie réseau du serveur Linux). Remplace build-apk.sh (serveur Linux) pour le Mac.
 # Sortie : artifacts-mac/sc2-partout-mac.apk (signé debug)
 set -euo pipefail
 RACINE="$(cd "$(dirname "$0")/.." && pwd)"     # sc2-partout-mac/
@@ -18,9 +18,9 @@ D8=$BT/d8
 ZIPALIGN=$BT/zipalign
 APKSIGNER=$BT/apksigner
 API=34
-# Passe 10r : variantes, comme scripts/apk-variante.sh côté devbox. SC2_APK_LIFT_OPT (défaut -O0), SC2_APK_API (défaut 34
-# ici), SC2_APK_LDFLAGS ; dossier et APK suffixés hors défauts. SC2_KEYSTORE : clé de signature (défaut
-# artifacts-mac/debug.keystore) ; celle du devbox permet de mettre à jour une APK du devbox sans désinstaller.
+# Passe 10r : variantes, comme scripts/apk-variante.sh côté serveur Linux. SC2_APK_LIFT_OPT (défaut -O0), SC2_APK_API (défaut 34
+# ici), SC2_APK_LDFLAGS ; dossier et APK suffixés hors défauts. SC2_KEYSTORE : clé de signature (défaut :
+# clé de debug générée dans artifacts-mac/) ; celle du serveur Linux permet de mettre à jour une APK du serveur Linux sans désinstaller.
 API="${SC2_APK_API:-34}"
 LIFT_OPT="${SC2_APK_LIFT_OPT:--O0}"
 LDFLAGS_APK="${SC2_APK_LDFLAGS:-}"
@@ -35,6 +35,7 @@ if [ "${SC2_APK_DRAPEAUX_MORTS:-0}" = 1 ]; then SUF="$SUF-dm"; OPT_AD="$OPT_AD -
 if [ "${SC2_APK_REGISTRES_LOCAUX:-$OPTIM}" = 1 ]; then SUF="$SUF-rl"; OPT_AD="$OPT_AD -DSC2_REGISTRES_LOCAUX=ON"; else OPT_AD="$OPT_AD -DSC2_REGISTRES_LOCAUX=OFF"; fi
 if [ "${SC2_APK_RL_VIVACITE:-0}" = 1 ]; then SUF="$SUF-v"; OPT_AD="$OPT_AD -DSC2_RL_VIVACITE=ON"; else OPT_AD="$OPT_AD -DSC2_RL_VIVACITE=OFF"; fi
 if [ "${SC2_APK_RL_X87:-$OPTIM}" = 1 ]; then SUF="$SUF-x87"; OPT_AD="$OPT_AD -DSC2_RL_X87=ON"; else OPT_AD="$OPT_AD -DSC2_RL_X87=OFF"; fi
+if [ "${SC2_APK_RL_SSE:-0}" = 1 ]; then SUF="$SUF-sse"; OPT_AD="$OPT_AD -DSC2_RL_SSE=ON"; else OPT_AD="$OPT_AD -DSC2_RL_SSE=OFF"; fi
 BUILD="$AND/build-mac$SUF"
 NOM="sc2-partout-mac$SUF"
 # SC2_APK_SWAPCHAIN=1 : compile la presentation par swapchain (-DSC2_SWAPCHAIN=ON,
@@ -49,14 +50,31 @@ rm -f "$OUT/$NOM.apk" "$OUT/$NOM-BANC-lift-perime.apk"   # passe 10p : jamais l'
 GARDE="$RACINE/scripts/garde-lift.sh"
 [ -x "$GARDE" ] || { echo "GARDE LIFT : $GARDE absent — resynchroniser scripts/ depuis le canon ; build refusé"; exit 1; }
 BANC=0; rc_garde=0; "$GARDE" sources "$RECOMP/src/lifted" || rc_garde=$?
-case $rc_garde in 0) ;; 2) BANC=1 ;; *) echo "→ resynchroniser recomp-sc2/src/lifted depuis le canon (devbox) avant de construire"; exit 1 ;; esac
+case $rc_garde in 0) ;; 2) BANC=1 ;; *) echo "→ resynchroniser recomp-sc2/src/lifted depuis le canon (serveur Linux) avant de construire"; exit 1 ;; esac
+
+# V0.3 : lift précompilé du cache Android partagé (scripts/cache-lift.sh, ~/dev/sc2-lift-cache/android-<empreinte>/) :
+# compilé UNE fois par empreinte (lift, en-têtes, passes, options ci-dessous, NDK), sous le verrou build-lift, puis lié
+# ici ; l'édition de liens de la .so prend un jeton du verrou edl (recomp-sc2/cmake/verrous.cmake). SC2_APK_SANS_CACHE=1 :
+# lift compilé dans $BUILD, comme avant, sous le verrou build-lift.
+OPT_LIFT=(-DCMAKE_BUILD_TYPE=Release -DSC2_LIFTED_OPT="${LIFT_OPT// /;}" -DANDROID_PLATFORM=android-$API -DANDROID_NDK="$NDK" $OPT_AD)
+VERROU_LIFT=()
+if [ "${SC2_APK_SANS_CACHE:-0}" = 1 ]; then
+  PREBUILT=""; VERROU_LIFT=("$RACINE/scripts/verrou.sh" build-lift)
+  echo "[0/5] lift compilé dans le build de l'APK (SC2_APK_SANS_CACHE=1)"
+else
+  echo "[0/5] lift précompilé : cache Android (scripts/cache-lift.sh construire android)..."
+  PREBUILT="$("$RACINE/scripts/cache-lift.sh" construire android "${OPT_LIFT[@]}" | tail -1)"
+  [ -f "$PREBUILT" ] || { echo "cache de lift Android : aucune archive (ci-dessus) — APK refusé"; exit 1; }
+  echo "   lift : $PREBUILT"
+fi
 
 echo "[1/5] CMake + compilation aarch64-linux-android (NDK r28c)..."
 cmake -S "$AND" -B "$BUILD" -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
       -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-$API \
       -DRECOMP_DIR="$RECOMP" -DCMAKE_BUILD_TYPE=Release ${SC2_APK_SWAPCHAIN:+-DSC2_SWAPCHAIN=ON} \
-      -DSC2_LIFTED_OPT="${LIFT_OPT// /;}" -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS_APK" $OPT_AD > "$OUT/cmake.log" 2>&1 || { tail -20 "$OUT/cmake.log"; exit 1; }
-cmake --build "$BUILD" -j"${JOBS:-8}" > "$OUT/build.log" 2>&1 || { tail -20 "$OUT/build.log"; exit 1; }
+      -DSC2_LIFTED_OPT="${LIFT_OPT// /;}" -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS_APK" $OPT_AD \
+      -DSC2_LIFTED_PREBUILT="$PREBUILT" > "$OUT/cmake.log" 2>&1 || { tail -20 "$OUT/cmake.log"; exit 1; }
+${VERROU_LIFT[@]+"${VERROU_LIFT[@]}"} cmake --build "$BUILD" -j"${JOBS:-8}" > "$OUT/build.log" 2>&1 || { tail -20 "$OUT/build.log"; exit 1; }
 SO=$(find "$BUILD" -name "libSC2Partout.so" | head -1)
 [ -n "$SO" ] || { echo "libSC2Partout.so introuvable"; exit 1; }
 echo "   .so : $SO ($(du -h "$SO" | cut -f1))"
@@ -67,7 +85,7 @@ case $rc_garde in 0) ;; 2) BANC=1 ;; *) exit 1 ;; esac
 
 echo "[2/5] Ressources + assets (aapt2)..."
 $AAPT2 compile --dir "$AND/res" -o "$BUILD/res.zip" 2>/dev/null || $AAPT2 compile --dir "$AND/res" -o "$BUILD/res.zip"
-# Passe 9g etape 2 (trou T2) : l APK Mac embarque enfin les assets que le devbox posait
+# Passe 9g etape 2 (trou T2) : l APK Mac embarque enfin les assets que le serveur Linux posait
 # via scripts/build-apk.sh — inits-stricts.txt (lu par la glue -> SC2_STRICT_INITS) et
 # polices Liberation (SIL OFL, repli metrique d Arial/Times/Courier -> SC2_POLICES).
 ASSETS="$BUILD/assets"; rm -rf "$ASSETS"; mkdir -p "$ASSETS/polices"
@@ -78,6 +96,22 @@ if [ -d "$AND/assets/polices" ]; then
   cp "$AND/assets/polices/LICENCE-Liberation.txt" "$ASSETS/polices/" 2>/dev/null || true
 fi
 echo "   assets : inits-stricts.txt + $NFPOL police(s) Liberation"
+# V0.3 : marqueur des options de construction (assets/build-info.txt, lignes CLÉ=valeur), lu par scripts/valider-apk.sh
+# (refus d'un lift en -O0, clé de signature…)
+{
+  echo "SC2_APK_LIFT_OPT=$LIFT_OPT"
+  echo "SC2_APK_LIFT_PASSES=$OPT_AD"
+  echo "SC2_APK_LIFT_EMPREINTE=$("$GARDE" empreinte "$RECOMP/src/lifted")"
+  echo "SC2_APK_LIFT_CACHE=${PREBUILT:+$(basename "$(dirname "$PREBUILT")")}"
+  echo "SC2_APK_API=$API"
+  echo "SC2_APK_LDFLAGS=$LDFLAGS_APK"
+  echo "SC2_APK_SWAPCHAIN=${SC2_APK_SWAPCHAIN:-0}"
+  echo "SC2_APK_KEYSTORE=$(basename "${SC2_KEYSTORE:-$OUT/debug.keystore}")"
+  echo "SC2_APK_COMMIT=$(git -C "$RACINE" rev-parse --short HEAD 2>/dev/null)$(git -C "$RACINE" status --porcelain 2>/dev/null | grep -q . && echo '+modifié')"
+  echo "SC2_APK_BANC_LIFT_PERIME=$BANC"
+  echo "SC2_APK_DATE=$(date '+%Y-%m-%d %H:%M:%S')"
+} > "$ASSETS/build-info.txt"
+echo "   assets : build-info.txt (SC2_APK_LIFT_OPT=$LIFT_OPT${PREBUILT:+, cache $(basename "$(dirname "$PREBUILT")")})"
 $AAPT2 link -o "$BUILD/base.apk" -I "$SDK/platforms/android-$API/android.jar" \
     --manifest "$AND/AndroidManifest.xml" -A "$ASSETS" -R "$BUILD/res.zip" \
     --java "$BUILD/gen" --auto-add-overlay || true

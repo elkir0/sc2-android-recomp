@@ -104,7 +104,7 @@ apk)
     a1=$(grep -E '\.apk$' "$O/apk-$v-1.log" | tail -1 | cut -c1-64); a2=$(grep -E '\.apk$' "$O/apk-$v-2.log" | tail -1 | cut -c1-64)
     j "  reproductibilité SC2_APK_SWAPCHAIN=$v : $([ -n "$a1" ] && [ "$a1" = "$a2" ] && echo "IDENTIQUES ($a1)" || echo "DIFFÉRENTS ($a1 / $a2)")"
   done ;;
-adb) cmd "adb devices"; command -v adb > /dev/null && adb devices 2>&1 | sed 's/^/  /' | tee -a "$L" || j "  adb absent du devbox : test émulateur par la supervision" ;;
+adb) cmd "adb devices"; command -v adb > /dev/null && adb devices 2>&1 | sed 's/^/  /' | tee -a "$L" || j "  adb absent du serveur Linux : test émulateur par la supervision" ;;
 esac; done
 j "free -h APRÈS : $(free -h | awk '/Mem:/{print $3" utilisés / "$7" dispo"}')"
 j "=== fin $(date -u '+%T') UTC"

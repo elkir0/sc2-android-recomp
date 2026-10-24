@@ -34,6 +34,18 @@ static inline void sc2_geo_ajuster(uint32_t sw, uint32_t sh, uint32_t dw, uint32
 }
 
 /* Swapchain dw×dh (étirée à fw×fh par le compositeur si elles diffèrent). */
+/* 21/10 : rectangle du blit DONNÉ (image calée en haut ou à gauche quand la barre de raccourcis occupe la bande). */
+static inline sc2_geo sc2_geo_swapchain_rect(uint32_t jw, uint32_t jh, int32_t ox, int32_t oy, uint32_t rw, uint32_t rh,
+                                             uint32_t dw, uint32_t dh, uint32_t fw, uint32_t fh)
+{
+    sc2_geo g = { 0 };
+    if (!jw || !jh || !dw || !dh || !fw || !fh || !rw || !rh) return g;
+    double ex = (double)fw / dw, ey = (double)fh / dh;
+    g.x0 = ox * ex; g.y0 = oy * ey;
+    g.sx = (double)rw / jw * ex; g.sy = (double)rh / jh * ey;
+    g.jw = jw; g.jh = jh; g.ok = 1;
+    return g;
+}
 static inline sc2_geo sc2_geo_swapchain(uint32_t jw, uint32_t jh, uint32_t dw, uint32_t dh, uint32_t fw, uint32_t fh)
 {
     sc2_geo g = { 0 };

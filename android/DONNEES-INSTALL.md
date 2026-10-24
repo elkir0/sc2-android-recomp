@@ -20,14 +20,14 @@ Prévoir **8 Go libres** sur l'appareil, plus 45 Mo pour l'APK.
 
 Le détail par fichier (taille exacte et rôle) est dans `android/manifest-install.txt`.
 
-## 2. Obtenir les fichiers (une fois, sur le devbox)
+## 2. Obtenir les fichiers (une fois, sur le serveur Linux)
 
 L'installation est extraite du DVD par deux passes :
 - `scripts/extraire-install.sh` (passe 6a) produit `extraction/install` ;
 - `AJOUTS_7H=1 scripts/extraire-install.sh` (passe 7h) produit `extraction/install-ajouts-7h`, avec les archives de
   la campagne et de la locale enUS.
 
-On construit ensuite sur le devbox une **vue** limitée au manifest. Ce sont des liens symboliques, rien n'est copié :
+On construit ensuite sur le serveur Linux une **vue** limitée au manifest. Ce sont des liens symboliques, rien n'est copié :
 
 ```sh
 cd ~/code/reverse/sc2-partout          # ou le worktree qui porte la passe 7y
@@ -43,7 +43,7 @@ Le Fold est branché au Mac (USB, ou débogage sans fil). Il faut d'abord rapatr
 `-L` suit les liens de la vue :
 
 ```sh
-rsync -aL --progress devbox:sc2-vue-campagne/ ~/sc2-install-campagne/      # 7,54 Go
+rsync -aL --progress serveur:sc2-vue-campagne/ ~/sc2-install-campagne/      # 7,54 Go
 ```
 
 Ensuite, installer l'APK et pousser les données :
@@ -138,7 +138,7 @@ Commande : `adb logcat -s SC2Partout`.
 
 ## 6. Ce qui casse s'il manque quelque chose
 
-Mesuré sur le banc x86 du devbox : même moteur, run mission TRaynor01 de 300 s. Le détail est dans
+Mesuré sur le banc x86 du serveur Linux : même moteur, run mission TRaynor01 de 300 s. Le détail est dans
 `android/TRACE-PASSE7Y.md`.
 
 | Retiré | Effet |
@@ -158,7 +158,7 @@ Mesuré sur le banc x86 du devbox : même moteur, run mission TRaynor01 de 300 s
 ## 7. Note : la voie « menu » (sans `SC2_ARGS`)
 
 Constat du banc émulateur (supervision, 23:42 UTC) : sans `SC2_ARGS`, l'app s'arrête proprement au bout de 2 s.
-Ce que montrent les runs de la passe 7y sur le devbox :
+Ce que montrent les runs de la passe 7y sur le serveur Linux :
 - **Si `Mods/Liberty.SC2Mod` manque**, le jeu ouvre son rapport d'erreur fatale et l'app s'arrête proprement. Il le
   fait aussi pour d'autres fichiers attendus : c'est l'arrêt « propre » typique. Dans logcat :
   `[ARRÊT] … CreateProcessW appelé mais NON IMPLÉMENTÉ (appelant 0x0099DCD5)`, précédé de

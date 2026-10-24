@@ -32,9 +32,13 @@
 #include "android_native_app_glue.h"
 #include "sc2_android.h"
 #include "sc2_audio_android.h"
+#include <jni.h>
 #include "sc2_geo.h"
+#include "sc2_gestes.h"   /* 21/10 : 1 doigt = clic gauche, 2 doigts = clic droit */
 #include "sc2_phases.h"
+#include "sc2_documents.h"  /* V1.5 : semis de Variables.txt commun (recomp-sc2/runtime/sc2_documents.c) */
 #include "sc2_trace_present.h"
+#include "sc2_vars_regle.h"  /* 23/10 : les réglages d'un run de test ne fuient plus vers /sdcard */
 /* passe 9s : runtime/video_amc.c (option CMake SC2_VIDEO_AMC) — symboles faibles : absents si l'option est OFF */
 int  video_amc_entree(void) __attribute__((weak));
 void video_amc_bilan(char *o, size_t cap) __attribute__((weak));
@@ -145,8 +149,15 @@ static void vider_log(void)
     if (g_fjournal) fflush(g_fjournal);
 }
 
+/* 21/10 : exit(), lancé par le fil du jeu, exécute aussi les finaliseurs statiques de libart, qui avortent (« destroying
+ * mutex with owner or contenders », SIGABRT : Fold v24a, 1 sortie sur ≈ 20) quand un fil Java tient l'un de ses verrous.
+ * Enregistré AVANT tous les autres gestionnaires, celui-ci passe en DERNIER des nôtres (ordre inverse d'atexit) —
+ * bilans écrits, journal vidé — et termine par _exit : les finaliseurs d'ART ne tournent jamais. */
+static void sortie_sans_finaliseurs(void) { fflush(NULL); _exit(0); }
+
 static void rediriger_sorties(void)
 {
+    atexit(sortie_sans_finaliseurs);
     if (pipe(g_tube)) return;
     dup2(g_tube[1], 1); dup2(g_tube[1], 2);
     setvbuf(stdout, NULL, _IOLBF, 0); setvbuf(stderr, NULL, _IONBF, 0);
@@ -199,8 +210,94 @@ static int extraire_asset(const char *nom, const char *dest)
  * graphiques, son… écrit sous C:\Users\sc2\Documents\StarCraft II\ — serait perdu. À chaque lancement :
  * sauvegarde de celui du run précédent vers /sdcard/SC2Partout/Variables.txt (AVANT l'effacement), puis
  * semis d'un préréglage dans le C:\ neuf (APRÈS) : SC2_VARIABLES s'il est posé, sinon le fichier de
- * /sdcard. SC2_VARIABLES_FIGE=1 : le préréglage de /sdcard est figé, le jeu ne l'écrase plus. */
+ * /sdcard, sinon (vague 0 bis, 22/10) le préréglage intégré « fold ». SC2_VARIABLES_FIGE=1 : le préréglage
+ * de /sdcard est figé, le jeu ne l'écrase plus. Le semis lui-même est commun au banc Mac depuis V1.5
+ * (sc2_variables_semer, recomp-sc2/runtime/sc2_documents.c). */
 #define VARS_TXT_SD "/sdcard/SC2Partout/Variables.txt"
+
+/* Préréglage « fold » = ULTRA (décision du mainteneur le 23/10, après S1 : l'Ultra tient le plafond de 60 images/s sur
+ * TRaynor01 ; vague 0 bis du 22/10 : Medium, textures High), semé quand
+ * l'utilisateur n'a encore aucun Variables.txt. Copie conforme de scripts/prereglages/fold.txt (clés de réglage
+ * écrites par le jeu lui-même, aucun contenu du jeu) : scripts/banc-options.sh --controle vérifie l'égalité. */
+static const char VARS_FOLD[] =
+/* VARS_FOLD début (généré depuis scripts/prereglages/fold.txt) */
+"alphadepthWrite=1\r\n"
+"aolight=1\r\n"
+"creepnormalmap=1\r\n"
+"creepQuality=3\r\n"
+"creepreflection=1\r\n"
+"creepselfshadow=1\r\n"
+"creeptrans=1\r\n"
+"deff=1\r\n"
+"deffspec=1\r\n"
+"depthDisp=1\r\n"
+"dof=1\r\n"
+"fogvolume=1\r\n"
+"foliagedensity=0.750000\r\n"
+"foliagequality=3\r\n"
+"gamehdr8bit=0\r\n"
+"GraphicsOptionEffectsDetail=3\r\n"
+"GraphicsOptionLightingQuality=3\r\n"
+"GraphicsOptionModelQuality=2\r\n"
+"GraphicsOptionMovies=3\r\n"
+"GraphicsOptionOverallQualityVer7[5]=3\r\n"
+"GraphicsOptionPhysicsQuality=3\r\n"
+"GraphicsOptionPortraits=2\r\n"
+"GraphicsOptionPostProcessing=3\r\n"
+"GraphicsOptionReflections=2\r\n"
+"GraphicsOptionShaderDetail=3\r\n"
+"GraphicsOptionShadowQuality=3\r\n"
+"GraphicsOptionTerrainQuality=3\r\n"
+"GraphicsOptionTextureQuality[2]=3\r\n"
+"halo=1\r\n"
+"hdr=1\r\n"
+"hdr8bit=0\r\n"
+"lightingLevel=3\r\n"
+"lightmap=0\r\n"
+"lightmapcastshadows=1\r\n"
+"localao=1\r\n"
+"localight=1\r\n"
+"localShadows=1\r\n"
+"lowQualityMovies=0\r\n"
+"normalmap=1\r\n"
+"parallax=1\r\n"
+"parallaxshadow=1\r\n"
+"particlelod=3\r\n"
+"particleobjects=1.000000\r\n"
+"particleterrain=1.000000\r\n"
+"physicsdensity=16\r\n"
+"pixellight=1\r\n"
+"portraits3d=1\r\n"
+"preBlendedCreep=0\r\n"
+"ribbonlod=3\r\n"
+"sampleFOW=1\r\n"
+"shadowmapsize=2048\r\n"
+"shadows=1\r\n"
+"simplifiedCloaking=0\r\n"
+"simplifiedShaders=0\r\n"
+"soft=1\r\n"
+"softshadows=1\r\n"
+"softshadowTaps=12\r\n"
+"spec=1\r\n"
+"splatlod=3\r\n"
+"targettexeldensity=10.600000\r\n"
+"TerrainTextureHiResCacheSize=24\r\n"
+"TerrainTextureLowResCacheSize=50\r\n"
+"TerrainTextureSize=1024\r\n"
+"texQualityLevel=3\r\n"
+"texSpace=1024\r\n"
+"textureBasedFOW=1\r\n"
+"transparentshadows=1\r\n"
+"treadlod=3\r\n"
+"useLowqualitymodels=0\r\n"
+"watercaustics=1\r\n"
+"waterflipbook=0\r\n"
+"waterreflection=1\r\n"
+"waterrendertargetformat=3\r\n"
+"waterrendertargetsize=1024\r\n"
+"watershadow=1\r\n"
+/* VARS_FOLD fin */
+;
 
 /* Copie par blocs src → dst (dst créé/écrasé). 0 = OK, -1 = échec (journalisé par l'appelant). */
 static int copier_fichier(const char *src, const char *dst)
@@ -215,16 +312,6 @@ static int copier_fichier(const char *src, const char *dst)
     if (g && fclose(g)) ok = 0;                      /* fermé même après un échec d'écriture */
     fclose(f);
     return ok ? 0 : -1;
-}
-
-/* mkdir récursif (chaque composant en 0755). 0 = OK, -1 = échec au composant final. */
-static int mkdir_p(const char *chemin)
-{
-    char t[1024];
-    if (snprintf(t, sizeof t, "%s", chemin) >= (int)sizeof t) return -1;
-    for (char *q = t + 1; *q; q++)
-        if (*q == '/') { *q = 0; mkdir(t, 0755); *q = '/'; }
-    return mkdir(t, 0755) && errno != EEXIST ? -1 : 0;
 }
 
 /* Vrai si le fichier contient « GraphicsOption » (section des réglages graphiques du jeu : écarte un
@@ -242,17 +329,48 @@ static int contient_graphicsoption(const char *chemin)
 
 /* Étape 1 (avant l'effacement de sc2-c) : les réglages changés en jeu au run précédent → /sdcard, par
  * fichier temporaire + rename (un /sdcard à moitié écrit ne doit jamais passer pour un réglage). Un refus
- * (figé, absent, taille hors bornes, sans « GraphicsOption ») est journalisé et n'arrête pas le lancement. */
-static void sauver_vars(const char *src, const char *dst)
+ * (figé, absent, taille hors bornes, sans « GraphicsOption », run de test précédent, /sdcard plus récent)
+ * est journalisé et n'arrête pas le lancement. Les deux derniers protègent les réglages de l'utilisateur :
+ * le marqueur .sc2-run-de-test du sc2-c (23/10 : l'Ultra de l'étape 4 de la séance du Fold avait remplacé
+ * son Variables.txt) et un Variables.txt posé par le lanceur Java entre deux runs. La règle est pure
+ * (sc2_vars_regle.h, testée sur l'hôte) : sauver_vars ne fait que la nourrir et journaliser. */
+static void sauver_vars(const char *src, const char *dst, const char *marqueur)
 {
-    if (getenv("SC2_VARIABLES_FIGE") && !strcmp(getenv("SC2_VARIABLES_FIGE"), "1")) {
+    const char *f = getenv("SC2_VARIABLES_FIGE");
+    struct stat st;
+    int src_ok = !stat(src, &st) && S_ISREG(st.st_mode);
+    struct stat md;
+    int marque_ok = !stat(marqueur, &md) && S_ISREG(md.st_mode);
+    struct stat dd;
+    int dst_ok = !stat(dst, &dd) && S_ISREG(dd.st_mode);
+    int d = sc2_vars_decision(f && !strcmp(f, "1"), src_ok, src_ok ? (long)st.st_size : 0,
+                              src_ok && contient_graphicsoption(src), marque_ok, dst_ok,
+                              src_ok ? (long long)st.st_mtime : 0, dst_ok ? (long long)dd.st_mtime : 0);
+    switch (d) {
+    case SC2_VARS_FIGE:
         LOGI("[VARS] SC2_VARIABLES_FIGE=1 : réglages du jeu NON sauvegardés (préréglage de %s figé)", dst);
         return;
+    case SC2_VARS_ABSENT:
+        LOGI("[VARS] pas de réglages à sauvegarder (%s absent)", src);
+        return;
+    case SC2_VARS_TAILLE:
+        LOGI("[VARS] réglages NON sauvegardés (%s : %ld o)", src, (long)st.st_size);
+        return;
+    case SC2_VARS_SANS_GRAPHICSOPTION:
+        LOGI("[VARS] réglages NON sauvegardés (%s sans « GraphicsOption »)", src);
+        return;
+    case SC2_VARS_RUN_DE_TEST: {
+        char raison[128] = "";
+        FILE *m = fopen(marqueur, "r");               /* 1re ligne du marqueur : la raison du run de test */
+        if (m) { if (fgets(raison, sizeof raison, m)) raison[strcspn(raison, "\r\n")] = 0; fclose(m); }
+        LOGI("[VARS] réglages NON sauvegardés : run de test au lancement précédent (%s)",
+             raison[0] ? raison : sc2_vars_decision_texte(d));
+        return;
     }
-    struct stat st;
-    if (stat(src, &st) || !S_ISREG(st.st_mode)) { LOGI("[VARS] pas de réglages à sauvegarder (%s absent)", src); return; }
-    if (st.st_size < 1 || st.st_size > 64 * 1024) { LOGI("[VARS] réglages NON sauvegardés (%s : %ld o)", src, (long)st.st_size); return; }
-    if (!contient_graphicsoption(src)) { LOGI("[VARS] réglages NON sauvegardés (%s sans « GraphicsOption »)", src); return; }
+    case SC2_VARS_DST_PLUS_RECENT:
+        LOGI("[VARS] réglages NON sauvegardés : /sdcard plus récent que ceux du run précédent (posés par le lanceur ?)");
+        return;
+    }
     char tmp[1200];
     snprintf(tmp, sizeof tmp, "%s.tmp", dst);
     if (copier_fichier(src, tmp) || rename(tmp, dst)) {
@@ -263,27 +381,31 @@ static void sauver_vars(const char *src, const char *dst)
     LOGI("[VARS] réglages du jeu sauvegardés → %s (%ld o)", dst, (long)st.st_size);
 }
 
-/* Étape 2 (après l'effacement de sc2-c et setenv("SC2_ROOT")) : le préréglage de l'utilisateur est copié
- * là où le jeu le lit — C:\Users\sc2\Documents\StarCraft II\Variables.txt, soit $SC2_ROOT/Users/sc2/
- * Documents/StarCraft II/Variables.txt (cf. hpath() de recomp-sc2/runtime/sc2_iat.c). */
+/* Étape 2 (après l'effacement de sc2-c et setenv("SC2_ROOT")) : le préréglage est semé là où le jeu le lit —
+ * C:\Users\sc2\Documents\StarCraft II\Variables.txt, soit $SC2_ROOT/Users/sc2/Documents/StarCraft II/
+ * Variables.txt (hpath() de recomp-sc2/runtime/sc2_iat.c) — par le runtime commun (V1.5 : sc2_variables_semer,
+ * qui a remplacé la copie locale ; même point d'appel, mêmes bornes de 1 o à 64 Kio). Source : SC2_VARIABLES,
+ * à défaut /sdcard/SC2Partout/Variables.txt, à défaut (vague 0 bis) le préréglage intégré « fold » ;
+ * SC2_VARIABLES=0 : aucun semis, réglages détectés par le jeu. Un SC2_VARIABLES inutilisable n'est PAS
+ * remplacé par « fold » : réglages par défaut du jeu, comme avant. Les réglages de l'utilisateur (/sdcard)
+ * passent avant « fold » : lastDeviceId y est aligné sur la carte annoncée pour qu'ils soient conservés. */
 static void semer_vars(void)
 {
-    const char *src = getenv("SC2_VARIABLES");
-    if (!src || !*src) src = VARS_TXT_SD;
+    const char *r = getenv("SC2_ROOT"), *src = getenv("SC2_VARIABLES"), *f = getenv("SC2_VARIABLES_FIGE");
+    const char *racine = r && *r ? r : "sc2-c";
+    int fige = f && !strcmp(f, "1");
     struct stat st;
-    if (stat(src, &st) || !S_ISREG(st.st_mode) || st.st_size < 1 || st.st_size > 64 * 1024) {
-        LOGI("[VARS] aucun Variables.txt fourni : réglages par défaut du jeu");
+    if (src && !strcmp(src, "0")) {
+        LOGI("[VARS] SC2_VARIABLES=0 : aucun Variables.txt semé (réglages détectés par le jeu)");
         return;
     }
-    const char *r = getenv("SC2_ROOT");
-    char d[1200], v[1240];
-    snprintf(d, sizeof d, "%s/Users/sc2/Documents/StarCraft II", r && *r ? r : "sc2-c");
-    snprintf(v, sizeof v, "%s/Variables.txt", d);
-    if (mkdir_p(d) || copier_fichier(src, v)) {
-        LOGE("[VARS] semis de %s → %s en échec (%s)", src, v, strerror(errno));
+    if (src && *src) { sc2_variables_semer(racine, src, fige); return; }
+    if (!stat(VARS_TXT_SD, &st) && S_ISREG(st.st_mode) && st.st_size >= 1 && st.st_size <= SC2_VARIABLES_MAX) {
+        sc2_variables_semer(racine, VARS_TXT_SD, fige);
         return;
     }
-    LOGI("[VARS] Variables.txt semé depuis %s (%ld o)", src, (long)st.st_size);
+    LOGI("[VARS] aucun Variables.txt fourni (%s absent) : préréglage intégré « fold »", VARS_TXT_SD);
+    sc2_variables_semer_texte(racine, VARS_FOLD, "le préréglage intégré « fold » (Ultra)", fige);
 }
 
 static int rm_un(const char *p, const struct stat *st, int type, struct FTW *f)
@@ -292,7 +414,7 @@ static int rm_un(const char *p, const struct stat *st, int type, struct FTW *f)
 static int configurer(void)
 {
     const char *ext = g_app->activity->externalDataPath, *intr = g_app->activity->internalDataPath;
-    char p[1024];
+    char p[1024], marqueur[1100];
     mkdir(ext, 0755);
     snprintf(g_journal, sizeof g_journal, "%s/sc2-partout.log", ext);
     rediriger_sorties();
@@ -314,23 +436,56 @@ static int configurer(void)
     }
     setenv("SC2_INSTALL", g_install, 1);
     snprintf(g_exe, sizeof g_exe, "%s/Versions/Base15405/SC2.exe", g_install);
-    /* Variables.txt persistant : les réglages du run précédent sont sortis de sc2-c AVANT son effacement. */
+    /* Variables.txt persistant : les réglages du run précédent sont sortis de sc2-c AVANT son effacement
+     * (le marqueur .sc2-run-de-test y est lu s'il y est : run de test précédent → rien de recopié). */
     snprintf(p, sizeof p, "%s/sc2-c/Users/sc2/Documents/StarCraft II/Variables.txt", intr);
-    sauver_vars(p, VARS_TXT_SD);
+    snprintf(marqueur, sizeof marqueur, "%s/sc2-c/" SC2_VARS_MARQUE_TEST, intr);
+    sauver_vars(p, VARS_TXT_SD, marqueur);
     /* Racine C:\ neuve à chaque lancement (passe 6a : les runtimeCache~NN.bin accumulés font
      * déborder la pile hôte au démarrage). */
     snprintf(p, sizeof p, "%s/sc2-c", intr);
     nftw(p, rm_un, 16, FTW_DEPTH | FTW_PHYS);
     mkdir(intr, 0755);
     setenv("SC2_ROOT", p, 1);
-    semer_vars();                                    /* préréglage de l'utilisateur → C:\ neuf (SC2_VARIABLES ou /sdcard) */
+    /* Passe 10t : Banks/ et Saves/ (progression, sauvegardes) persistants — défaut /sdcard/
+     * SC2Partout/StarCraft II ; sc2.env (lu plus haut) ou l'environnement peuvent poser
+     * SC2_DOCUMENTS autre part, valeur vide = pas de persistance. */
+    if (!getenv("SC2_DOCUMENTS")) setenv("SC2_DOCUMENTS", "/sdcard/SC2Partout/StarCraft II", 1);
+    /* Vague 0 bis : profil GPU annoncé au jeu (V2.5, lu par recomp-sc2/runtime/sc2_d3d9.c ; sans effet tant que le
+     * runtime ne le lit pas) — « dx10 » par défaut sur Android ; « historique » (8600 GT, 512 Mo) dans sc2.env pour
+     * l'ancien comportement. AVANT semer_vars : le lastDeviceId du Variables.txt semé est aligné sur le DeviceId de la
+     * carte annoncée (sc2_variables_device_id) — ajouté au préréglage « fold », remplacé dans celui de /sdcard écrit
+     * par le jeu sous la 8600 GT (1026 → 1507) —, sinon le jeu re-détecte ses réglages et écrase ceux de l'utilisateur.
+     * Suppose que sc2_d3d9.c annonce bien ce profil (fusion de caps-etats AVANT ce changement). */
+    if (!getenv("SC2_GPU_PROFIL")) setenv("SC2_GPU_PROFIL", "dx10", 1);
+    semer_vars();                                    /* préréglage → C:\ neuf (SC2_VARIABLES, /sdcard, sinon « fold ») */
+    /* Run de test (23/10) : marqueur dans le sc2-c NEUF — le lancement suivant le lira dans sauver_vars
+     * (ci-dessus) avant d'effacer sc2-c, et ne recopiera pas les réglages de ce run vers /sdcard. */
+    {
+        const char *raison = sc2_vars_raison_test(getenv("SC2_BANC_ENTREES"), getenv("SC2_DOCUMENTS"),
+                                                  getenv("SC2_VARIABLES"), getenv("SC2_VARIABLES_FIGE"));
+        if (raison) {
+            mkdir(p, 0755);                            /* sc2-c peut manquer (semis sans effet, ex. SC2_VARIABLES=0) */
+            snprintf(marqueur, sizeof marqueur, "%s/" SC2_VARS_MARQUE_TEST, p);
+            FILE *m = fopen(marqueur, "w");
+            if (m) { fprintf(m, "%s\n", raison); fclose(m); }
+            else LOGE("[VARS] marqueur de run de test non posé : %s (%s)", marqueur, strerror(errno));
+            LOGI("[VARS] run de test (%s) : ses réglages ne seront pas recopiés dans /sdcard", raison);
+        }
+    }
     /* Passe 10s : cache de pipelines Vulkan HORS de sc2-c (effacé à chaque lancement), sinon les shaders sont
      * recompilés à chaque partie (322 pipelines, 3,5 s cumulées, jusqu'à 35 ms d'à-coup sur le Fold). */
     snprintf(p, sizeof p, "%s/vk-pipelines.bin", intr);
     if (!getenv("SC2_VK_CACHE_PIPELINES")) setenv("SC2_VK_CACHE_PIPELINES", p, 1);
     snprintf(p, sizeof p, "%s/frames", ext);
     if (!getenv("SC2_FRAMES_DIR")) setenv("SC2_FRAMES_DIR", p, 1);
-    if (!getenv("SC2_ECRAN")) setenv("SC2_ECRAN", "1280x720", 1);
+    /* Vague 0 bis (22/10) : plus aucune capture PPM en jeu par défaut (à-coup de relecture toutes les 1,7 s,
+     * 6-8 Go écrits par heure) ; les scripts de banc et du Fold posent SC2_FRAMES=1 explicitement (V0.1). */
+    if (!getenv("SC2_FRAMES")) setenv("SC2_FRAMES", "0", 1);
+    /* 21/10 : plein écran par défaut — « auto » = mode standard au rapport le plus proche de la fenêtre (lancer_jeu) :
+     * 1280x1024 sur l'écran intérieur du Fold (1280x720 y laissait ≈ 37 % de bandes noires), 1280x720 sur l'extérieur.
+     * SC2_ECRAN=1280x720 dans sc2.env pour l'ancien comportement (scénarios scriptés en coordonnées 1280x720). */
+    if (!getenv("SC2_ECRAN")) setenv("SC2_ECRAN", "auto", 1);
 #ifdef SC2_SWAPCHAIN
     /* APK « vk » (passe 7b) : swapchain par défaut ; SC2_SWAPCHAIN=0 dans sc2.env → copie CPU */
     if (!getenv("SC2_SWAPCHAIN")) setenv("SC2_SWAPCHAIN", "1", 1);
@@ -357,8 +512,9 @@ static int configurer(void)
         printf("[ANDROID] polices système de repli : %d posées dans %s\n", n, p);
     }
     if (chdir(intr)) LOGE("chdir(%s) : %s", intr, strerror(errno));
-    printf("[ANDROID] SC2_INSTALL=%s SC2_ROOT=%s SC2_FRAMES_DIR=%s SC2_ECRAN=%s SC2_STRICT_INITS=%s\n", g_install,
-           getenv("SC2_ROOT"), getenv("SC2_FRAMES_DIR"), getenv("SC2_ECRAN"),
+    printf("[ANDROID] SC2_INSTALL=%s SC2_ROOT=%s SC2_DOCUMENTS=%s SC2_FRAMES_DIR=%s SC2_FRAMES=%s SC2_GPU_PROFIL=%s SC2_ECRAN=%s "
+           "SC2_STRICT_INITS=%s\n", g_install, getenv("SC2_ROOT"), getenv("SC2_DOCUMENTS"), getenv("SC2_FRAMES_DIR"),
+           getenv("SC2_FRAMES"), getenv("SC2_GPU_PROFIL"), getenv("SC2_ECRAN"),
            getenv("SC2_STRICT_INITS") ? getenv("SC2_STRICT_INITS") : "(aucun)");
     return 0;
 }
@@ -547,8 +703,11 @@ static sc2_geo geo_courante(void)
     if (fw > 0 && fh > 0) {
 #ifdef SC2_SWAPCHAIN
         uint32_t sw, sh, dw, dh;
+        barre_geo bg;                    /* 21/10 : rectangle réel du blit (image calée en haut si la barre est là) */
         if (atomic_load(&g_par_gpu) && !sc2v_geometrie(&sw, &sh, &dw, &dh) && sw == g_jw && sh == g_jh)
-            g = sc2_geo_swapchain(g_jw, g_jh, dw, dh, (uint32_t)fw, (uint32_t)fh);
+            g = !sc2v_barre_geo(&bg) ? sc2_geo_swapchain_rect(g_jw, g_jh, bg.jeu.x, bg.jeu.y, (uint32_t)bg.jeu.w,
+                                                             (uint32_t)bg.jeu.h, dw, dh, (uint32_t)fw, (uint32_t)fh)
+                                     : sc2_geo_swapchain(g_jw, g_jh, dw, dh, (uint32_t)fw, (uint32_t)fh);
         else
 #endif
         if (!atomic_load(&g_par_gpu) && g_geo_ok && g_fw == fw && g_fh == fh)
@@ -629,6 +788,9 @@ static void lancer_jeu(void)
         char v[32]; snprintf(v, sizeof v, "%ux%u", aw, ah); setenv("SC2_ECRAN", v, 1);
         printf("[ANDROID] SC2_ECRAN=auto → %s (fenêtre %dx%d)\n", v, ANativeWindow_getWidth(g_app->window),
                ANativeWindow_getHeight(g_app->window));
+    } else if (!strcmp(getenv("SC2_ECRAN"), "auto")) {          /* pas encore de fenêtre : repli explicite */
+        setenv("SC2_ECRAN", "1280x720", 1);
+        printf("[ANDROID] SC2_ECRAN=auto sans fenêtre au lancement → 1280x720\n");
     }
     if (sscanf(getenv("SC2_ECRAN"), "%ux%u", &w, &h) == 2) { g_jw = w; g_jh = h; }
     sc2a_taille_ecran(g_jw, g_jh);
@@ -645,10 +807,52 @@ static void lancer_jeu(void)
 static int g_config_ok = -1;
 static struct timespec g_t_sortie;
 
+/* 21/10 : plein écran immersif (fr.sc2partout.Immersif, fil de l'interface) — les barres système recouvraient la barre
+ * de raccourcis. Classe chargée par le chargeur de l'activité (FindClass d'un fil natif ne voit pas les classes de l'app).
+ * SC2_IMMERSIF=0 : rien. */
+static void immersif(void)
+{
+    const char *e = getenv("SC2_IMMERSIF");
+    if ((e && *e == '0') || !g_app || !g_app->activity) return;
+    JavaVM *vm = g_app->activity->vm; JNIEnv *env;
+    if ((*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) return;
+    jobject act = g_app->activity->clazz;
+    jclass ca = (*env)->GetObjectClass(env, act);
+    jmethodID gcl = (*env)->GetMethodID(env, ca, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject cl = (*env)->CallObjectMethod(env, act, gcl);
+    jclass ccl = (*env)->FindClass(env, "java/lang/ClassLoader");
+    jmethodID lc = (*env)->GetMethodID(env, ccl, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring nom = (*env)->NewStringUTF(env, "fr.sc2partout.Immersif");
+    jclass ci = (jclass)(*env)->CallObjectMethod(env, cl, lc, nom);
+    if ((*env)->ExceptionCheck(env) || !ci) {
+        (*env)->ExceptionClear(env); LOGI("[IMMERSIF] classe fr.sc2partout.Immersif introuvable");
+    } else {
+        jmethodID ap = (*env)->GetStaticMethodID(env, ci, "appliquer", "(Landroid/app/Activity;)V");
+        if (ap) (*env)->CallStaticVoidMethod(env, ci, ap, act);
+        if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); LOGI("[IMMERSIF] échec de l'appel"); }
+        else { static int dit; if (!dit++) LOGI("[IMMERSIF] barres système masquées (plein écran immersif)"); }
+    }
+    (*env)->DeleteLocalRef(env, nom); (*env)->DeleteLocalRef(env, ca); (*env)->DeleteLocalRef(env, ccl);
+    if (cl) (*env)->DeleteLocalRef(env, cl);
+    if (ci) (*env)->DeleteLocalRef(env, ci);
+    (*vm)->DetachCurrentThread(vm);
+}
+
 static void cmd(struct android_app *app, int32_t c)
 {
     switch (c) {
+    case APP_CMD_GAINED_FOCUS: immersif(); break;      /* 21/10 : après un retour d'arrière-plan ou un dialogue */
+    case APP_CMD_PAUSE: case APP_CMD_RESUME: {     /* 21/10 : arrière-plan = jeu suspendu (SC2_PAUSE=0 : continue) */
+        static int lu, coupe;
+        if (!lu) { const char *e = getenv("SC2_PAUSE"); coupe = e && *e == '0'; lu = 1; }
+        if (!coupe && atomic_load(&g_jeu_lance) && !atomic_load(&g_jeu_fini)) {
+            LOGI("[PAUSE] %s", c == APP_CMD_PAUSE ? "activité en pause : suspension du jeu" : "activité reprise : le jeu repart");
+            sc2a_suspendre(c == APP_CMD_PAUSE);
+        }
+        break;
+    }
     case APP_CMD_INIT_WINDOW:
+        immersif();                                    /* 21/10 */
 #ifdef SC2_SWAPCHAIN
         /* la swapchain se crée sur le fil du jeu au prochain Present ; avant la 1re frame, rien ne
          * verrouille la fenêtre par CPU (sinon elle ne pourrait plus servir à Vulkan). Passe 10o : remise à la
@@ -713,6 +917,50 @@ static void demander_sortie(const char *pourquoi)
     clock_gettime(CLOCK_MONOTONIC, &g_t_sortie);
 }
 
+/* 21/10 : gestes tactiles — état (fil principal seulement) et livraison des actions au module d'entrées */
+static gestes g_gestes;
+static int32_t g_doigt0;
+static void gestes_livrer(void)
+{
+    for (int k = 0; k < g_gestes.na; k++) {
+        const geste_action *ac = &g_gestes.a[k];
+        int32_t x, y;
+        vers_jeu(ac->x, ac->y, &x, &y);
+        int b = ac->bouton ? 2 : 0;                         /* sc2_input_bouton : 0 gauche, 2 droit */
+        if (ac->type == GACT_POSITION) sc2a_deplacer(x, y);
+        else sc2a_bouton(b, ac->type == GACT_APPUI, x, y);
+        if (ac->bouton && ac->type == GACT_APPUI) LOGI("[GESTE] deux doigts → clic droit en (%d, %d)", x, y);
+    }
+    g_gestes.na = 0;
+}
+
+#ifdef SC2_SWAPCHAIN
+/* 21/10 : barre de raccourcis (sc2_barre.h, dessinée par sc2_vk_presente.c) — un toucher la (ré)affiche ; un appui DANS
+ * la barre envoie ses touches au jeu et tout le geste (jusqu'au dernier doigt levé) lui appartient. 1 = consommé. */
+static int barre_entree(AInputEvent *e, int32_t a)
+{
+    static int geste_barre;
+    if (geste_barre) { if (a == AMOTION_EVENT_ACTION_UP || a == AMOTION_EVENT_ACTION_CANCEL) geste_barre = 0; return 1; }
+    if (a != AMOTION_EVENT_ACTION_DOWN) return 0;
+    sc2v_barre_voulue(1);
+    uint32_t sw, sh, dw, dh;
+    pthread_mutex_lock(&g_fen_mu);
+    int32_t fw = g_fen ? ANativeWindow_getWidth(g_fen) : 0, fh = g_fen ? ANativeWindow_getHeight(g_fen) : 0;
+    pthread_mutex_unlock(&g_fen_mu);
+    if (fw <= 0 || fh <= 0 || sc2v_geometrie(&sw, &sh, &dw, &dh)) return 0;
+    int32_t sx = (int32_t)(AMotionEvent_getX(e, 0) * (float)dw / (float)fw);
+    int32_t sy = (int32_t)(AMotionEvent_getY(e, 0) * (float)dh / (float)fh);
+    uint16_t vk[8]; uint8_t bas[8];
+    int n = sc2v_barre_appuyer(sx, sy, vk, bas, 8);
+    if (n < 0) return 0;                                 /* hors de la barre : geste du jeu */
+    geste_barre = 1;
+    for (int k = 0; k < n; k++) sc2a_cle(vk[k], bas[k]);
+    int t = 0; while (t < n - 1 && (vk[t] == 0x10 || vk[t] == 0x11 || vk[t] == 0x12)) t++;   /* touche hors modificateurs */
+    if (n) LOGI("[BARRE] appui en (%d, %d) : VK 0x%02X, %d événement(s) clavier", sx, sy, vk[t], n);
+    return 1;
+}
+#endif
+
 static int32_t entree(struct android_app *app, AInputEvent *e)
 {
     (void)app;
@@ -726,7 +974,11 @@ static int32_t entree(struct android_app *app, AInputEvent *e)
         if (kc != AKEYCODE_BACK) {
             if (ka != AKEY_EVENT_ACTION_DOWN && ka != AKEY_EVENT_ACTION_UP) return 0;
             if (!atomic_load(&g_jeu_lance) || atomic_load(&g_jeu_fini)) return 0;
-            return sc2bt_cle(kc, ka == AKEY_EVENT_ACTION_DOWN, AKeyEvent_getRepeatCount(e));
+            int pris = sc2bt_cle(kc, ka == AKEY_EVENT_ACTION_DOWN, AKeyEvent_getRepeatCount(e));
+#ifdef SC2_SWAPCHAIN
+            if (pris) sc2v_barre_voulue(0);              /* 21/10 : clavier physique → la barre s'efface */
+#endif
+            return pris;
         }
         /* Passe 7d : retour = Échap pour le jeu (VK_ESCAPE enfoncée puis relâchée) ; appui LONG
          * (bouton retour maintenu, navigation à 3 boutons) = sortie propre. Fermer l'app depuis les
@@ -751,19 +1003,39 @@ static int32_t entree(struct android_app *app, AInputEvent *e)
         vers_jeu(AMotionEvent_getX(e, 0), AMotionEvent_getY(e, 0), &x, &y);
         sc2bt_souris(a, AMotionEvent_getButtonState(e), x, y, AMotionEvent_getAxisValue(e, AMOTION_EVENT_AXIS_VSCROLL, 0),
                      AMotionEvent_getAxisValue(e, AMOTION_EVENT_AXIS_HSCROLL, 0));
+#ifdef SC2_SWAPCHAIN
+        sc2v_barre_voulue(0);                            /* 21/10 : souris → la barre s'efface */
+#endif
         return 1;
     }
-    if (AMotionEvent_getPointerId(e, 0) != 0 && a != AMOTION_EVENT_ACTION_MOVE) return 1;   /* 1er doigt seul */
     /* passe 9s : toucher pendant une cinématique plein écran (SC2_VIDEO_AMC=1) = Échap injectée ; le geste entier
      * (appui → relâche) est gardé ici, sinon son clic tomberait sur l'écran qui suit la cinématique */
     static int geste_garde;
     if (a == AMOTION_EVENT_ACTION_DOWN && video_amc_entree && video_amc_entree()) { geste_garde = 1; LOGI("toucher → saut de cinématique (VK_ESCAPE)"); }
     if (geste_garde) { if (a == AMOTION_EVENT_ACTION_UP || a == AMOTION_EVENT_ACTION_CANCEL) geste_garde = 0; return 1; }
-    int32_t x, y;
-    vers_jeu(AMotionEvent_getX(e, 0), AMotionEvent_getY(e, 0), &x, &y);
-    if (a == AMOTION_EVENT_ACTION_DOWN) sc2a_tactile(SC2A_APPUI, x, y);
-    else if (a == AMOTION_EVENT_ACTION_MOVE) sc2a_tactile(SC2A_BOUGE, x, y);
-    else if (a == AMOTION_EVENT_ACTION_UP || a == AMOTION_EVENT_ACTION_CANCEL) sc2a_tactile(SC2A_LEVE, x, y);
+#ifdef SC2_SWAPCHAIN
+    if (barre_entree(e, a)) return 1;                    /* 21/10 : toucher dans la barre de raccourcis */
+#endif
+    /* 21/10 : gestes (sc2_gestes.h) — 1 doigt = clic gauche (glisser = cadre), 2 doigts = clic droit */
+    int64_t t = AMotionEvent_getEventTime(e) / 1000000;
+    size_t i = (size_t)((AMotionEvent_getAction(e) & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)
+                        >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+    if (a == AMOTION_EVENT_ACTION_DOWN) {
+        g_doigt0 = AMotionEvent_getPointerId(e, 0);
+        gestes_appui(&g_gestes, AMotionEvent_getX(e, 0), AMotionEvent_getY(e, 0), t);
+    } else if (a == AMOTION_EVENT_ACTION_POINTER_DOWN) {
+        gestes_appui_autre(&g_gestes, AMotionEvent_getX(e, i), AMotionEvent_getY(e, i), t);
+    } else if (a == AMOTION_EVENT_ACTION_POINTER_UP) {
+        gestes_releve_autre(&g_gestes, AMotionEvent_getX(e, i), AMotionEvent_getY(e, i), t);
+    } else if (a == AMOTION_EVENT_ACTION_MOVE) {
+        size_t n = AMotionEvent_getPointerCount(e), k = 0;
+        while (k < n && AMotionEvent_getPointerId(e, k) != g_doigt0) k++;
+        if (k == n) return 1;                               /* le 1er doigt est déjà levé */
+        gestes_bouge(&g_gestes, AMotionEvent_getX(e, k), AMotionEvent_getY(e, k), t);
+    } else if (a == AMOTION_EVENT_ACTION_UP || a == AMOTION_EVENT_ACTION_CANCEL) {
+        gestes_releve(&g_gestes, AMotionEvent_getX(e, 0), AMotionEvent_getY(e, 0), t, a == AMOTION_EVENT_ACTION_CANCEL);
+    } else return 1;
+    gestes_livrer();
     return 1;
 }
 
@@ -779,8 +1051,14 @@ void android_main(struct android_app *app)
     while (!app->destroyRequested) {
         int ev; struct android_poll_source *src;
         int delai = sc2a_sortie_demandee() ? 100 : -1;
+        if (gestes_attend(&g_gestes)) delai = 16;          /* 21/10 : échéance d'un appui en attente */
         int r = ALooper_pollOnce(delai, NULL, &ev, (void **)&src);
         if (r >= 0 && src) src->process(app, src);
+        if (gestes_attend(&g_gestes)) {
+            struct timespec tn; clock_gettime(CLOCK_MONOTONIC, &tn);
+            gestes_tick(&g_gestes, (int64_t)tn.tv_sec * 1000 + tn.tv_nsec / 1000000);
+            gestes_livrer();
+        }
         if (atomic_load(&g_jeu_fini) && !sc2a_sortie_demandee()) demander_sortie("fin du runtime");
         if (sc2a_sortie_demandee() && atomic_load(&g_jeu_lance) && !atomic_load(&g_jeu_fini)) {
             struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);

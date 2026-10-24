@@ -5,7 +5,7 @@
 #   C = optionnel / inutile au portage (non poussé)              chemin finissant par « / » = dossier vide à créer
 # Mesures : extraction/install (DVD, installation de référence 6a) + extraction/install-ajouts-7h (archives retrouvées
 # sur le DVD, 7h). Lectures relevées dans les journaux des runs (lignes « [MPQ] … 1re lecture » et « [FS] »).
-A	Versions/Base15405/SC2.exe	16458904	moteur : l'exécutable que le runtime charge et dont le code est lifté (SC2_EXE)
+A	Versions/Base15405/SC2.exe	16449536	moteur : l'exécutable que le runtime charge et dont le code est lifté (SC2_EXE)
 A	Mods/Core.SC2Mod/Base.SC2Data	8238904	données de base du moteur (UI, layouts, TriggerLibs, GameData) — ~280 fichiers lus par run
 A	Mods/Core.SC2Mod/base.SC2Assets	29653983	textures de base (UI, curseurs, polices d'image) — ~240 fichiers lus par run
 A	Mods/Core.SC2Mod/enUS.SC2Data	885052	locale enUS du moteur (GameStrings…) : ouverte au démarrage

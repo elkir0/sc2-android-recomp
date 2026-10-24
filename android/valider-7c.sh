@@ -78,7 +78,7 @@ run-sim)
   ;;
 fps)
   # mesure APPARIÉE (runs enchaînés, charge machine notée) : la cadence du banc dépend fortement de
-  # la charge du devbox (sessions parallèles) ; deux runs de 300 f espacés de 15 min ne se comparent pas.
+  # la charge du serveur Linux (sessions parallèles) ; deux runs de 300 f espacés de 15 min ne se comparent pas.
   for m in poussés classiques; do
     cmd "SIM_SORTIE=100 … sc2-sim   ($m ; charge avant : $(cut -d' ' -f1-3 /proc/loadavg))"
     if [ $m = poussés ]; then run_sim "$O/fps-push" 100; else run_sim "$O/fps-classique" 100 SC2_VK_SANS_PUSH_DESCRIPTOR=1; fi

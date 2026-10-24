@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Passe 7o — test du TOUCHER sur l'émulateur (AVD sc2partout du Mac mini M4) ou un appareil, par adb.
-# À lancer CÔTÉ MAC (le devbox n'a pas d'adb : règle de supervision). Aucune donnée modifiée sur l'appareil
+# À lancer CÔTÉ MAC (le serveur Linux n'a pas d'adb : règle de supervision). Aucune donnée modifiée sur l'appareil
 # hors de /sdcard/SC2Partout/sc2.env, sauvegardé puis restauré.
 #
 #   android/outils/test-tap-emulateur.sh <apk> [attente_s=150] [sortie=./tap-<date>]
