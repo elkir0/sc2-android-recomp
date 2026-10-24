@@ -16,7 +16,7 @@
  * défini (le backend entier est sous #ifndef) : les fonctions static de la table deviennent
  * testables ici, sans Vulkan ni device — la cible CMake lie par ailleurs le backend complet. */
 #define SC2_D3D9V_TABLE_VOLATILS
-#include "../runtime/sc2_d3d9v.c"
+#include "../sc2_d3d9v.c"
 
 static int g_pass, g_fail;
 #define CHECK(cond, msg) do { if (cond) { g_pass++; printf("PASS  %s\n", msg); } \
@@ -122,6 +122,64 @@ static void tests_textures(void)
     CHECK(okx && e5 <= 8, "cube DXT1 : face 5 = décodage logiciel (±8)");
 }
 
+/* ---- V5.1 (24/10) : oubli d'une texture rendue à l'arène (d3dv_oublier) ----
+ * Une clé (adresse invitée) reprise par un objet NEUF de même génération : sans oubli, l'image de l'ancien est servie
+ * (génération égale → pas de re-téléversement) ; après oubli, l'objet neuf a la sienne et l'indice libéré est repris.
+ * 3 000 cycles création/oubli : pierres tombales et tables refaites, une texture vivante témoin reste trouvée. */
+static void tests_oubli(void)
+{
+    uint8_t a[4 * 4 * 4], b[4 * 4 * 4], o[4 * 4 * 4];
+    for (int i = 0; i < 16; i++) { a[4 * i] = 10; a[4 * i + 1] = 20; a[4 * i + 2] = 30; a[4 * i + 3] = 255;
+                                   b[4 * i] = 200; b[4 * i + 1] = 100; b[4 * i + 2] = 50; b[4 * i + 3] = 255; }
+    int id = d3dv_texture_niveaux(0x7500, 2, 4, 4, 1, 21, 1, a, sizeof a, 2);
+    int id2 = d3dv_texture_niveaux(0x7500, 2, 4, 4, 1, 21, 1, b, sizeof b, 2);
+    CHECK(id >= 0 && id2 == id && d3dv_texture_relire(id, 0, 0, o) == 0 && px_egal(o, 30, 20, 10, 255),
+          "même clé, même génération, sans oubli : l'image de l'ancien objet reste (le danger)");
+    uint32_t cle = 0x7500; d3dv_oublier(&cle, 1);
+    int id3 = d3dv_texture_niveaux(0x7500, 2, 4, 4, 1, 21, 1, b, sizeof b, 2);
+    CHECK(id3 == id && d3dv_texture_relire(id3, 0, 0, o) == 0 && px_egal(o, 50, 100, 200, 255),
+          "après d3dv_oublier : objet neuf à la même clé téléversé, indice libéré repris");
+    int temoin = d3dv_texture_niveaux(0x7600, 2, 4, 4, 1, 21, 1, a, sizeof a, 1), ok = temoin >= 0;
+    for (uint32_t k = 0; k < 3000 && ok; k++) {
+        uint32_t c = 0x10000u + 16u * k;
+        ok = d3dv_texture_niveaux(c, 2, 4, 4, 1, 21, 1, (k & 1) ? a : b, sizeof a, 1) >= 0;
+        d3dv_oublier(&c, 1);
+        if (!(k % 500)) ok = ok && d3dv_texture_niveaux(0x7600, 2, 4, 4, 1, 21, 1, a, sizeof a, 1) == temoin;
+    }
+    CHECK(ok && d3dv_texture_relire(temoin, 0, 0, o) == 0 && px_egal(o, 30, 20, 10, 255),
+          "3 000 créations/oublis : pierres tombales, tables refaites, texture témoin intacte et trouvée");
+    d3dv_oublier(&cle, 1); cle = 0x7600; d3dv_oublier(&cle, 1);
+    /* revue adverse (MAJEUR 1) : CIBLES de rendu d'un objet rendu — clé adresse << 32 | taille (niveaux d'une texture RT)
+     * ou adresse (surface autonome). 700 objets successifs, chacun oublié : sans oubli, MAX_CIBLES (512) atteint → −1. */
+    int ok_c = 1, premiere = -1, id_max = -1;
+    for (uint32_t k = 0; k < 700 && ok_c; k++) {
+        uint32_t obj = 0x20000000u + 64u * k;
+        int a1 = d3dv_cible(((uint64_t)obj << 32) | (64u << 16) | 64u, 64, 64, 21, 0);
+        int a2 = d3dv_cible(((uint64_t)obj << 32) | (32u << 16) | 32u, 32, 32, 21, 0);
+        int a3 = d3dv_cible(obj + 16u, 16, 16, 75 /* D24S8 */, 0);
+        ok_c = a1 >= 0 && a2 >= 0 && a3 >= 0;
+        if (!k) premiere = a1;
+        if (a1 > id_max) id_max = a1; if (a2 > id_max) id_max = a2; if (a3 > id_max) id_max = a3;
+        uint32_t lot[2] = { obj, obj + 16u };
+        d3dv_oublier(lot, 2);
+    }
+    int id_c = d3dv_cible(((uint64_t)0x20000000u << 32) | (64u << 16) | 64u, 64, 64, 21, 0);
+    char m_c[240]; snprintf(m_c, sizeof m_c, "cibles : 700 objets × 3 cibles (niveaux d'une texture RT, surface de profondeur), "
+             "chacun oublié — jamais −1 (MAX_CIBLES), indices repris : plus grand %d, %d au départ", id_max, premiere);
+    CHECK(ok_c && id_c >= 0 && id_max <= premiere + 2, m_c);
+    /* une cible EN USAGE (RT courante) n'est pas oubliée : même indice, image gardée */
+    int rt = d3dv_cible(0x7700, 32, 32, 22, 0); d3dv_rt(rt);
+    d3dv_viewport(0, 0, 32, 32, 0.f, 1.f);
+    d3dv_scene(1); d3dv_clear(0, NULL, D3DV_CLEAR_TARGET, 0xFF123456u, 1.f, 0); d3dv_scene(0);
+    cle = 0x7700; d3dv_oublier(&cle, 1);
+    uint8_t *px32 = malloc(32 * 32 * 4);
+    CHECK(rt >= 0 && d3dv_cible(0x7700, 32, 32, 22, 0) == rt && px32 && d3dv_lire(rt, px32) == 0 && px32[4 * (5 * 32 + 5)] == 0x12
+          && px32[4 * (5 * 32 + 5) + 1] == 0x34 && px32[4 * (5 * 32 + 5) + 2] == 0x56,
+          "cible en usage (RT courante) gardée par l'oubli : même indice, contenu intact (0x123456)");
+    free(px32); d3dv_rt(-1); d3dv_oublier(&cle, 1);
+    uint32_t lot0 = 0x20000000u; d3dv_oublier(&lot0, 1);
+}
+
 /* ---- passe 10t : table des plages volatiles (insertion, recherche, époque périmée, collision) ---- */
 static void tests_table_volatils(void)
 {
@@ -169,9 +227,200 @@ static void tests_table_volatils(void)
     }
 }
 
+/* Passe 10t : plage de constantes lue (nconst) — étendue recopiée et réutilisation du bloc en cache. Pur. */
+static void tests_plage_consts(void)
+{
+    CHECK(consts_a_copier(10, 0) == 160 && consts_a_copier(1, 0) == 16 && consts_a_copier(256, 0) == 4096,
+          "plage consts : 16 × nconst octets recopiés");
+    CHECK(consts_a_copier(0, 0) == D3DV_CONST_TAILLE && consts_a_copier(257, 0) == D3DV_CONST_TAILLE,
+          "plage consts : 0 (bloc entier) et valeur hors borne → bloc entier");
+    CHECK(consts_a_copier(10, 1) == D3DV_CONST_TAILLE, "plage consts : SC2_VK_CONSTS_COMPLETES → bloc entier");
+    /* bloc recopié à l'époque 7, génération 42 */
+    CHECK(!bloc_consts_reutilisable(7, 42, consts_a_copier(10, 0), 7, 42, consts_a_copier(50, 0)),
+          "cache consts : nconst 10 recopié, dessin à 50 → recopie");
+    CHECK(bloc_consts_reutilisable(7, 42, consts_a_copier(50, 0), 7, 42, consts_a_copier(20, 0)),
+          "cache consts : 50 recopiés, dessin à 20 → réutilisé");
+    CHECK(!bloc_consts_reutilisable(7, 42, consts_a_copier(50, 0), 7, 42, consts_a_copier(0, 0)),
+          "cache consts : dessin à bloc entier → recopie");
+    CHECK(bloc_consts_reutilisable(7, 42, consts_a_copier(0, 0), 7, 42, consts_a_copier(256, 0)),
+          "cache consts : bloc entier recopié → sert tout dessin de même génération");
+    CHECK(!bloc_consts_reutilisable(7, 42, consts_a_copier(50, 0), 7, 43, consts_a_copier(20, 0)),
+          "cache consts : autre génération → recopie");
+    CHECK(!bloc_consts_reutilisable(7, 42, consts_a_copier(50, 0), 8, 42, consts_a_copier(20, 0)),
+          "cache consts : autre époque de l'anneau → recopie");
+}
+
+/* ---- V2.2 (22/10) : instanciation — UN dessin instancié contre N dessins de référence (MoltenVK au Mac) ------------
+ * Shaders du test (les nôtres, tests/shaders/inst.{vert,frag}) : coin du quad par sommet (liaison 0) ; centre, demi-
+ * taille et teinte par instance (liaison 1, enregistrement de 24 octets). Référence : N dessins NON instanciés
+ * (instances 0, flux_inst 0) dont le flux 1 porte 4 copies de l'enregistrement i, lues par sommet (stride 24 : même
+ * clé de pipeline au taux près). Scènes jugées octet par octet (d3dv_lire) :
+ *   S1 grille 8×8 opaque ; S2 516 instances qui se chevauchent, en mélange alpha (ordre des instances = ordre des
+ *   primitives) ; S3 flux d'instance par le cache statique (création puis réutilisation, décalage 48 dans le VB) ;
+ *   S4 chemin d'avant (instances 0 : le flux d'instance lu par sommet) ≠ référence — le test discrimine ;
+ *   S5 vertexOffset 4 : le flux d'instance n'est pas décalé ; S6 le taux est dans la clé (pipeline RATE_VERTEX créé
+ *   d'abord par la référence, puis un pipeline RATE_INSTANCE distinct). Compteurs : +1 dessin et +N instances par
+ *   dessin instancié, 0 pour la référence. */
+#include <vulkan/vulkan.h>
+#include "shaders/inst_vert.h"
+#include "shaders/inst_frag.h"
+#define IW 256
+#define IH 256
+typedef struct { float cx, cy, dx, dy; uint8_t rgba[4]; uint32_t bourre; } inst_rec;   /* 24 octets */
+static uint8_t g_cvs_nul[D3DV_CONST_TAILLE], g_cps_nul[D3DV_CONST_TAILLE];
+static int g_ivs = -1, g_ips = -1, g_icible = -1;
+static const float g_coins[16] = { 9, 9, -9, 9, 9, -9, -9, -9,     /* éléments 0-3 : leurres (S5 lit 4-7) */
+                                   -1, -1, 1, -1, -1, 1, 1, 1 };
+static const uint16_t g_quad[6] = { 0, 1, 2, 2, 1, 3 };
+typedef struct { uint32_t obj, decalage, taille_tot; const void *tot; int32_t dsommet; uint32_t instances, flux_inst; } inst_opt;
+static void inst_base(d3dv_dessin *d, int blend)
+{
+    memset(d, 0, sizeof *d);
+    d->vs = g_ivs; d->ps = g_ips; d->topo = 4;                   /* TRIANGLELIST */
+    d->nattr = 4;
+    d->attr[0].loc = 0; d->attr[0].flux = 0; d->attr[0].vkfmt = VK_FORMAT_R32G32_SFLOAT; d->attr[0].offset = 0;
+    d->attr[1].loc = 1; d->attr[1].flux = 1; d->attr[1].vkfmt = VK_FORMAT_R32G32_SFLOAT; d->attr[1].offset = 0;
+    d->attr[2].loc = 2; d->attr[2].flux = 1; d->attr[2].vkfmt = VK_FORMAT_R32G32_SFLOAT; d->attr[2].offset = 8;
+    d->attr[3].loc = 3; d->attr[3].flux = 1; d->attr[3].vkfmt = VK_FORMAT_R8G8B8A8_UNORM; d->attr[3].offset = 16;
+    d->nflux = 2;
+    d->flux[0].stride = 8; d->flux[0].donnees = g_coins + 8; d->flux[0].taille = 32;
+    d->index = g_quad; d->index_taille = sizeof g_quad; d->nombre = 6;
+    d->cvs = g_cvs_nul; d->cps = g_cps_nul;
+    d->masque_couleur = 0xF; d->cull = 1;                        /* D3DCULL_NONE, ni profondeur ni stencil */
+    if (blend) { d->blend = 1; d->src = d->src_a = 5; d->dst = d->dst_a = 6; d->op = d->op_a = 1; }   /* SRCALPHA, INVSRCALPHA */
+    else { d->src = d->src_a = 2; d->dst = d->dst_a = 1; d->op = d->op_a = 1; }
+}
+static void inst_effacer(void)
+{
+    d3dv_rt(g_icible); d3dv_ds(-1); d3dv_viewport(0, 0, IW, IH, 0.f, 1.f);
+    d3dv_clear(0, NULL, D3DV_CLEAR_TARGET, 0xFF000000u, 1.f, 0);
+}
+static int inst_reference(const inst_rec *r, uint32_t n, int blend, uint8_t *px)
+{
+    inst_effacer();
+    inst_rec q[4];
+    for (uint32_t i = 0; i < n; i++) {
+        d3dv_dessin d; inst_base(&d, blend);
+        for (int k = 0; k < 4; k++) q[k] = r[i];
+        d.flux[1].stride = 24; d.flux[1].donnees = q; d.flux[1].taille = sizeof q;   /* recopié dans l'anneau au dessin */
+        if (d3dv_dessiner(&d)) return -1;
+    }
+    return d3dv_lire(g_icible, px);
+}
+static int inst_dessin(const inst_rec *r, uint32_t n, int blend, const inst_opt *o, uint8_t *px)
+{
+    inst_effacer();
+    d3dv_dessin d; inst_base(&d, blend);
+    if (o->dsommet) { d.flux[0].donnees = g_coins; d.flux[0].taille = sizeof g_coins; d.decalage_sommet = o->dsommet; }
+    d.flux[1].stride = 24; d.flux[1].donnees = r; d.flux[1].taille = 24 * n;
+    if (o->obj) {                                                /* passe 10r : tampon invité statique (cache, dalle) */
+        d.flux[1].obj = o->obj; d.flux[1].gen = 1; d.flux[1].usage = 0; d.flux[1].taille_tot = o->taille_tot;
+        d.flux[1].donnees_tot = o->tot; d.flux[1].decalage = o->decalage;
+    }
+    d.instances = o->instances; d.flux_inst = o->flux_inst;
+    if (d3dv_dessiner(&d)) return -1;
+    return d3dv_lire(g_icible, px);
+}
+static uint32_t inst_ecarts(const uint8_t *a, const uint8_t *b)
+{
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < IW * IH * 4; i++) n += a[i] != b[i];
+    return n;
+}
+#define CHECKF(cond, ...) do { char m_[320]; snprintf(m_, sizeof m_, __VA_ARGS__); CHECK(cond, m_); } while (0)
+static uint32_t g_inst_alea;
+static uint32_t inst_alea(void) { g_inst_alea = g_inst_alea * 1103515245u + 12345u; return (g_inst_alea >> 8) & 0xFFFF; }
+static void tests_instanciation_gpu(void)
+{
+    g_ivs = d3dv_module(spv_inst_vert, sizeof spv_inst_vert / 4, 0);
+    g_ips = d3dv_module(spv_inst_frag, sizeof spv_inst_frag / 4, 1);
+    g_icible = d3dv_cible(0x5000, IW, IH, 22 /* X8R8G8B8 */, 0);
+    CHECKF(g_ivs >= 0 && g_ips >= 0 && g_icible >= 0, "V2.2 : modules inst.vert/inst.frag et cible 256×256 créés");
+    if (g_ivs < 0 || g_ips < 0 || g_icible < 0) return;
+    uint8_t *ref = malloc(IW * IH * 4), *img = malloc(IW * IH * 4);
+    static inst_rec grille[64], nuee[516];
+    for (int i = 0; i < 64; i++)
+        grille[i] = (inst_rec){ -1.f + (2.f * (float)(i % 8) + 1.f) / 8.f, -1.f + (2.f * (float)(i / 8) + 1.f) / 8.f, 0.1f, 0.1f,
+                                { (uint8_t)(32 * (i % 8) + 16), (uint8_t)(32 * (i / 8) + 16), 200, 255 }, 0xDEADBEEFu };
+    uint64_t d0, s0, d1, s1, d2, s2; int p0, p1, p2, q0, q2; uint32_t ecarts;
+    d3dv_compteurs_inst(&d0, &s0, NULL, &p0, &q0);
+    /* S1 et S6 : la référence crée d'abord le pipeline RATE_VERTEX */
+    int ok = inst_reference(grille, 64, 0, ref) == 0;
+    d3dv_compteurs_inst(&d1, &s1, NULL, &p1, NULL);
+    int cellules = 0;
+    for (int i = 0; i < 64; i++) {
+        const uint8_t *p = ref + 4 * ((size_t)(32 * (i / 8) + 16) * IW + 32 * (i % 8) + 16);
+        cellules += p[0] == grille[i].rgba[0] && p[1] == grille[i].rgba[1] && p[2] == 200;
+    }
+    const uint8_t *coin = ref + 4 * ((size_t)2 * IW + 2);
+    CHECKF(ok && cellules == 64 && !coin[0] && !coin[1] && !coin[2] && d1 == d0 && s1 == s0,
+          "V2.2 S1 référence : 64 dessins non instanciés, 64 cellules à leur teinte, fond noir, compteurs d'instances inchangés");
+    inst_opt o = { .instances = 64, .flux_inst = 2 };
+    ok = inst_dessin(grille, 64, 0, &o, img) == 0;
+    d3dv_compteurs_inst(&d2, &s2, NULL, &p2, &q2);
+    ecarts = inst_ecarts(img, ref);
+    CHECKF(ok && !ecarts, "V2.2 S1 : UN dessin de 64 instances (grille 8×8) = 64 dessins de référence, octet pour octet (%u octets "
+                         "différents)", ecarts);
+    CHECKF(d2 == d1 + 1 && s2 == s1 + 64, "V2.2 compteurs : +1 dessin à flux d'instance, +64 instances (%llu, %llu)",
+          (unsigned long long)(d2 - d1), (unsigned long long)(s2 - s1));
+    CHECKF(p1 - p0 == 1 && p2 - p1 == 1 && q2 == q0 + 1, "V2.2 S6 : taux dans la clé — pipeline RATE_VERTEX (référence, +%d) puis "
+          "pipeline RATE_INSTANCE distinct (+%d, dont %d à flux d'instance)", p1 - p0, p2 - p1, q2 - q0);
+    /* S4 : chemin d'avant — le test discrimine */
+    inst_opt avant = { 0 };
+    ok = inst_dessin(grille, 64, 0, &avant, img) == 0;
+    ecarts = inst_ecarts(img, ref);
+    CHECKF(ok && ecarts > 1000, "V2.2 S4 : chemin d'avant (instances 0, flux d'instance lu par sommet) ≠ référence (%u octets)", ecarts);
+    /* S5 : vertexOffset 4 sur la géométrie, flux d'instance non décalé */
+    inst_opt o5 = { .dsommet = 4, .instances = 64, .flux_inst = 2 };
+    ok = inst_dessin(grille, 64, 0, &o5, img) == 0;
+    ecarts = inst_ecarts(img, ref);
+    CHECKF(ok && !ecarts, "V2.2 S5 : vertexOffset 4 (géométrie aux éléments 4-7), flux d'instance non décalé : image de S1 (%u)", ecarts);
+    /* S3 : flux d'instance servi par le cache statique (création, puis réutilisation), à 48 octets du début du VB */
+    static uint8_t vb[48 + 64 * 24 + 24];
+    memset(vb, 0x5A, sizeof vb); memcpy(vb + 48, grille, sizeof grille);
+    inst_opt o3 = { .obj = 0x77770000u, .decalage = 48, .taille_tot = sizeof vb, .tot = vb, .instances = 64, .flux_inst = 2 };
+    uint32_t e3a, e3b;
+    ok = inst_dessin((const inst_rec *)(vb + 48), 64, 0, &o3, img) == 0; e3a = inst_ecarts(img, ref);
+    ok &= inst_dessin((const inst_rec *)(vb + 48), 64, 0, &o3, img) == 0; e3b = inst_ecarts(img, ref);
+    CHECKF(ok && !e3a && !e3b, "V2.2 S3 : flux d'instance par le cache statique (décalage 48), création puis réutilisation : image "
+                              "de S1 (%u, %u)", e3a, e3b);
+    /* V5.1 (revue adverse, MAJEUR 2) : branche TAMPONS de d3dv_oublier — même objet, même génération, AUTRES données
+     * (un VB neuf à l'adresse d'un VB rendu) : sans oubli, le cache sert l'ancien tampon ; après oubli, le nouveau. */
+    static inst_rec grille2[64]; static uint8_t vb2[sizeof vb]; uint8_t *ref2 = malloc(IW * IH * 4);
+    for (int i = 0; i < 64; i++) { grille2[i] = grille[i]; grille2[i].rgba[2] = 40; grille2[i].rgba[1] = (uint8_t)(255 - grille[i].rgba[1]); }
+    memset(vb2, 0x5A, sizeof vb2); memcpy(vb2 + 48, grille2, sizeof grille2);
+    int okr = inst_reference(grille2, 64, 0, ref2) == 0;
+    inst_opt o3b = o3; o3b.tot = vb2;
+    uint32_t avant_oubli, apres_oubli;
+    ok = inst_dessin((const inst_rec *)(vb2 + 48), 64, 0, &o3b, img) == 0; avant_oubli = inst_ecarts(img, ref2);
+    uint32_t xvb = 0x77770000u; d3dv_oublier(&xvb, 1);
+    ok &= inst_dessin((const inst_rec *)(vb2 + 48), 64, 0, &o3b, img) == 0; apres_oubli = inst_ecarts(img, ref2);
+    CHECKF(okr && ok && avant_oubli > 1000 && !apres_oubli, "V5.1 tampons : même VB et même génération, autres données — sans "
+          "oubli l'ancien tampon est servi (%u octets d'écart), après d3dv_oublier le nouveau (%u)", avant_oubli, apres_oubli);
+    free(ref2); d3dv_oublier(&xvb, 1);
+    /* S2 : 516 instances qui se chevauchent, en mélange alpha */
+    g_inst_alea = 0x22102026u;
+    for (int i = 0; i < 516; i++) {
+        nuee[i].cx = (float)inst_alea() / 65535.f * 1.2f - 0.6f; nuee[i].cy = (float)inst_alea() / 65535.f * 1.2f - 0.6f;
+        nuee[i].dx = 0.05f + (float)inst_alea() / 65535.f * 0.35f; nuee[i].dy = 0.05f + (float)inst_alea() / 65535.f * 0.35f;
+        for (int c = 0; c < 3; c++) nuee[i].rgba[c] = (uint8_t)inst_alea();
+        nuee[i].rgba[3] = (uint8_t)(64 + inst_alea() % 128); nuee[i].bourre = 0;
+    }
+    ok = inst_reference(nuee, 516, 1, ref) == 0;
+    uint32_t nonnoirs = 0;
+    for (uint32_t i = 0; i < IW * IH; i++) nonnoirs += ref[4 * i] || ref[4 * i + 1] || ref[4 * i + 2];
+    inst_opt o2 = { .instances = 516, .flux_inst = 2 };
+    ok &= inst_dessin(nuee, 516, 1, &o2, img) == 0;
+    ecarts = inst_ecarts(img, ref);
+    CHECKF(ok && !ecarts && nonnoirs > IW * IH / 4, "V2.2 S2 : 516 instances en mélange alpha = 516 dessins de référence, octet pour "
+          "octet (%u différents ; %u pixels couverts sur %u)", ecarts, nonnoirs, IW * IH);
+    free(ref); free(img);
+}
+
 int main(void)
 {
     tests_table_volatils();   /* passe 10t : pure, sans Vulkan — tourne même si le backend est absent */
+    tests_plage_consts();     /* passe 10t : idem */
     if (!d3dv_init()) { printf("SKIP  backend Vulkan indisponible\n"); return 77; }
     printf("device : %s\n", d3dv_nom_device());
     CHECK(d3dv_actif(), "backend actif");
@@ -229,6 +478,8 @@ int main(void)
     CHECK(d3dv_present(bb, NULL, NULL) == 0, "Present sans relecture");
 
     tests_textures();
+    tests_oubli();               /* V5.1 */
+    tests_instanciation_gpu();   /* V2.2 */
     d3dv_bilan();
     free(px);
     printf("\nRÉSULTAT : %d PASS, %d FAIL\n", g_pass, g_fail);

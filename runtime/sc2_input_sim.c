@@ -11,6 +11,13 @@
  * Horloge des scripts : « frame n » = n-ième appel de la pompe du jeu (PeekMessageW dont l'adresse de
  * retour est 0x0099A3CC, une fois par frame au boot) — pas d'accès au compteur de Present (sc2_d3d9).
  * Chaque message injecté qui atteint la wndproc du jeu est tracé [INPUT] avec la valeur rendue.
+ *
+ * V3 (M1, 22/10) — plate-forme de bureau qui fournit ses CARACTÈRES (Mac : NSEvent.characters) : un message clavier posté
+ * par sc2_input_touche_plateforme est MARQUÉ (msg_t.fourni) ; prendre(retirer) recopie la marque dans I.dernier_fourni et
+ * i_TranslateMessage n'en synthétise aucun WM_CHAR (la pompe enchaîne GetMessageW → TranslateMessage → DispatchMessageW
+ * sans autre prise entre deux) ; les caractères arrivent par sc2_input_caractere. Focus : sc2_input_activation suspend
+ * l'auto-activation (activation()) tant que l'hôte dit « inactif », sc2_input_tout_relacher relâche touches et boutons.
+ * Sans ces appels (banc, SC2_INPUT_SIM, SC2_BANC_ENTREES, Android) : comportement d'avant, synthèse US comprise.
  */
 #define _GNU_SOURCE
 #include "sc2_input.h"
@@ -44,7 +51,7 @@ typedef struct { uint32_t frame; int genre; uint32_t vk; int32_t x, y; int bouto
                  int c_sens, c_texte, c_pv, c_seuil; /* 8e : sauf: (1) / si: (2) sur un texte ou un relevé de PV */
                  int saute, bloc, repere;            /* 8e : sinon:saute, bloc:<n>, repere */
                  uint32_t debut; uint64_t seq0; } evt_t;  /* 8e : début de l'attente (tour, n° de texte lu) */
-typedef struct { uint32_t hwnd, msg, wp, lp; int32_t x, y; } msg_t;
+typedef struct { uint32_t hwnd, msg, wp, lp; int32_t x, y; uint8_t fourni; } msg_t;   /* M1 : fourni = caractères par la plate-forme */
 
 static struct {
     int actif, essaye, contourne;
@@ -61,6 +68,8 @@ static struct {
     uint64_t n_sautes;                            /* 8e : événements sautés (sauf:/si:/sinon:saute + leur bloc) */
     int bloc_saute;                               /* 8e : bloc en cours de saut (0 : aucun) */
     int textes;                                   /* 8e : le script utilise des conditions de texte ou de PV */
+    uint8_t dernier_fourni;                       /* M1 : marque du dernier message RETIRÉ (lue par i_TranslateMessage) */
+    uint32_t dernier_lp;                          /* M1 : lParam du dernier KEYDOWN de la plate-forme (WM_CHAR) */
     char script[512];
 } I = { .mu = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP, .x = 512, .y = 384 };   /* récursif : appliquer() → sc2_input_*() */
 
@@ -79,13 +88,14 @@ static uint32_t appel_origine(const char *nom, CPU *c, uint32_t *args)
 }
 
 /* ---- état ------------------------------------------------------------------------- */
-static void poster(uint32_t msg, uint32_t wp, uint32_t lp)
+static void poster_f(uint32_t msg, uint32_t wp, uint32_t lp, int fourni)   /* M1 : fourni = message marqué */
 {
     if (I.flen >= 256) return;
     msg_t *m = &I.file[(I.fdeb + I.flen++) % 256];
-    m->hwnd = 0; m->msg = msg; m->wp = wp; m->lp = lp; m->x = I.x; m->y = I.y;
+    m->hwnd = 0; m->msg = msg; m->wp = wp; m->lp = lp; m->x = I.x; m->y = I.y; m->fourni = (uint8_t)(fourni != 0);
     I.n_injectes++;
 }
+static void poster(uint32_t msg, uint32_t wp, uint32_t lp) { poster_f(msg, wp, lp, 0); }
 static uint32_t lp_souris(void) { return ((uint32_t)(uint16_t)I.y << 16) | (uint16_t)I.x; }
 /* Passe 8h (clavier Bluetooth) : code de balayage « set 1 » d'un VK (clavier US 101/102 touches), bit 8 = touche
  * étendue (bit 24 du lParam). Ce que TranslateMessage / le jeu lisent dans lParam : bits 16–23 scan, 24 étendue, 29 Alt
@@ -112,9 +122,8 @@ static uint32_t scan_de(uint32_t vk)
     for (unsigned k = 0; k < sizeof t / sizeof t[0]; k++) if (t[k].vk == vk) return t[k].sc;
     return 0;
 }
-void sc2_input_touche(uint32_t vk, int bas)
+static void touche(uint32_t vk, int bas, int fourni)       /* sous I.mu ; M1 : fourni = sc2_input_touche_plateforme */
 {
-    pthread_mutex_lock(&I.mu);
     vk &= 0xFF;
     uint32_t msg_vk = vk, sc = scan_de(vk);
     int prec = I.bas[vk];                                /* passe 8h : répétition = enfoncée alors qu'elle l'était */
@@ -132,7 +141,37 @@ void sc2_input_touche(uint32_t vk, int bas)
     int alt = I.bas[0x12] || msg_vk == 0x79;             /* Alt maintenue (ou F10) → WM_SYSKEY*, bit 29 */
     uint32_t lp = 1u | (sc & 0xFF) << 16 | (sc & 0x100 ? 1u << 24 : 0) | (alt && I.bas[0x12] ? 1u << 29 : 0)
                      | (bas ? (prec ? 1u << 30 : 0) : 0xC0000000u);
-    poster(alt ? (bas ? WM_SYSKEYDOWN : WM_SYSKEYUP) : (bas ? WM_KEYDOWN : WM_KEYUP), msg_vk, lp);
+    poster_f(alt ? (bas ? WM_SYSKEYDOWN : WM_SYSKEYUP) : (bas ? WM_KEYDOWN : WM_KEYUP), msg_vk, lp, fourni);
+    if (fourni && bas) I.dernier_lp = lp;                /* M1 : lParam des WM_CHAR de sc2_input_caractere */
+}
+void sc2_input_touche(uint32_t vk, int bas)
+{
+    pthread_mutex_lock(&I.mu);
+    touche(vk, bas, 0);
+    pthread_mutex_unlock(&I.mu);
+}
+/* M1 (V3) : même message que sc2_input_touche, MARQUÉ : i_TranslateMessage n'en synthétise aucun WM_CHAR. */
+void sc2_input_touche_plateforme(uint32_t vk, int bas)
+{
+    pthread_mutex_lock(&I.mu);
+    touche(vk, bas, 1);
+    pthread_mutex_unlock(&I.mu);
+}
+/* M1 (V3) : caractère fourni par la plate-forme (UTF-32) → WM_CHAR, ou WM_SYSCHAR si VK_MENU est tenue (le KEYDOWN était
+ * alors un WM_SYSKEYDOWN) ; hors BMP, deux messages (paire de substitution UTF-16) ; une unité UTF-16 isolée (0xD800-
+ * 0xDFFF, NSString vu unité par unité) passe telle quelle ; 0 et > 0x10FFFF ignorés. lParam = celui du dernier KEYDOWN
+ * de la plate-forme (1 avant le premier). Appelé juste après sc2_input_touche_plateforme(vk, 1) : ordre Win32 KEYDOWN,
+ * CHAR, KEYUP. */
+void sc2_input_caractere(uint32_t cp)
+{
+    if (!cp || cp > 0x10FFFFu) return;
+    pthread_mutex_lock(&I.mu);
+    uint32_t m = I.bas[0x12] ? WM_SYSCHAR : WM_CHAR, lp = I.dernier_lp ? I.dernier_lp : 1u;
+    if (cp > 0xFFFFu) {
+        cp -= 0x10000u;
+        poster(m, 0xD800u | (cp >> 10), lp);
+        poster(m, 0xDC00u | (cp & 0x3FFu), lp);
+    } else poster(m, cp, lp);
     pthread_mutex_unlock(&I.mu);
 }
 /* Passe 8h : molette. delta en unités Win32 (± 120 par cran ; > 0 = vers l'avant / la droite), position = curseur courant
@@ -457,6 +496,7 @@ static int prendre(CPU *c, uint32_t pmsg, uint32_t min, uint32_t max, int retire
         I.temps = sc2_tick_ms();                         /* passe 9j : MSG.time en ms (était un compteur 1, 2, 3…) */
         wr32(pmsg + 16, I.temps); wr32(pmsg + 20, (uint32_t)m->x); wr32(pmsg + 24, (uint32_t)m->y);
         if (retirer) {                                   /* retrait (k = 0 au boot : file en ordre) */
+            I.dernier_fourni = m->fourni;                /* M1 : lu par le TranslateMessage qui suit */
             for (int j = k; j > 0; j--) I.file[(I.fdeb + j) % 256] = I.file[(I.fdeb + j - 1) % 256];
             I.fdeb = (I.fdeb + 1) % 256; I.flen--;
             I.n_livres++;
@@ -465,11 +505,85 @@ static int prendre(CPU *c, uint32_t pmsg, uint32_t min, uint32_t max, int retire
     }
     return 0;
 }
+/* 21/10 : ACTIVATION de l'application. Aucun WM_ACTIVATEAPP n'était jamais livré : le jeu se croyait en arrière-plan,
+ * drapeau [0x0169A62C] à 0 (écrit par le gestionnaire d'activation L_00804490), et sa boucle principale (L_00807F20)
+ * faisait « if (![0x0169A62C]) Sleep(10) » à CHAQUE tour : ≈ 10 ms d'attente par image (53 % du fil du jeu au banc).
+ * Tant que le drapeau vaut 0, on poste WM_ACTIVATEAPP(TRUE) + WM_ACTIVATE(WA_ACTIVE) à la wndproc, au plus une fois
+ * tous les 60 tours de pompe. SC2_ACTIVATION=0 : rien (comportement d'avant). */
+#define ACTIF_VA 0x0169A62Cu
+/* M1 (V3) : l'état de l'auto-activation (ex-statiques de activation()) est partagé avec sc2_input_activation. hote_inactif :
+ * la plate-forme a perdu le focus → activation() ne reposte rien ; n_hote : envois de l'hôte (WM_ACTIVATEAPP(1) posté par
+ * sc2_input_activation(1) : l'auto-activation attend ensuite 60 tours comme après l'un des siens, sans doublon). */
+static struct { int mode, vu_actif, hote_inactif; uint32_t dernier; unsigned n, n_hote; } ACT = { .mode = -1 };
+static int activation_mode(void)
+{
+    if (ACT.mode < 0) { const char *e = getenv("SC2_ACTIVATION"); ACT.mode = !(e && *e == '0'); }
+    return ACT.mode;
+}
+static void activation(void)
+{
+    if (!activation_mode()) return;
+    if (ACT.hote_inactif) return;                        /* M1 : perte du focus annoncée par l'hôte : rien n'est reposté */
+    if (rd32(ACTIF_VA)) {
+        if (!ACT.vu_actif) { ACT.vu_actif = 1; sc2_log("[INPUT] activation : jeu ACTIF au tour %u (%u envoi(s))", I.frame, ACT.n); }
+        return;
+    }
+    if ((ACT.n || ACT.n_hote) && I.frame - ACT.dernier < 60) return;
+    ACT.dernier = I.frame; ACT.n++;
+    poster(0x1C /* WM_ACTIVATEAPP */, 1, 0); poster(0x06 /* WM_ACTIVATE */, 1 /* WA_ACTIVE */, 0);
+    if (ACT.n <= 3 || !(ACT.n & (ACT.n - 1)))
+        sc2_log("[INPUT] activation : WM_ACTIVATEAPP + WM_ACTIVATE postés (tour %u, envoi n°%u) — [0x%08X] = 0", I.frame, ACT.n,
+                ACTIF_VA);
+}
+/* M1 (V3) : focus de la plate-forme, tous les fils. 0 (perte) : WM_ACTIVATEAPP(0) + WM_ACTIVATE(WA_INACTIVE) postés tout
+ * de suite, auto-activation suspendue ; 1 (retour) : WM_ACTIVATEAPP(1) + WM_ACTIVATE(WA_ACTIVE) postés tout de suite (livrés
+ * au tour de pompe suivant), auto-activation reprise. Rien n'est posté si l'état ne change pas, si le module est inactif
+ * (état mémorisé : il vaudra à l'activation du module) ou sous SC2_ACTIVATION=0 (aucune activation, comme avant). */
+void sc2_input_activation(int actif)
+{
+    pthread_mutex_lock(&I.mu);
+    actif = actif != 0;
+    int avant = !ACT.hote_inactif;
+    ACT.hote_inactif = !actif;
+    const char *pourquoi = actif == avant ? "inchangé, rien de posté"
+                         : !I.actif ? "module d'entrées inactif : état mémorisé, rien de posté"
+                         : !activation_mode() ? "SC2_ACTIVATION=0 : rien de posté" : NULL;
+    if (!pourquoi) {
+        poster(0x1C /* WM_ACTIVATEAPP */, (uint32_t)actif, 0);
+        poster(0x06 /* WM_ACTIVATE */, (uint32_t)actif /* WA_ACTIVE : WA_INACTIVE */, 0);
+        if (actif) { ACT.dernier = I.frame; ACT.n_hote++; }
+        else ACT.vu_actif = 0;                           /* le retour à l'état actif sera de nouveau journalisé */
+    }
+    sc2_log("[ACTIVATION] hôte : %s (tour %u)%s%s", actif ? "actif" : "inactif", I.frame,
+            pourquoi ? " — " : " — WM_ACTIVATEAPP + WM_ACTIVATE postés", pourquoi ? pourquoi : "");
+    pthread_mutex_unlock(&I.mu);
+}
+/* M1 (V3) : relâche tout (perte du focus) : KEYUP (SYSKEYUP si Alt tenue) de chaque touche tenue, dans l'ordre des VK,
+ * boutons de souris exclus (1, 2, 4) ; un VK générique 0x10-0x12 l'est par ses variantes gauche/droite tenues (un seul
+ * message par touche physique), seul s'il n'en a aucune ; puis les boutons tenus (gauche, milieu, droit). L'état bascule
+ * (Verr. maj) est intact : GetAsyncKeyState, relu par le jeu à l'activation, trouve tout relâché. */
+void sc2_input_tout_relacher(void)
+{
+    static const uint32_t vk_bouton[3] = { 0x01, 0x04, 0x02 };
+    pthread_mutex_lock(&I.mu);
+    int nt = 0, nb = 0;
+    for (uint32_t vk = 0; vk < 256; vk++) {
+        if (!I.bas[vk] || vk == 0x01 || vk == 0x02 || vk == 0x04) continue;
+        if (vk >= 0x10 && vk <= 0x12) {
+            uint32_t g = vk == 0x10 ? 0xA0 : vk == 0x11 ? 0xA2 : 0xA4;
+            if (I.bas[g] || I.bas[g + 1]) continue;
+        }
+        touche(vk, 0, 0); nt++;
+    }
+    for (int b = 0; b < 3; b++) if (I.bas[vk_bouton[b]]) { sc2_input_bouton(b, 0); nb++; }
+    sc2_log("[INPUT] hôte : tout relâché (tour %u) — %d touche(s), %d bouton(s)", I.frame, nt, nb);
+    pthread_mutex_unlock(&I.mu);
+}
 static uint32_t i_PeekMessageW(CPU *c, const uint32_t *a)        /* (msg*, hwnd, min, max, retrait) */
 {
     if (rd32(c->esp) == POMPE_VA) sc2_banc_entrees_tour();   /* passe 10i : hors verrou (sc2_input_* le prennent) */
     pthread_mutex_lock(&I.mu);
-    if (rd32(c->esp) == POMPE_VA) { appliquer(++I.frame); sc2_glue_pompe(c); }
+    if (rd32(c->esp) == POMPE_VA) { appliquer(++I.frame); activation(); sc2_glue_pompe(c); }
     int r = prendre(c, A(0), A(2), A(3), A(4) & 1);
     pthread_mutex_unlock(&I.mu);
     return (uint32_t)r;                                  /* file vide : 0, comme avant */
@@ -480,6 +594,7 @@ static uint32_t i_GetMessageW(CPU *c, const uint32_t *a)         /* (msg*, hwnd,
     int r = prendre(c, A(0), A(2), A(3), 1);
     if (!r) {                                            /* la pompe ne l'appelle qu'après un Peek non vide */
         memset(GPTR(A(0)), 0, 28); wr32(A(0), fenetre(c)); wr32(A(0) + 4, WM_NULL);
+        I.dernier_fourni = 0;                            /* M1 : WM_NULL n'est pas marqué */
     }
     pthread_mutex_unlock(&I.mu);
     return 1;                                            /* jamais WM_QUIT */
@@ -487,6 +602,7 @@ static uint32_t i_GetMessageW(CPU *c, const uint32_t *a)         /* (msg*, hwnd,
 static uint32_t i_TranslateMessage(CPU *c, const uint32_t *a)    /* WM_KEYDOWN imprimable → WM_CHAR */
 {
     (void)c;
+    if (I.dernier_fourni) return 0;                      /* M1 : la plate-forme fournit ses caractères (sc2_input_caractere) */
     uint32_t m = rd32(A(0) + 4);
     if (m != WM_KEYDOWN && m != WM_SYSKEYDOWN) return 0;
     uint32_t vk = rd32(A(0) + 8), ch = 0;

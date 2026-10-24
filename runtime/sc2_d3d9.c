@@ -17,6 +17,8 @@
 #define _GNU_SOURCE
 #include "sc2_d3d9.h"
 #include "sc2_d3d9v.h"
+#include "sc2_d3d9_inst.h"            /* V2.2 : plan d'instanciation (SetStreamSourceFreq → Vulkan), pur */
+#include "sc2_d3d9_file.h"            /* V5.1 : file de libération des ressources, pure */
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>            /* VkFormat des attributs de sommets (passe 5d) */
 /* Table des shaders du jeu traduits hors-ligne (scripts/d3d9-vers-spirv.py, hors git :
@@ -31,11 +33,13 @@ typedef struct { uint64_t hash; uint8_t ps; uint8_t nentrees; sc2_spv_entree ent
 #define SC2_SPV_OMBRES 1
 static const sc2_spv_shader SC2_SHADERS_SPV[1] = { { 0 } };
 #endif
+#include "sc2_spv_pack.h"    /* passe 10t : pack SPIR-V externe sc2-spirv.pak (mmap), consulté si la table embarquée manque un shader */
 
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>          /* strncasecmp : préfixes réservés des captures */
 #include <sys/stat.h>
 
 typedef uint32_t (*com_fn)(CPU *c, uint32_t self, const uint32_t *a);
@@ -50,12 +54,16 @@ static pthread_mutex_t g_com_mu = PTHREAD_MUTEX_INITIALIZER;
 enum { O_VTBL = 0, O_REF = 4, O_W = 8, O_H = 12, O_FMT = 16, O_LEVELS = 20, O_SIZE = 24,
        O_BUF = 28, O_USAGE = 32, O_POOL = 36, O_DEPTH = 40, O_KIND = 44, O_AUX = 48,
        O_GEN = 52 /* passe 5d : génération du contenu (Lock) */, O_LEVEL = 56 /* niveau d'une surface de texture */,
-       O_SIZEOF = 64 };
+       O_ETAT = 60 /* V5.1 : bit 0 en file de libération, bit 1 jamais rendu */, O_SIZEOF = 64 };
 
+/* V5.1 : objets créés par genre (O_KIND : 1 surface, 3 texture, 4 volume, 5 cube, 6 VB, 7 IB ; 0 = autre), libérés,
+ * octets de données rendus — lignes [MEM] (sc2_d3d9_mem) */
+static uint64_t g_mo_crees[8], g_mo_liberes[8], g_mo_o_rendus;
 static uint32_t obj_new(com_class *k, uint32_t kind)
 {
-    uint32_t o = sc2_alloc(O_SIZEOF);
+    uint32_t o = sc2_alloc_de(O_SIZEOF, SC2_MO_D3D_OBJ);
     wr32(o + O_VTBL, k->vtbl); wr32(o + O_REF, 1); wr32(o + O_KIND, kind);
+    __atomic_add_fetch(&g_mo_crees[kind < 8 ? kind : 0], 1, __ATOMIC_RELAXED);
     return o;
 }
 
@@ -65,8 +73,14 @@ static uint32_t m_zero(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s
 static uint32_t m_one(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; (void)a; return 1; }
 static uint32_t m_AddRef(CPU *c, uint32_t s, const uint32_t *a)
 { (void)c; (void)a; uint32_t r = rd32(s + O_REF) + 1; wr32(s + O_REF, r); return r; }
+static void liberable(uint32_t s);              /* V5.1, plus bas : référence tombée à zéro */
+static int liberer_actif(void);
 static uint32_t m_Release(CPU *c, uint32_t s, const uint32_t *a)
-{ (void)c; (void)a; uint32_t r = rd32(s + O_REF); if (r) r--; wr32(s + O_REF, r); return r; }
+{
+    (void)c; (void)a; uint32_t r0 = rd32(s + O_REF), r = r0 ? r0 - 1 : 0; wr32(s + O_REF, r);
+    if (r0 == 1 && liberer_actif()) liberable(s);   /* V5.1 : 1 → 0 seulement (un Release de trop ne relibère rien) */
+    return r;
+}
 static uint32_t m_QueryInterface(CPU *c, uint32_t s, const uint32_t *a)
 { (void)c; if (A(1)) wr32(A(1), s); m_AddRef(c, s, a); return 0; }
 static uint32_t g_device;                       /* l'unique IDirect3DDevice9 factice */
@@ -112,11 +126,19 @@ static uint32_t pitch_of(uint32_t f, uint32_t w)
 static uint32_t rows_of(uint32_t f, uint32_t h) { return fmt_bloc(f) ? ((h + 3) / 4 ? (h + 3) / 4 : 1) : h; }
 
 /* Mémoire de verrouillage : allouée au premier Lock, taille du niveau 0, réutilisée. */
+static unsigned mo_de(uint32_t o)             /* V5.1 : origine [MEM] des données d'un objet, par genre */
+{
+    switch (rd32(o + O_KIND)) {
+    case 1: return SC2_MO_D3D_SURF; case 3: return SC2_MO_D3D_TEX; case 4: return SC2_MO_D3D_VOL;
+    case 5: return SC2_MO_D3D_CUBE; case 6: return SC2_MO_D3D_VB; case 7: return SC2_MO_D3D_IB;
+    default: return SC2_MO_D3D_OBJ;
+    }
+}
 static uint32_t buf_of(uint32_t o, uint32_t size)
 {
     uint32_t b = rd32(o + O_BUF);
     if (!b || rd32(o + O_SIZE) < size) {
-        b = sc2_alloc(size ? size : 16); wr32(o + O_BUF, b); wr32(o + O_SIZE, size);
+        b = sc2_alloc_de(size ? size : 16, mo_de(o)); wr32(o + O_BUF, b); wr32(o + O_SIZE, size);
     }
     return b;
 }
@@ -235,16 +257,25 @@ static uint32_t t_GetLevelDesc(CPU *c, uint32_t s, const uint32_t *a) { (void)c;
 static struct { uint32_t tex, code, sf; } g_surfc[NSURFC];
 static pthread_mutex_t g_surfc_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t g_n_surfc_neuves, g_n_surfc_reprises;
+/* V5.1 : une texture rendue à l'arène retire ses surfaces du cache — case TOMBE (tex = 1, jamais une adresse d'objet),
+ * que la recherche traverse et que l'insertion reprend ; au-delà de NSURFC / 4 pierres tombales, table recompactée. */
+#define SURFC_TOMBE 1u
+static uint32_t g_surfc_tombes;
+static uint32_t surfc_case(uint32_t s, uint32_t code) { return ((s >> 4) * 2654435761u ^ code * 40503u) % NSURFC; }
 static uint32_t surf_niveau(uint32_t s, uint32_t niveau, uint32_t code)
 {
     pthread_mutex_lock(&g_surfc_mu);
-    uint32_t k = ((s >> 4) * 2654435761u ^ code * 40503u) % NSURFC, n = 0, sf = 0;
-    for (; n < NSURFC && g_surfc[k].tex; k = (k + 1) % NSURFC, n++)
+    uint32_t k = surfc_case(s, code), n = 0, sf = 0, libre = ~0u;
+    for (; n < NSURFC && g_surfc[k].tex; k = (k + 1) % NSURFC, n++) {
+        if (g_surfc[k].tex == SURFC_TOMBE) { if (libre == ~0u) libre = k; continue; }   /* V5.1 */
         if (g_surfc[k].tex == s && g_surfc[k].code == code) { sf = g_surfc[k].sf; break; }
+    }
     if (sf) { wr32(sf + O_REF, rd32(sf + O_REF) + 1); g_n_surfc_reprises++; pthread_mutex_unlock(&g_surfc_mu); return sf; }
     sf = surf_new(lvl(rd32(s + O_W), niveau), lvl(rd32(s + O_H), niveau), rd32(s + O_FMT), rd32(s + O_USAGE), rd32(s + O_POOL));
     wr32(sf + O_AUX, s); wr32(sf + O_LEVEL, code);
+    if (libre != ~0u) { k = libre; n = 0; g_surfc_tombes--; }   /* V5.1 : pierre tombale reprise */
     if (n < NSURFC) { g_surfc[k].tex = s; g_surfc[k].code = code; g_surfc[k].sf = sf; }
+    else wr32(s + O_ETAT, rd32(s + O_ETAT) | 2u);   /* V5.1 : surface hors cache → conteneur jamais rendu (ETAT_JAMAIS) */
     g_n_surfc_neuves++;
     pthread_mutex_unlock(&g_surfc_mu);
     return sf;
@@ -339,33 +370,110 @@ uint32_t sc2_frames_presentees(void) { return __atomic_load_n(&g_frames, __ATOMI
 static int cible_de(uint32_t surf);
 static int shader_id(uint32_t o) { int i = o ? (int)rd32(o + O_AUX) - 1 : -1; return i >= 0 && i < g_nshaders ? i : -1; }
 static uint32_t g_backbuf_va;                 /* = D.backbuf (déclaré plus bas) */
+/* 22/10 : CAPTURE:<nom> (banc d'entrées V1.1, sc2_banc_capture_prendre) — le Present suivant écrit
+ * <SC2_FRAMES_DIR>/<nom>.ppm, MÊME sous SC2_FRAMES=0 (demande explicite), et toutes les cibles de rendu si
+ * SC2_CIBLES_DUMP=capture. Nom contrôlé : 1 à 96 caractères de [A-Za-z0-9_.-], sans point initial (ni chemin ni fichier
+ * caché), ni préfixe réservé « frame_ », « cible_ », « video_ » quelle que soit la casse (APFS l'ignore) : ce sont les PPM
+ * que la règle 1/10/100, SC2_CIBLES_DUMP et le banc vidéo écrivent dans le même dossier ; « frame_00100 » à la frame 100
+ * ferait de la capture et de la frame un seul fichier, tronqué à 0 octet par la copie. Sinon refus journalisé.
+ * SC2_CAPTURE_TEST="<frame>:<nom>[,…]" simule la demande (test sans le banc d'entrées). */
+static int capture_nom_valide(const char *nc)
+{
+    size_t n = strlen(nc);
+    if (!n || n > 96 || nc[0] == '.') return 0;
+    if (!strncasecmp(nc, "frame_", 6) || !strncasecmp(nc, "cible_", 6) || !strncasecmp(nc, "video_", 6)) return 0;
+    for (size_t i = 0; i < n; i++) {
+        char ch = nc[i];
+        if (!((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' || ch == '-'))
+            return 0;
+    }
+    return 1;
+}
+static const char *capture_test(uint32_t n)
+{
+    static int lu, nt;
+    static struct { uint32_t f; char nom[128]; } t[16];
+    if (!lu) {
+        lu = 1;
+        const char *e = getenv("SC2_CAPTURE_TEST");
+        char buf[1024]; snprintf(buf, sizeof buf, "%s", e ? e : "");
+        for (char *it = strtok(buf, ","); it && nt < 16; it = strtok(NULL, ",")) {
+            char *dp = strchr(it, ':');
+            if (!dp) continue;
+            *dp = 0; t[nt].f = (uint32_t)strtoul(it, NULL, 10);
+            snprintf(t[nt].nom, sizeof t[nt].nom, "%s", dp + 1); nt++;
+        }
+        if (nt) sc2_log("[CAPTURE] SC2_CAPTURE_TEST : %d capture(s) simulée(s)", nt);
+    }
+    for (int i = 0; i < nt; i++) if (t[i].f == n) return t[i].nom;
+    return NULL;
+}
+static int copier_fichier(const char *de, const char *vers)
+{
+    /* même fichier (casse ignorée par APFS, lien) : fopen « wb » le tronquerait avant toute lecture ; un strcmp des
+     * chemins ne suffit pas. Le contenu y est déjà : rien à copier. */
+    struct stat sa, sb;
+    if (!stat(de, &sa) && !stat(vers, &sb) && sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino) return 0;
+    FILE *a = fopen(de, "rb"), *b = a ? fopen(vers, "wb") : NULL;
+    int ok = a && b;
+    static char tampon[1 << 16];
+    for (size_t k; ok && (k = fread(tampon, 1, sizeof tampon, a)) > 0;) ok = fwrite(tampon, 1, k, b) == k;
+    if (a) fclose(a);
+    if (b && fclose(b)) ok = 0;
+    return ok ? 0 : -1;
+}
 /* Passe 5c : PPM du back buffer aux frames 1, 10, 100 puis toutes les 100 (+ SC2_FRAMES_PAS, passe 7m). */
 static void present_vk(uint32_t n)
 {
-    if (!d3dv_actif()) return;
+    const char *nc = sc2_banc_capture_prendre();     /* rendue une fois puis oubliée : prise même sans backend */
+    if (!nc) nc = capture_test(n);
+    if (!d3dv_actif()) { if (nc) sc2_log("[CAPTURE] « %.96s » à la frame %u : backend Vulkan inactif, rien d'écrit", nc, n); return; }
     /* passe 7m : SC2_FRAMES_PAS=<k> → aussi une frame toutes les k (écran éphémère avant un arrêt) ;
-     * passe 8f : SC2_FRAMES_TOUTES=<n> → TOUTES les frames 1..n (paliers du chargement de la démo) */
+     * passe 8f : SC2_FRAMES_TOUTES=<n> → TOUTES les frames 1..n (paliers du chargement de la démo) ;
+     * V0.1 : SC2_FRAMES=0 → AUCUNE de ces captures (ni 1/10/100, ni PAS, ni TOUTES : pas de relecture du back buffer) ;
+     *        SC2_FRAMES_BASE=0 → sans la seule règle 1/10/100 (PAS et TOUTES restent actifs). Seule la valeur « 0 »
+     *        coupe ; absentes, comportement d'avant. SC2_CIBLES_DUMP (demande explicite, plus bas) n'en dépend pas. */
     static uint32_t pas = ~0u, toutes = ~0u;
+    static int captures = -1, base = -1;
+    if (captures < 0) { const char *e = getenv("SC2_FRAMES"); captures = !(e && !strcmp(e, "0")); }
+    if (base < 0) { const char *e = getenv("SC2_FRAMES_BASE"); base = !(e && !strcmp(e, "0")); }
     if (pas == ~0u) { const char *e = getenv("SC2_FRAMES_PAS"); pas = e ? (uint32_t)strtoul(e, NULL, 10) : 0; }
     if (toutes == ~0u) { const char *e = getenv("SC2_FRAMES_TOUTES"); toutes = e ? (uint32_t)strtoul(e, NULL, 10) : 0; }
-    int sauver = n == 1 || n == 10 || n % 100 == 0 || (pas && n % pas == 0) || n <= toutes;
+    int sauver = captures && ((base && (n == 1 || n == 10 || n % 100 == 0)) || (pas && n % pas == 0) || n <= toutes);
     char chemin[512] = "";
     if (sauver) {
         const char *dir = getenv("SC2_FRAMES_DIR"); if (!dir || !*dir) dir = "frames";
         mkdir(dir, 0755);
         snprintf(chemin, sizeof chemin, "%s/frame_%05u.ppm", dir, n);
     }
+    char capt[600] = "";
+    if (nc && !capture_nom_valide(nc)) {
+        sc2_log("[CAPTURE] nom refusé « %.96s » (frame %u) : 1 à 96 caractères de [A-Za-z0-9_.-], sans point initial "
+                "ni préfixe réservé frame_/cible_/video_", nc, n);
+        nc = NULL;
+    }
+    static const char *dir;
+    if (!dir) { dir = getenv("SC2_FRAMES_DIR"); if (!dir || !*dir) dir = "frames"; }
+    if (nc) { mkdir(dir, 0755); snprintf(capt, sizeof capt, "%s/%s.ppm", dir, nc); }
     double moy[3] = { 0, 0, 0 };
-    /* passe 7m : SC2_CIBLES_DUMP=<frame> → toutes les cibles de rendu en PPM (dans SC2_FRAMES_DIR) */
+    /* passe 7m : SC2_CIBLES_DUMP=<frame> → toutes les cibles de rendu en PPM (dans SC2_FRAMES_DIR) ;
+     * 22/10 : SC2_CIBLES_DUMP=capture → à chaque CAPTURE (cible_<frame>_<i>_<L>x<H>.ppm, frame journalisée) */
     static uint32_t fc = ~0u;
-    if (fc == ~0u) { const char *e = getenv("SC2_CIBLES_DUMP"); fc = e ? (uint32_t)strtoul(e, NULL, 10) : 0; }
-    if (fc && n == fc) { const char *dir = getenv("SC2_FRAMES_DIR"); d3dv_vider_cibles(dir && *dir ? dir : "frames", n); }
-    int r = d3dv_present(cible_de(g_backbuf_va), sauver ? chemin : NULL, moy);
+    static int fc_capture;
+    if (fc == ~0u) { const char *e = getenv("SC2_CIBLES_DUMP"); fc = e ? (uint32_t)strtoul(e, NULL, 10) : 0; fc_capture = e && !strcmp(e, "capture"); }
+    int cibles = (fc && n == fc) || (nc && fc_capture);
+    if (cibles) d3dv_vider_cibles(dir, n);
+    int r = d3dv_present(cible_de(g_backbuf_va), nc ? capt : sauver ? chemin : NULL, moy);
+    if (nc && sauver && !r && copier_fichier(capt, chemin)) r = -1;   /* frame de la règle 1/10/100 aussi : même image */
+    if (nc)
+        sc2_log("[CAPTURE] « %s » : frame n°%u → %s : %s, moyenne RGB %.2f %.2f %.2f%s", nc, n, capt, r ? "ÉCHEC" : "écrit",
+                moy[0], moy[1], moy[2], cibles ? " ; cibles de rendu : cible_*.ppm de la même frame" : "");
     if (sauver)
         sc2_trace("[VK] Present frame n°%u → %s : %s, moyenne RGB %.2f %.2f %.2f%s", n, chemin, r ? "ÉCHEC" : "écrit",
                 moy[0], moy[1], moy[2], !r && (moy[0] + moy[1] + moy[2]) > 0 ? " (NON NOIRE)" : "");
 }
 static void ui2d_fenetre(uint32_t n);   /* passe 10k, plus bas */
+static void zombies_traiter(uint32_t n);   /* V5.1, plus bas */
 static uint32_t m_Present(CPU *c, uint32_t s, const uint32_t *a)
 {
     (void)s; (void)a;
@@ -374,6 +482,7 @@ static uint32_t m_Present(CPU *c, uint32_t s, const uint32_t *a)
         sc2_trace("[D3D9] Present : FRAME n°%u présentée (%s, appelant 0x%08X)", n,
                 d3dv_actif() ? "back buffer Vulkan" : "device factice", rd32(c->esp));
     present_vk(n);
+    zombies_traiter(n);                              /* V5.1 : après la soumission de la frame */
     ui2d_fenetre(n);
     /* SC2_FRAMES_MAX=N : arrêt volontaire et propre après N frames (run de référence). */
     static uint32_t max = 1;
@@ -409,15 +518,50 @@ static void ecran_init(void)
 static void mode_ecrire(uint32_t m)
 { wr32(m + 0, ECRAN_W); wr32(m + 4, ECRAN_H); wr32(m + 8, 60); wr32(m + 12, FMT_X8R8G8B8); }
 static uint32_t d_GetAdapterCount(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; (void)a; return 1; }
+/* Vague 0 bis (V2.5, profil provisoire, 22/10) : SC2_GPU_PROFIL choisit la carte annoncée au jeu (GetAdapterIdentifier) et
+ * sa mémoire de textures (GetAvailableTextureMem). Le jeu passe le seul DeviceId à L_00A08C20 (lift, appel en 00A011C9),
+ * qui le cherche dans GPUQualityLevels.txt (Mods/Core.SC2Mod/Base.SC2Data ; nom en 0x01427E1C de SC2.exe), table
+ * « DeviceId|niveau|nom », niveau Low, Medium, High, Ultra ou Unsupported : 0x0402 (GeForce 8600 GT) y est Medium,
+ * 0x05E3 (GeForce GTX 285, 1 Go) Ultra.
+ *   historique (défaut du RUNTIME, canon) : GeForce 8600 GT, 512 Mo — l'adaptateur d'avant, à l'octet près ;
+ *   dx10 : GeForce GTX 285 (NVIDIA 0x10DE:0x05E3), 1 Go. Les lanceurs (Android, app Mac) posent dx10 eux-mêmes.
+ * Valeur inconnue : historique, journalisé. Ligne « [GPU] profil … » au premier appel.
+ * Constat du 22/10 (banc, 600 frames sans Variables.txt) : dx10 fait passer le jeu de Medium à Ultra
+ * (GraphicsOptionOverallQualityVer7 1 → 3, toutes les options à 3) mais PAS les textures (GraphicsOptionTextureQuality 0
+ * dans les deux profils). Le jeu n'appelle jamais GetAvailableTextureMem : il mesure la mémoire vidéo par
+ * DirectDrawCreateEx + IDirectDraw7::GetAvailableVidMem (lift 00A010A5-00A01100, DDSCAPS 0x10004000 → [+0x2BC0],
+ * 0x20005000 → [+0x2BC4]), et sc2_iat_p4.c rend DDERR_NODIRECTDRAWHW : 0 et 0. La mémoire du profil n'atteint le jeu
+ * qu'une fois ce DirectDraw servi (V2.5). */
+typedef struct { const char *nom, *description; uint32_t device, mem_mo; } gpu_profil;
+static const gpu_profil *gpu_profil_courant(void)
+{
+    static const gpu_profil P[2] = {
+        { "historique", "SC2 Partout D3D9 factice (passe 4)", 0x0402, 512 },    /* GeForce 8600 GT : Medium */
+        { "dx10", "NVIDIA GeForce GTX 285", 0x05E3, 1024 },                      /* GeForce GTX 285 : Ultra */
+    };
+    static const gpu_profil *p;
+    if (!p) {
+        const char *e = getenv("SC2_GPU_PROFIL");
+        p = e && !strcmp(e, "dx10") ? &P[1] : &P[0];
+        if (e && *e && strcmp(e, "dx10") && strcmp(e, "historique"))
+            sc2_log("[GPU] SC2_GPU_PROFIL « %s » inconnu (historique|dx10) → historique", e);
+        sc2_log("[GPU] profil %s : « %s », VendorId 0x10DE DeviceId 0x%04X, GetAvailableTextureMem %u Mo", p->nom,
+                p->description, p->device, p->mem_mo);
+    }
+    return p;
+}
+/* V1.5 : définition forte (remplace la faible de sc2_documents.c) — lastDeviceId du Variables.txt semé = carte annoncée. */
+unsigned sc2_gpu_device_id(void) { return gpu_profil_courant()->device; }
 static uint32_t d_GetAdapterIdentifier(CPU *c, uint32_t s, const uint32_t *a)
 {
     (void)c; (void)s; uint32_t p = A(2);
+    const gpu_profil *g = gpu_profil_courant();
     memset(GPTR(p), 0, 1100);
     strcpy((char *)GPTR(p), "sc2partout_d3d9.dll");
-    strcpy((char *)GPTR(p + 512), "SC2 Partout D3D9 factice (passe 4)");
+    snprintf((char *)GPTR(p + 512), 512, "%s", g->description);
     strcpy((char *)GPTR(p + 1024), "\\\\.\\DISPLAY1");
     wr32(p + 1056, 0x00000000u); wr32(p + 1060, 0x00080010u);   /* DriverVersion 8.16.x */
-    wr32(p + 1064, 0x10DE); wr32(p + 1068, 0x0402);             /* « GeForce 8600 GT » */
+    wr32(p + 1064, 0x10DE); wr32(p + 1068, g->device);          /* NVIDIA ; profil (8600 GT par défaut) */
     wr32(p + 1072, 0); wr32(p + 1076, 0xA1);
     wr32(p + 1080, 0x53433250u);                                /* GUID : « SC2P » … */
     wr32(p + 1096, 1);
@@ -434,13 +578,46 @@ static uint32_t d_CheckDeviceMultiSampleType(CPU *c, uint32_t s, const uint32_t 
     if (A(5)) wr32(A(5), 1);
     return A(4) <= 1 ? 0 : 0x8876086Au;                         /* NOTAVAILABLE au-delà de 1× */
 }
+/* V1.0 (22/10) : masques EXPLICITES des champs de bits de D3DCAPS9 (0xFFFFFFFF auparavant de Caps à LineCaps, qui
+ * annonçait aussi des RESTRICTIONS — POW2, SQUAREONLY… — et des fonctions absentes). Table bit par bit, état et preuves :
+ * docs/CAPS.md. Le jeu ne lit que 5 de ces bits (lift : L_00A00FC0 en 00A011DA et 00A01324-00A0132A, L_009FFD20
+ * en 009FFD26-009FFD39) ; ils restent annoncés quel que soit leur état d'implémentation, pour ne pas changer le chemin
+ * du jeu (canon) — CAPS_LUS_* ci-dessous. Tout autre bit vaut l'implémentation réelle du runtime. Les caps restent
+ * STATIQUES : IDirect3D9::GetDeviceCaps est appelé avant CreateDevice, donc avant d3dv_init (limites Vulkan inconnues). */
+#define CAPS_LUS_CAPS2 0x00120000u   /* FULLSCREENGAMMA 0x20000, CANCALIBRATEGAMMA 0x100000 (SetGammaRamp ignoré : V2.8) */
+#define CAPS_LUS_PMISC 0x00044000u   /* INDEPENDENTWRITEMASKS 0x4000, MRTINDEPENDENTBITDEPTHS 0x40000 (MRT : V2.1) */
+#define CAPS_LUS_ADR   0x00000008u   /* TextureAddressCaps BORDER (bordure arrondie à 3 couleurs Vulkan) */
+static const struct { uint16_t off; const char *nom; uint32_t v; } g_caps_masques[] = {
+    {   8, "Caps",                     0x00000000u },
+    {  12, "Caps2",                    0x20000000u | CAPS_LUS_CAPS2 },   /* + DYNAMICTEXTURES */
+    {  16, "Caps3",                    0x00000320u },
+    {  24, "CursorCaps",               0x00000000u },
+    {  28, "DevCaps",                  0x001BBFF0u },
+    {  32, "PrimitiveMiscCaps",        0x000208F2u | CAPS_LUS_PMISC },
+    {  36, "RasterCaps",               0x06422010u },
+    {  40, "ZCmpCaps",                 0x000000FFu },
+    {  44, "SrcBlendCaps",             0x000007FFu },
+    {  48, "DestBlendCaps",            0x000007FFu },
+    {  52, "AlphaCmpCaps",             0x000000FFu },
+    {  56, "ShadeCaps",                0x00004208u },
+    {  60, "TextureCaps",              0x0001EC45u },
+    {  64, "TextureFilterCaps",        0x07030700u },
+    {  68, "CubeTextureFilterCaps",    0x07030700u },
+    {  72, "VolumeTextureFilterCaps",  0x03030300u },
+    {  76, "TextureAddressCaps",       0x00000017u | CAPS_LUS_ADR },
+    {  80, "VolumeTextureAddressCaps", 0x0000001Fu },
+    {  84, "LineCaps",                 0x0000000Fu },
+    { 212, "DevCaps2",                 0x00000051u },
+    { 236, "DeclTypes",                0x0000033Fu },
+    { 244, "StretchRectFilterCaps",    0x03000300u },
+    { 284, "VertexTextureFilterCaps",  0x00000000u },
+};
 static void caps_ecrire(uint32_t p)
 {
     float f;
 #define WF(off, v) do { f = (v); memcpy(GPTR(p + (off)), &f, 4); } while (0)
     memset(GPTR(p), 0, 304);
     wr32(p + 0, 1);                       /* DeviceType = HAL */
-    for (uint32_t o = 8; o <= 84; o += 4) wr32(p + o, 0xFFFFFFFFu);   /* Caps … LineCaps */
     wr32(p + 20, 0x8000000Fu);            /* PresentationIntervals : IMMEDIATE | 1..4 */
     wr32(p + 88, 8192); wr32(p + 92, 8192); wr32(p + 96, 2048);
     wr32(p + 100, 8192); wr32(p + 104, 8192); wr32(p + 108, 16);
@@ -450,13 +627,26 @@ static void caps_ecrire(uint32_t p)
     wr32(p + 168, 4); wr32(p + 172, 0); WF(176, 8192.f); wr32(p + 180, 0xFFFFF); wr32(p + 184, 0xFFFFFF);
     wr32(p + 188, 16); wr32(p + 192, 255);
     wr32(p + 196, 0xFFFE0300u); wr32(p + 200, 256); wr32(p + 204, 0xFFFF0300u); WF(208, 65504.f);
-    wr32(p + 212, 0x7F); WF(216, 0.f); wr32(p + 224, 0); wr32(p + 228, 0); wr32(p + 232, 1);
-    wr32(p + 236, 0x3FF); wr32(p + 240, 4); wr32(p + 244, 0x03030303u);
+    WF(216, 0.f); wr32(p + 224, 0); wr32(p + 228, 0); wr32(p + 232, 1);
+    wr32(p + 240, 4);
     wr32(p + 248, 1); wr32(p + 252, 24); wr32(p + 256, 32); wr32(p + 260, 4);             /* VS20Caps */
     wr32(p + 264, 0x1F); wr32(p + 268, 24); wr32(p + 272, 32); wr32(p + 276, 4); wr32(p + 280, 512);
-    wr32(p + 284, 0x03030300u); wr32(p + 288, 65535); wr32(p + 292, 65535);
+    wr32(p + 288, 65535); wr32(p + 292, 65535);
     wr32(p + 296, 32768); wr32(p + 300, 32768);
 #undef WF
+    for (size_t i = 0; i < sizeof g_caps_masques / sizeof g_caps_masques[0]; i++) wr32(p + g_caps_masques[i].off, g_caps_masques[i].v);
+    static int dit;
+    if (!dit) {
+        dit = 1;
+        char l[1024]; int n = 0;
+        for (size_t i = 0; i < sizeof g_caps_masques / sizeof g_caps_masques[0] && n < (int)sizeof l - 48; i++)
+            n += snprintf(l + n, sizeof l - (size_t)n, "%s%s 0x%X", i ? ", " : "", g_caps_masques[i].nom, g_caps_masques[i].v);
+        sc2_log("[CAPS] V1.0 masques explicites (docs/CAPS.md) : %s", l);
+        sc2_log("[CAPS] lus par le jeu, gardés : Caps2 0x%X, PrimitiveMisc 0x%X, TextureAddress 0x%X, StencilCaps 0x%X ; "
+                "RT %u, plans %u, textures %u, %ux%u, VS 0x%X (%u c), PS 0x%X", CAPS_LUS_CAPS2, CAPS_LUS_PMISC, CAPS_LUS_ADR,
+                rd32(p + 136), rd32(p + 240), rd32(p + 164), rd32(p + 152), rd32(p + 88), rd32(p + 92), rd32(p + 196),
+                rd32(p + 200), rd32(p + 204));
+    }
 }
 static uint32_t d_GetDeviceCaps(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; caps_ecrire(A(2)); return 0; }
 static uint32_t d_GetAdapterMonitor(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; (void)a; return 0x0000F001u; }
@@ -475,6 +665,276 @@ static struct {
     uint32_t gen_vs, gen_ps;
     uint32_t clip[6][4], material[17], light_on[8];
 } D;
+
+/* ---- V5.1 (24/10) : ressources D3D9 RENDUES à l'arène au dernier Release ---------------------------------------------
+ * Avant, m_Release ne libérait rien : textures, cubes, volumes, tampons de sommets/index et surfaces de chaque carte
+ * restaient dans l'arène, et une campagne jouée d'une traite l'épuisait au chargement de la 4e mission (marathon acte1,
+ * 23/10 : 805 Mo + 1,8 Go de débordement servis). Désormais, un objet de ces genres tombé à zéro référence entre dans une
+ * FILE ; au Present (après la soumission de la frame) et au moins deux frames plus tard, il est rendu — données (O_BUF),
+ * surfaces de niveaux mises en cache, puis l'objet — s'il n'a pas été repris (AddRef) et s'il n'est plus lié au device.
+ * Le D3D9 réel garde une référence sur chaque ressource liée (SetTexture, SetStreamSource, SetIndices, SetRenderTarget,
+ * SetDepthStencilSurface) ; ce device factice n'en prend pas : la vérification des liaisons en tient lieu (objet lié :
+ * reste en file, revu à chaque Present). Une surface de niveau a son propre compte (le D3D9 réel le partage avec le
+ * conteneur) : une texture dont une surface est encore tenue n'est pas rendue ; quand cette surface tombe à zéro à son
+ * tour, le conteneur rentre en file. Avant de rendre la mémoire, le backend Vulkan oublie les entrées de cache dont la
+ * clé est l'adresse de l'objet (d3dv_oublier : image ou tampon détruits après les frames en vol). Petits blocs : la
+ * quarantaine de l'arène (passe 10j) retarde encore leur réemploi. Ne sont pas rendus : back buffer et surface de
+ * profondeur du device, shaders, déclarations, requêtes et state blocks (coquilles de 80 o).
+ * SC2_MEM_LIBERER=0 : rien n'est rendu (comportement d'avant) ; sans recyclage d'arène (SC2_ARENE_RECYCLE=0, ou ni
+ * l'une ni SC2_RUN_SANS_BNET=1) : inactif aussi, sc2_free n'y rendrait rien. */
+static uint32_t g_ds_auto;                      /* surface de profondeur automatique du device (CreateDevice) */
+static int liberer_actif(void) { return sc2_mem_liberer(); }   /* sc2_runtime.c : SC2_MEM_LIBERER, recyclage */
+/* La logique de la file (délai, liaisons, repris, retenu, ordre oubli Vulkan → rendu) est dans sc2_d3d9_file.h, testée
+ * sur l'hôte (recomp-sc2/tests/test_d3d9_file.c) ; ici, ses accès à la mémoire invitée et au device. */
+#define ZN 65536
+static zf_entree g_zomb[ZN];
+static uint32_t g_zn;
+static pthread_mutex_t g_zomb_mu = PTHREAD_MUTEX_INITIALIZER;
+static zf_compteurs g_zc;
+#define ETAT_EN_FILE 1u
+#define ETAT_JAMAIS 2u                                  /* surface de niveau hors du cache (table pleine) : jamais rendu */
+static int genre_rendable(uint32_t o)
+{
+    uint32_t v = rd32(o + O_VTBL);
+    if (!v || (rd32(o + O_ETAT) & ETAT_JAMAIS)) return ZF_AUTRE;
+    if (v == K_TEX.vtbl || v == K_CUBE.vtbl || v == K_VOL.vtbl) return ZF_CONTENEUR;
+    if (v == K_VB.vtbl || v == K_IB.vtbl) return ZF_TAMPON;
+    if (v == K_SURF.vtbl && !rd32(o + O_AUX) && o != D.backbuf && o != g_ds_auto) return ZF_SURFACE;
+    return ZF_AUTRE;
+}
+static void zomb_mettre(uint32_t o)
+{
+    pthread_mutex_lock(&g_zomb_mu);
+    if (!(rd32(o + O_ETAT) & ETAT_EN_FILE) && zf_mettre(g_zomb, &g_zn, ZN, o, sc2_frames_presentees(), &g_zc))
+        wr32(o + O_ETAT, rd32(o + O_ETAT) | ETAT_EN_FILE);   /* file pleine : objet gardé (comme avant), compté */
+    pthread_mutex_unlock(&g_zomb_mu);
+}
+static void liberable(uint32_t s)
+{
+    if (genre_rendable(s)) { zomb_mettre(s); return; }
+    if (rd32(s + O_VTBL) == K_SURF.vtbl) {           /* surface de niveau : son conteneur à zéro l'attendait peut-être */
+        uint32_t p = rd32(s + O_AUX);
+        if (p && !rd32(p + O_REF) && genre_rendable(p) == ZF_CONTENEUR) zomb_mettre(p);
+    }
+}
+static int lie_au_device(uint32_t o)
+{
+    zf_liaisons l;
+    memcpy(l.tex, D.tex, sizeof l.tex);
+    for (int k = 0; k < 16; k++) l.flux[k] = D.stream[k][0];
+    memcpy(l.rt, D.rt, sizeof l.rt);
+    l.indices = D.indices; l.ds = D.ds; l.backbuf = D.backbuf;
+    return zf_lie(&l, o);
+}
+static void poison(uint32_t o);                 /* SC2_MEM_EMPOISONNER, plus bas */
+/* Surfaces de niveaux d'une texture dans le cache (niveaux 0..15 ; faces 0..5 d'un cube) : -1 si l'une est encore tenue
+ * (référence > 0), -2 si l'une est liée au device, sinon leur nombre. retirer : les sort du cache et les rend à l'arène
+ * (avec l'O_BUF qu'un GetRenderTargetData a pu leur donner). */
+static int surfaces_de(uint32_t t, int retirer)
+{
+    int nb = 0, faces = rd32(t + O_KIND) == 5 ? 6 : 1;
+    pthread_mutex_lock(&g_surfc_mu);
+    for (int f = 0; f < faces; f++)
+        for (uint32_t l = 0; l < 16; l++) {
+            uint32_t code = l | (uint32_t)f << 16;
+            for (uint32_t k = surfc_case(t, code), n = 0; n < NSURFC && g_surfc[k].tex; k = (k + 1) % NSURFC, n++) {
+                if (g_surfc[k].tex != t || g_surfc[k].code != code) continue;
+                uint32_t sf = g_surfc[k].sf;
+                if (!retirer) {
+                    if (rd32(sf + O_REF)) { pthread_mutex_unlock(&g_surfc_mu); return -1; }
+                    if (lie_au_device(sf)) { pthread_mutex_unlock(&g_surfc_mu); return -2; }
+                } else {
+                    g_surfc[k].tex = SURFC_TOMBE; g_surfc[k].code = 0; g_surfc[k].sf = 0; g_surfc_tombes++;
+                    if (rd32(sf + O_BUF)) { g_mo_o_rendus += sc2_alloc_size(rd32(sf + O_BUF)); sc2_free(rd32(sf + O_BUF)); }
+                    wr32(sf + O_BUF, 0); poison(sf);
+                    sc2_free(sf);
+                    __atomic_add_fetch(&g_mo_liberes[1], 1, __ATOMIC_RELAXED);
+                }
+                nb++;
+                break;
+            }
+        }
+    if (retirer && g_surfc_tombes > NSURFC / 4) {      /* recompactage : les vivantes réinsérées, plus de pierre tombale */
+        static struct { uint32_t tex, code, sf; } tmp[NSURFC];
+        memcpy(tmp, g_surfc, sizeof tmp); memset(g_surfc, 0, sizeof g_surfc); g_surfc_tombes = 0;
+        for (uint32_t i = 0; i < NSURFC; i++) {
+            if (tmp[i].tex <= SURFC_TOMBE) continue;
+            uint32_t k = surfc_case(tmp[i].tex, tmp[i].code);
+            while (g_surfc[k].tex) k = (k + 1) % NSURFC;
+            g_surfc[k].tex = tmp[i].tex; g_surfc[k].code = tmp[i].code; g_surfc[k].sf = tmp[i].sf;
+        }
+    }
+    pthread_mutex_unlock(&g_surfc_mu);
+    return nb;
+}
+/* SC2_MEM_EMPOISONNER=1 (diagnostic, revue adverse) : l'objet rendu garde, le temps de sa quarantaine, une VTBL
+ * 0x0000DEA0 (sous l'image : hors de la zone invitée, tout appel de méthode faute aussitôt) et O_KIND 0xDEAD (un dessin
+ * qui le lirait compte un repli « format ») — un usage après le dernier Release devient visible au lieu de silencieux. */
+static int empoisonner(void) { static int v = -1; if (v < 0) { const char *e = getenv("SC2_MEM_EMPOISONNER"); v = e && *e == '1'; } return v; }
+static void poison(uint32_t o) { if (empoisonner()) { wr32(o + O_VTBL, 0x0000DEA0u); wr32(o + O_KIND, 0xDEADu); } }
+static void rendre_objet(uint32_t o)
+{
+    uint32_t b = rd32(o + O_BUF), kind = rd32(o + O_KIND);
+    wr32(o + O_BUF, 0); wr32(o + O_SIZE, 0);          /* un lecteur en retard (quarantaine) voit « sans données » */
+    poison(o);
+    if (b) { g_mo_o_rendus += sc2_alloc_size(b); sc2_free(b); }
+    __atomic_add_fetch(&g_mo_liberes[kind < 8 ? kind : 0], 1, __ATOMIC_RELAXED);
+    sc2_free(o);
+}
+/* accès de la file (sc2_d3d9_file.h) */
+static uint32_t zo_ref(void *x, uint32_t o) { (void)x; return rd32(o + O_REF); }
+static int zo_genre(void *x, uint32_t o) { (void)x; return genre_rendable(o); }
+static int zo_surfaces(void *x, uint32_t o, int retirer) { (void)x; return surfaces_de(o, retirer); }
+static int zo_lie(void *x, uint32_t o) { (void)x; return lie_au_device(o); }
+static void zo_hors_file(void *x, uint32_t o) { (void)x; wr32(o + O_ETAT, rd32(o + O_ETAT) & ~ETAT_EN_FILE); }
+static void zo_oublier(void *x, const uint32_t *objs, int n) { (void)x; d3dv_oublier(objs, n); }
+static void zo_rendre(void *x, uint32_t o) { (void)x; rendre_objet(o); }
+static const zf_ops ZOPS = { zo_ref, zo_genre, zo_surfaces, zo_lie, zo_hors_file, zo_oublier, zo_rendre };
+static void zombies_traiter(uint32_t n)
+{
+    if (!__atomic_load_n(&g_zn, __ATOMIC_RELAXED)) return;
+    static uint32_t prets[ZN];
+    pthread_mutex_lock(&g_zomb_mu);
+    uint32_t np = zf_trier(g_zomb, &g_zn, n, &ZOPS, NULL, prets, &g_zc);
+    pthread_mutex_unlock(&g_zomb_mu);
+    zf_rendre(prets, np, &ZOPS, NULL, &g_zc);        /* oubli Vulkan d'abord, puis surfaces de niveaux et objets */
+}
+/* lignes [MEM] (sc2_runtime.c) : objets vivants = créés − rendus, par genre ; file ; rendus */
+void sc2_d3d9_mem(char *o, size_t n)
+{
+    static const char *const NOMS[8] = { "autres", "surfaces", "?", "textures", "volumes", "cubes", "VB", "IB" };
+    size_t p = 0;
+    for (int k = 0; k < 8; k++) {
+        uint64_t c = __atomic_load_n(&g_mo_crees[k], __ATOMIC_RELAXED), l = __atomic_load_n(&g_mo_liberes[k], __ATOMIC_RELAXED);
+        if (!c) continue;
+        p += (size_t)snprintf(o + p, p < n ? n - p : 0, "%s%s %llu vivant(e)s (%llu rendu(e)s)", p ? ", " : "", NOMS[k],
+                              (unsigned long long)(c >= l ? c - l : 0), (unsigned long long)l);
+        if (p >= n) return;
+    }
+    uint64_t tx = 0, tm = 0, cx = 0; int txv = 0, tmv = 0, cv = 0;
+    if (d3dv_actif()) d3dv_oublis(&tx, &tm, &txv, &tmv, &cx, &cv);
+    snprintf(o + p, p < n ? n - p : 0, " ; file %u (pleine %llu, reprises %llu, liées %llu, retenues par une surface %llu) ; "
+             "données rendues %.1f Mo ; Vulkan : %d textures, %d tampons et %d cibles en cache, %llu + %llu + %llu oubliés%s", g_zn,
+             (unsigned long long)g_zc.pleine, (unsigned long long)g_zc.reprises, (unsigned long long)g_zc.lies,
+             (unsigned long long)g_zc.retenus, (double)g_mo_o_rendus / 1048576.0, txv, tmv, cv, (unsigned long long)tx,
+             (unsigned long long)tm, (unsigned long long)cx, liberer_actif() ? "" : " ; libération INACTIVE");
+}
+
+/* ---- V1.3 (22/10) : compteurs des états non traduits ---------------------------------------------------------
+ * « [BILAN] [ETATS] », toujours actifs, sans coût par dessin pour les états seuls : chaque bit E_* compte ses dessins
+ * par ÉPOQUES — etats_maj, appelé par les seuls Set* qui changent un état suivi (SetRenderState via g_rs_suivi,
+ * SetSamplerState(SRGBTEXTURE), SetStreamSourceFreq, SetRenderTarget, SetScissorRect, Reset, CreateDevice), note le
+ * nombre de dessins déjà faits quand un bit s'allume et cumule la différence quand il s'éteint. Au dessin, UN test
+ * d'entier (g_etats & E_DETAIL, compter_draw) : seuls SRGBTEXTURE (texture liée, lue par le PS), ANTIALIASEDLINE
+ * (topologie) et les fréquences de flux (indexé ou non, histogramme) demandent le dessin. Jamais cible_de(), aucun
+ * journal par dessin. Défauts piégeux (docs/CAPS.md) : D.rs[190..193] et D.freq[] valent 0 tant que le jeu ne les pose
+ * pas (fréquence 0 = 1). */
+enum { E_CLIP, E_CISEAU, E_CISEAU_PARTIEL, E_BF, E_BF_BLANC, E_BF_ZERO, E_BF_AUTRE, E_SRGBW, E_SRGBW_BB, E_CWE,
+       E_CWE_PARTIEL, E_FILL_POINT, E_FILL_FIL, E_MSAA, E_RT1, E_RT2, E_RT3, E_MRT, E_MRT_CWE0, E_RT0NULL,
+       E_SRGBT, E_AALIGNE, E_FREQ, E_NB };     /* les trois derniers : bits « détail », regardés au dessin */
+#define EB(x) (1u << (x))
+#define E_DETAIL (EB(E_SRGBT) | EB(E_AALIGNE) | EB(E_FREQ))
+static uint32_t g_etats;                       /* EB(E_*) vrais maintenant */
+static uint64_t g_ep_debut[E_NB], g_ep_n[E_NB];   /* époque ouverte : dessins faits à l'allumage ; cumul des fermées */
+static uint32_t g_srgb_ss;                     /* samplers PS 0-15 dont SRGBTEXTURE (11) ≠ 0 */
+static uint32_t g_freq_non1;                   /* flux dont la fréquence ∉ {0, 1} */
+static int g_rt0_null;                         /* RT0 au FOURCC « NULL » (passe d'ombre : profondeur seule) */
+static uint32_t g_clip_or, g_clip_max, g_bf_dernier;   /* plans activés (OR, max), dernier BLENDFACTOR ≠ 0 / blanc */
+static uint64_t g_n_rs_pose[256];              /* SetRenderState par n° d'état */
+static uint64_t g_n_setclip, g_n_setciseau, g_n_setfreq, g_n_setfreq_non1;
+static const uint8_t g_rs_suivi[256] = { [8] = 1, [19] = 1, [20] = 1, [27] = 1, [152] = 1, [161] = 1, [174] = 1, [176] = 1,
+                                         [190] = 1, [191] = 1, [192] = 1, [193] = 1, [194] = 1, [206] = 1, [207] = 1, [208] = 1 };
+#define FOURCC_NULL 0x4C4C554Eu                /* « NULL » */
+static uint64_t etats_n_dessins(void);         /* dessins faits (réels + « lumière »), plus bas */
+static int facteur_bf(uint32_t f) { return f == 14 || f == 15; }   /* D3DBLEND_BLENDFACTOR, INVBLENDFACTOR */
+static void etats_maj(void)
+{
+    uint32_t m = 0;
+    if (D.rs[152]) {
+        uint32_t p = D.rs[152] & 0x3F, n = (uint32_t)__builtin_popcount(p);
+        m |= EB(E_CLIP); g_clip_or |= p; if (n > g_clip_max) g_clip_max = n;
+    }
+    if (D.rs[174]) {
+        uint32_t w = D.rt[0] ? rd32(D.rt[0] + O_W) : 0, h = D.rt[0] ? rd32(D.rt[0] + O_H) : 0;
+        m |= EB(E_CISEAU);
+        if (D.scissor[0] || D.scissor[1] || D.scissor[2] != w || D.scissor[3] != h) m |= EB(E_CISEAU_PARTIEL);
+    }
+    if (D.rs[27] && (facteur_bf(D.rs[19]) || facteur_bf(D.rs[20]) || (D.rs[206] && (facteur_bf(D.rs[207]) || facteur_bf(D.rs[208]))))) {
+        uint32_t v = D.rs[193];
+        m |= EB(E_BF) | (v == 0xFFFFFFFFu ? EB(E_BF_BLANC) : !v ? EB(E_BF_ZERO) : EB(E_BF_AUTRE));
+        if (v && v != 0xFFFFFFFFu) g_bf_dernier = v;
+    }
+    if (D.rs[194]) m |= EB(E_SRGBW) | (D.rt[0] == D.backbuf ? EB(E_SRGBW_BB) : 0);
+    if (g_srgb_ss) m |= EB(E_SRGBT);
+    if (D.rs[190] || D.rs[191] || D.rs[192]) m |= EB(E_CWE);
+    for (int i = 1; i < 4; i++) {
+        if (!D.rt[i]) continue;
+        m |= EB(E_RT1 + i - 1) | EB(E_MRT);
+        if (D.rs[189 + i] != 0xF) m |= EB(E_CWE_PARTIEL);
+        if (!D.rs[189 + i]) m |= EB(E_MRT_CWE0);     /* masque nul : RT i ne recevrait rien si on le prenait tel quel */
+    }
+    if (D.rs[8] == 1) m |= EB(E_FILL_POINT);        /* D3DFILL_POINT ; WIREFRAME 2 ; SOLID 3 ; jamais posé 0 */
+    if (D.rs[8] == 2) m |= EB(E_FILL_FIL);
+    if (D.rs[161]) m |= EB(E_MSAA);
+    if (D.rs[176]) m |= EB(E_AALIGNE);
+    if (g_freq_non1) m |= EB(E_FREQ);
+    if (g_rt0_null) m |= EB(E_RT0NULL);
+    uint32_t ch = m ^ g_etats;
+    if (!ch) return;
+    uint64_t n = etats_n_dessins();
+    for (uint32_t b = ch; b; b &= b - 1) {
+        int i = __builtin_ctz(b);
+        if (m & EB(i)) g_ep_debut[i] = n; else g_ep_n[i] += n - g_ep_debut[i];
+    }
+    g_etats = m;
+}
+static uint64_t etats_dessins(int i) { return g_ep_n[i] + (g_etats & EB(i) ? etats_n_dessins() - g_ep_debut[i] : 0); }
+
+/* ---- V2.2 (22/10) : instanciation (SetStreamSourceFreq) --------------------------------------------------------------
+ * dessin_reel traduit D.freq par inst_planifier (sc2_d3d9_inst.h) quand un flux a une fréquence ∉ {0, 1} (g_freq_non1,
+ * V1.3) et que le dessin est indexé (D3D9 n'instancie ni DrawPrimitive ni *PrimitiveUP) : instanceCount = N, flux
+ * INSTANCEDATA | 1 en VK_VERTEX_INPUT_RATE_INSTANCE, lus sur [0, N) sans BaseVertexIndex ni MinIndex. Sinon (et sous
+ * SC2_INSTANCES=0), le dessin d'avant à l'octet. Compteurs : « [BILAN] [INST] V2.2 », à comparer à « [ETATS] freq ». */
+static int instances_actives(void)                 /* SC2_INSTANCES=0 coupe (A/B, échappatoire) ; défaut 1 partout */
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("SC2_INSTANCES"); v = !(e && *e == '0');
+        sc2_log("[INST] V2.2 : instanciation %s", v ? "active (INSTANCEDATA | 1 → RATE_INSTANCE, instanceCount = N)"
+                                                     : "COUPÉE (SC2_INSTANCES=0) : dessins d'avant");
+    }
+    return v;
+}
+static struct {
+    uint64_t candidats, somme_cand, up, somme_up, dessines, somme, vides, tronques, replis[INST_NREPLIS];
+    uint32_t max, idx_or, inst_or;
+} g_inst;
+static const char *const k_usage[14] = { "position", "blendweight", "blendindices", "normal", "psize", "texcoord",
+    "tangent", "binormal", "tessfactor", "positiont", "color", "fog", "depth", "sample" };
+/* une ligne « [INST] VS » à la première rencontre de chaque VS dessiné instancié (32 au plus) : liaisons Vulkan, flux
+ * D3D9, taux et entrées (Usage + UsageIndex) — lève l'hypothèse H1 de la conception (particules : coin par sommet,
+ * état de la particule par instance) */
+static void inst_journal_vs(int sv, const sc2_spv_shader *tv, const d3dv_dessin *d, const int *s_de_flux)
+{
+    static uint64_t vus[32]; static int nvus;
+    uint64_t h = g_shaders[sv].hash;
+    for (int i = 0; i < nvus; i++) if (vus[i] == h) return;
+    if (nvus >= 32) return;
+    vus[nvus++] = h;
+    char l[1200]; size_t o = 0;
+    o += (size_t)snprintf(l + o, sizeof l - o, "[INST] VS %016llx : N=%u", (unsigned long long)h, d->instances);
+    for (uint32_t b = 0; b < d->nflux && o < sizeof l - 80; b++) {
+        if (s_de_flux[b] < 0) o += (size_t)snprintf(l + o, sizeof l - o, " ; liaison %u = constante (0, 0, 0, 1) :", b);
+        else o += (size_t)snprintf(l + o, sizeof l - o, " ; liaison %u = flux D3D9 %d %s (stride %u) :", b, s_de_flux[b],
+                                   (d->flux_inst >> b) & 1u ? "PAR INSTANCE" : "par sommet", d->flux[b].stride);
+        for (uint32_t e = 0; e < d->nattr && e < (uint32_t)tv->nentrees && o < sizeof l - 24; e++)
+            if (d->attr[e].flux == b) {
+                uint8_t u = tv->entrees[e].usage;
+                o += (size_t)snprintf(l + o, sizeof l - o, " %s%u", u < 14 ? k_usage[u] : "usage?", tv->entrees[e].index);
+            }
+    }
+    sc2_log("%s", l);
+}
 
 static uint32_t addref_out(uint32_t out, uint32_t o);
 static uint32_t sw_GetBackBuffer(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; return addref_out(A(2), D.backbuf); }
@@ -538,10 +998,16 @@ static uint32_t d_CreateDevice(CPU *c, uint32_t s, const uint32_t *a)
      * couleur nul, facteurs de blend invalides…) — ce que rendent aussi les Get*. */
     D.rs[7] = 1; D.rs[14] = 1; D.rs[19] = 2; D.rs[20] = 1; D.rs[22] = 3; D.rs[23] = 4; D.rs[25] = 8;
     D.rs[168] = 0xF; D.rs[171] = 1; D.rs[207] = 2; D.rs[208] = 1; D.rs[209] = 1;
+    /* 21/10 : stencil D3D9 — défauts de la doc (KEEP=1, ALWAYS=8, masques pleins, deux faces coupé) */
+    D.rs[52] = 0; D.rs[53] = 1; D.rs[54] = 1; D.rs[55] = 1; D.rs[56] = 8; D.rs[57] = 0;
+    D.rs[58] = 0xFFFFFFFFu; D.rs[59] = 0xFFFFFFFFu; D.rs[185] = 0;
+    D.rs[186] = 1; D.rs[187] = 1; D.rs[188] = 1; D.rs[189] = 8;
     for (int k = 0; k < 20; k++) { D.ss[k][1] = D.ss[k][2] = D.ss[k][3] = 1; D.ss[k][5] = D.ss[k][6] = 1; }
     D.backbuf = surf_new(D.pp[0], D.pp[1], D.pp[2], 1, 0);
     D.rt[0] = D.backbuf;
+    g_rt0_null = 0; etats_maj();                     /* V1.3 */
     if (D.pp[9]) D.ds = surf_new(D.pp[0], D.pp[1], D.pp[10], 2, 0);
+    g_ds_auto = D.ds;                                /* V5.1 : surface du device, jamais rendue à l'arène */
     D.vp[0] = 0; D.vp[1] = 0; D.vp[2] = D.pp[0]; D.vp[3] = D.pp[1];
     { float z1 = 1.0f; memcpy(&D.vp[5], &z1, 4); }
     for (int m = 0; m < 512; m++) { float one = 1.f; uint32_t u; memcpy(&u, &one, 4);
@@ -571,7 +1037,8 @@ static com_meth M_D3D[] = { IUNK, { "RegisterSoftwareDevice", 1, m_ok, 0 },
 static uint32_t addref_out(uint32_t out, uint32_t o)
 { if (out) wr32(out, o); if (o) wr32(o + O_REF, rd32(o + O_REF) + 1); return 0; }
 
-static uint32_t v_GetAvailableTextureMem(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; (void)a; return 512u << 20; }
+static uint32_t v_GetAvailableTextureMem(CPU *c, uint32_t s, const uint32_t *a)
+{ (void)c; (void)s; (void)a; return gpu_profil_courant()->mem_mo << 20; }   /* SC2_GPU_PROFIL (plus haut) */
 static uint32_t v_GetDirect3D(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; return addref_out(A(0), g_d3d); }
 static uint32_t v_GetDeviceCaps(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; caps_ecrire(A(0)); return 0; }
 static uint32_t v_GetDisplayMode(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; mode_ecrire(A(1)); return 0; }
@@ -588,11 +1055,19 @@ static uint32_t v_Reset(CPU *c, uint32_t s, const uint32_t *a)
     if (D.pp[0] && D.pp[1]) { wr32(D.backbuf + O_W, D.pp[0]); wr32(D.backbuf + O_H, D.pp[1]); }
     if (d3dv_actif()) {
         D.rt[0] = D.backbuf;
+        g_rt0_null = 0; etats_maj();                 /* V1.3 */
         d3dv_rt(cible_de(D.backbuf));
         d3dv_viewport(0, 0, rd32(D.backbuf + O_W), rd32(D.backbuf + O_H), 0.f, 1.f);
         sc2_log("[VK] Reset : back buffer %u×%u", rd32(D.backbuf + O_W), rd32(D.backbuf + O_H));
     }
     return 0;
+}
+/* 22/10 (V1.1) : taille du client vue par le jeu = back buffer courant (Reset compris), sinon le mode annoncé (SC2_ECRAN) —
+ * mise à l'échelle des scénarios du banc (REF:). */
+void sc2_d3d9_taille(uint32_t *w, uint32_t *h)
+{
+    uint32_t bw = D.backbuf ? rd32(D.backbuf + O_W) : 0, bh = D.backbuf ? rd32(D.backbuf + O_H) : 0;
+    *w = bw && bh ? bw : ECRAN_W; *h = bw && bh ? bh : ECRAN_H;
 }
 static uint32_t v_GetBackBuffer(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; return addref_out(A(3), D.backbuf); }
 static uint32_t v_GetRasterStatus(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; wr32(A(1), 0); wr32(A(1) + 4, 0); return 0; }
@@ -806,7 +1281,11 @@ static uint32_t v_SetRenderTarget(CPU *c, uint32_t s, const uint32_t *a)
         if (rtt_log() && g_n_setrt_sec <= 300) { char d[200]; rtt_desc(d, sizeof d, A(1));
             sc2_log("[RTT] SetRenderTarget(%u) n°%llu → %s", A(0), (unsigned long long)g_n_setrt_sec, d); }
     }
-    if (A(0) < 4) D.rt[A(0)] = A(1);
+    if (A(0) < 4) {
+        D.rt[A(0)] = A(1);
+        if (A(0) == 0) g_rt0_null = A(1) && rd32(A(1) + O_FMT) == FOURCC_NULL;   /* V1.3 : lu ici, pas au dessin */
+        etats_maj();
+    }
     if (A(0) == 0 && A(1)) {
         /* D3D9 : changer la RT0 remet le viewport à sa taille entière. */
         D.vp[0] = 0; D.vp[1] = 0; D.vp[2] = rd32(A(1) + O_W); D.vp[3] = rd32(A(1) + O_H);
@@ -960,9 +1439,30 @@ static void inventaire_bilan(void)
                k[8], k[9], k[10], (unsigned long long)g_inv_rs[i].n);
     }
 }
+static uint64_t g_n_spv_pack;   /* passe 10t : shaders servis par le pack externe (bilan) */
 static const sc2_spv_shader *spv_de(uint64_t h, int ps)
 {
     for (int i = 0; i < SC2_NB_SPV; i++) if (SC2_SHADERS_SPV[i].hash == h && SC2_SHADERS_SPV[i].ps == ps) return &SC2_SHADERS_SPV[i];
+    /* passe 10t : la table embarquée n'a pas ce shader → pack SPIR-V externe (sc2-spirv.pak).
+     * L'entrée recopiée est allouée une fois, jamais libérée (au plus une par shader :
+     * spv_de n'est appelé qu'une fois par shader via g_spv[]). */
+    sc2_spv_pack_entree e;
+    _Static_assert(sizeof((sc2_spv_shader *)0)->entrees == sizeof e.entrees, "entrees : table embarquée et pack doivent coïncider");
+    if (sc2_spv_pack_chercher(h, ps, &e)) {
+        sc2_spv_shader *s = calloc(1, sizeof *s);
+        if (s) {
+            s->hash = e.hash; s->ps = e.ps; s->nentrees = e.nentrees;
+            memcpy(s->entrees, e.entrees, sizeof s->entrees);
+            memcpy(s->samplers, e.samplers, sizeof s->samplers);
+            s->spv = e.spv; s->nmots = e.nmots;   /* pointent DANS le mmap du pack (durée du processus) */
+            s->spv_ombre = e.spv_ombre; s->nmots_ombre = e.nmots_ombre;
+#ifdef SC2_SPV_NCONST
+            s->nconst = e.nconst;                 /* passe 10t : registres c lus (0 : bloc entier) */
+#endif
+            g_n_spv_pack++;
+            return s;
+        }
+    }
     return NULL;
 }
 /* Passe 10t : entrée de SC2_SHADERS_SPV de chaque shader, résolue avec son module. dessin_reel la cherchait à chaque
@@ -1036,9 +1536,11 @@ static void journal_draw(int sv, uint32_t type, uint32_t nprim, int indexe, int3
     char h[24]; snprintf(h, sizeof h, "%016llx", (unsigned long long)g_shaders[sv].hash);
     if (strncmp(h, pref, strlen(pref))) return;
     n++;
-    sc2_log("[DRAW] n°%d VS %s : type %u, %u prim, indexé %d, base %d, minidx %u, nverts %u, start %u ; viewport %u,%u %u×%u z %g..%g ; RT0 0x%08X",
+    sc2_log("[DRAW] n°%d VS %s : type %u, %u prim, indexé %d, base %d, minidx %u, nverts %u, start %u ; viewport %u,%u %u×%u z %g..%g ; RT0 0x%08X ; "
+            "instances %u, flux d'instance 0x%X",
             n, h, type, nprim, indexe, base, minidx, nverts, start, D.vp[0], D.vp[1], D.vp[2], D.vp[3],
-            (double)(union { uint32_t u; float f; }){ .u = D.vp[4] }.f, (double)(union { uint32_t u; float f; }){ .u = D.vp[5] }.f, D.rt[0]);
+            (double)(union { uint32_t u; float f; }){ .u = D.vp[4] }.f, (double)(union { uint32_t u; float f; }){ .u = D.vp[5] }.f, D.rt[0],
+            d->instances, d->flux_inst);
     uint32_t el = rd32(D.decl + O_BUF), nel = rd32(D.decl + O_W);
     for (uint32_t k = 0; k < nel; k++)
         sc2_log("[DRAW]   élément %u : flux %u off %u type %u méthode %u usage %u index %u", k, rd16(el + 8 * k), rd16(el + 8 * k + 2),
@@ -1073,6 +1575,25 @@ static int dessin_reel(uint32_t type, uint32_t nprim, int indexe, int32_t base, 
     static int actifs = -1;                           /* SC2_DRAWS_REELS=0 : mode « lumière » de la passe 5c */
     if (actifs < 0) { const char *e = getenv("SC2_DRAWS_REELS"); actifs = !(e && *e == '0'); }
     if (!actifs) return -1;
+    /* V2.2 : plan d'instanciation — avant les sorties « sans SPIR-V » et « sans déclaration », pour que les compteurs se
+     * comparent à ceux de V1.3 (freq indexés = candidats + UP) ; neutre (rien ne change) sans fréquence ∉ {0, 1} */
+    inst_plan ip = { 1, 0, 0, 0, INST_OK, 0 };
+    if (__builtin_expect(g_freq_non1 != 0, 0) && indexe && instances_actives()) {
+        inst_plan q = inst_planifier(D.freq, g_freq_non1);
+        if (up) { g_inst.up++; g_inst.somme_up += q.somme_idx; }     /* *PrimitiveUP : D3D9 n'instancie pas */
+        else {
+            ip = q; g_inst.candidats++; g_inst.somme_cand += q.somme_idx;
+            g_inst.idx_or |= q.indexes; g_inst.inst_or |= q.par_inst;
+            if (q.repli && !g_inst.replis[q.repli]++) {
+                sc2_log("[INST] repli %s (valeur 0x%X) : dessin NON instancié, comme avant", q.repli == INST_REPLI_DIVISEUR
+                        ? "diviseur > 1" : q.repli == INST_REPLI_N ? "deux N différents" : "drapeaux invalides", q.vu);
+                if (q.repli == INST_REPLI_DIVISEUR)
+                    sc2_log("[VK] fonction diviseur d'instance > 1 (VK_EXT_vertex_attribute_divisor) : non prise en charge → repli");
+            }
+        }
+    }
+    uint32_t ninst = ip.n;
+    int s_de_flux[17];                                /* V2.2 : liaison Vulkan → flux D3D9 (-1 : constante), journal [INST] VS */
     int sv = shader_id(D.vs), sp = shader_id(D.ps);
     int mv = module_de(sv), mp = module_de(sp);
     if (mv < 0 || mp < 0) { g_n_sans_spv++; return -1; }
@@ -1097,7 +1618,8 @@ static int dessin_reel(uint32_t type, uint32_t nprim, int indexe, int32_t base, 
             uint32_t s = rd16(el + 8 * trouve);
             if (s >= 16) return -1;
             if (flux_de[s] < 0) {
-                flux_de[s] = (int)d.nflux++;
+                flux_de[s] = (int)d.nflux++; s_de_flux[flux_de[s]] = (int)s;
+                const int par_inst = (int)((ip.par_inst >> s) & 1u);   /* V2.2 : INSTANCEDATA | 1 */
                 uint32_t stride = up ? up_stride : D.stream[s][2];
                 const uint8_t *src;
                 uint32_t dispo;
@@ -1110,8 +1632,14 @@ static int dessin_reel(uint32_t type, uint32_t nprim, int indexe, int32_t base, 
                     tvb = rd32(vb + O_W);
                     dispo = tvb > D.stream[s][1] ? tvb - D.stream[s][1] : 0;
                 }
-                uint64_t debut = (uint64_t)premier * stride, n = (uint64_t)nsommets * stride;
-                if (debut + n > dispo) { n = dispo > debut ? dispo - debut : 0; }
+                /* V2.2 : flux d'instance = [0, N) depuis le décalage du flux ; par sommet, la formule d'avant à l'octet */
+                uint64_t debut, n;
+                inst_plage(par_inst, premier, nsommets, ip.n, stride, &debut, &n);
+                if (debut + n > dispo) {
+                    n = dispo > debut ? dispo - debut : 0;
+                    if (par_inst) { uint32_t b = inst_borne(ninst, n, stride); if (b < ninst) { g_inst.tronques++; ninst = b; } }
+                }
+                if (par_inst) d.flux_inst |= 1u << flux_de[s];
                 d.flux[flux_de[s]].stride = stride;
                 d.flux[flux_de[s]].donnees = src + debut;
                 d.flux[flux_de[s]].taille = (uint32_t)n;
@@ -1126,7 +1654,7 @@ static int dessin_reel(uint32_t type, uint32_t nprim, int indexe, int32_t base, 
             }
             fl = (uint32_t)flux_de[s]; fmt = vk_decl(rd8(el + 8 * trouve + 4)); off = rd16(el + 8 * trouve + 2);
         } else {                                       /* élément absent : (0, 0, 0, 1) */
-            if (flux_const < 0) { flux_const = (int)d.nflux++; d.flux[flux_const].stride = 0;
+            if (flux_const < 0) { flux_const = (int)d.nflux++; s_de_flux[flux_const] = -1; d.flux[flux_const].stride = 0;
                                   d.flux[flux_const].donnees = zero_w1; d.flux[flux_const].taille = 16; }
             fl = (uint32_t)flux_const; fmt = VK_FORMAT_R32G32B32A32_SFLOAT; off = 0;
         }
@@ -1153,6 +1681,10 @@ static int dessin_reel(uint32_t type, uint32_t nprim, int indexe, int32_t base, 
         d.nombre = ni;
         d.decalage_sommet = -(int32_t)minidx;
     } else d.nombre = nsommets;
+    if (ip.par_inst || ip.n > 1) {                    /* V2.2 : instancié au sens de D3D9 */
+        if (!ninst) { g_inst.vides++; return 0; }     /* aucun enregistrement d'instance lisible : pas de dessin (ni « lumière ») */
+        if (d.flux_inst || ninst > 1) d.instances = ninst;   /* flux d'instance non lu par le VS et N = 1 : dessin d'avant */
+    }
     /* passe 10s : g_cvs/g_cps sont tenus à jour par les Set*ShaderConstant* (cf. bloc_consts) ; leur contenu est
      * toujours celui des générations courantes. SC2_VK_SANS_CACHE_CONSTS=1 : assemblage complet à chaque dessin,
      * comportement d'avant la passe 10r. */
@@ -1163,6 +1695,9 @@ static int dessin_reel(uint32_t type, uint32_t nprim, int indexe, int32_t base, 
     }
     d.cvs = g_cvs; d.cps = g_cps;
     d.gen_vs = D.gen_vs; d.gen_ps = D.gen_ps;
+#ifdef SC2_SPV_NCONST
+    d.nconst_vs = tv->nconst; d.nconst_ps = tp->nconst;   /* passe 10t : seuls ces registres c sont recopiés */
+#endif
     for (int k = 0; k < 16; k++) {
         d.tex[k].genre_shader = tp->samplers[k];
         if (!tp->samplers[k]) continue;
@@ -1222,12 +1757,21 @@ static int dessin_reel(uint32_t type, uint32_t nprim, int indexe, int32_t base, 
     d.masque_couleur = D.rs[168];
     d.zt = D.rs[7]; d.zw = D.rs[14]; d.zf = D.rs[23]; d.cull = D.rs[22];     /* passe 7n : profondeur et culling */
     d.zbiais = D.rs[195]; d.zpente = D.rs[175];                               /* passe 7v3 : biais de profondeur */
+    /* 21/10 : stencil D3D9 — les 13 D3DRS tels quels (valeurs brutes : op = D3DSTENCILOP, func = D3DCMP) */
+    d.st_en = D.rs[52]; d.st_fail = D.rs[53]; d.st_zfail = D.rs[54]; d.st_pass = D.rs[55];
+    d.st_func = D.rs[56]; d.st_ref = D.rs[57]; d.st_masque = D.rs[58]; d.st_ecriture = D.rs[59];
+    d.st_2faces = D.rs[185]; d.st_ccw_fail = D.rs[186]; d.st_ccw_zfail = D.rs[187];
+    d.st_ccw_pass = D.rs[188]; d.st_ccw_func = D.rs[189];
     float vw = D.vp[2] ? (float)D.vp[2] : 1.f, vh = D.vp[3] ? (float)D.vp[3] : 1.f;
     d.hp[0] = 1.f / vw; d.hp[1] = 1.f / vh;
     d.at[0] = D.rs[15] ? 1.f : 0.f; d.at[1] = (float)D.rs[25]; d.at[2] = (float)(D.rs[24] & 0xFF) / 255.f;
     journal_draw(sv, type, nprim, indexe, base, minidx, nverts, start, &d);
     if (d3dv_dessiner(&d)) return -1;
     g_n_reels++;
+    if (d.instances) {                                /* V2.2 */
+        g_inst.dessines++; g_inst.somme += d.instances; if (d.instances > g_inst.max) g_inst.max = d.instances;
+        inst_journal_vs(sv, tv, &d, s_de_flux);
+    }
     return 0;
 }
 
@@ -1265,28 +1809,70 @@ static void ui2d_fenetre(uint32_t n)
             g_ui2d_tot, bbt, sup, o ? t : " aucun", g_ui2d_hors ? " (+ groupes hors table)" : "");
     g_ui2d_n = 0; g_ui2d_tot = g_ui2d_hors = 0;
 }
-static void compter_draw(void)
-{ int v = shader_id(D.vs), p = shader_id(D.ps); if (v >= 0) g_shaders[v].n_draw++; if (p >= 0) g_shaders[p].n_draw++; ui2d_compter(v); }
+/* V1.3 : détails qui demandent le dessin (g_etats & E_DETAIL ≠ 0 : SRGBTEXTURE, ANTIALIASEDLINE, fréquences). */
+static uint64_t etats_n_dessins(void) { return g_n_reels + g_n_lumiere; }
+static struct {
+    uint64_t srgbt_lie, srgbt_lu, aaligne_lignes, freq_idx, freq_nonidx, idx_hist[5], idx_somme, inst1, instn, autres;
+    uint32_t idx_max, inst_max, autres_max, autres_dernier;
+} g_et;
+static void etats_compter(uint32_t type, int indexe)
+{
+    const uint32_t m = g_etats;
+    if (m & EB(E_SRGBT)) {
+        int sp = shader_id(D.ps), lie = 0, lu = 0;
+        const sc2_spv_shader *tp = sp >= 0 && g_shaders[sp].module >= 0 ? g_spv[sp] : NULL;
+        for (uint32_t b = g_srgb_ss; b; b &= b - 1) {
+            int k = __builtin_ctz(b);
+            if (D.tex[k]) { lie = 1; if (tp && tp->samplers[k]) lu = 1; }
+        }
+        g_et.srgbt_lie += (uint64_t)lie; g_et.srgbt_lu += (uint64_t)lu;
+    }
+    if ((m & EB(E_AALIGNE)) && (type == 2 || type == 3)) g_et.aaligne_lignes++;
+    if (m & EB(E_FREQ)) {
+        if (indexe) g_et.freq_idx++; else g_et.freq_nonidx++;
+        for (uint32_t b = g_freq_non1; b; b &= b - 1) {
+            uint32_t f = D.freq[__builtin_ctz(b)], n = f & 0x3FFFFFFFu;
+            if (f & 0x40000000u) {                  /* D3DSTREAMSOURCE_INDEXEDDATA | nombre d'instances */
+                g_et.idx_hist[n <= 1 ? 0 : n < 16 ? 1 : n < 64 ? 2 : n < 256 ? 3 : 4]++;
+                g_et.idx_somme += n; if (n > g_et.idx_max) g_et.idx_max = n;
+            } else if (f & 0x80000000u) {           /* D3DSTREAMSOURCE_INSTANCEDATA | diviseur */
+                if (n == 1) g_et.inst1++; else g_et.instn++;
+                if (n > g_et.inst_max) g_et.inst_max = n;
+            } else { g_et.autres++; g_et.autres_dernier = f; if (f > g_et.autres_max) g_et.autres_max = f; }
+        }
+    }
+}
+static void compter_draw(uint32_t type, int indexe)
+{
+    int v = shader_id(D.vs), p = shader_id(D.ps); if (v >= 0) g_shaders[v].n_draw++; if (p >= 0) g_shaders[p].n_draw++; ui2d_compter(v);
+    if (__builtin_expect(g_etats & E_DETAIL, 0)) etats_compter(type, indexe);   /* V1.3 : le seul coût par dessin */
+}
 static void lumiere(uint32_t t, uint32_t n) { g_n_lumiere++; d3dv_draw(t, n); }
 static uint32_t v_DrawPrimitive(CPU *c, uint32_t s, const uint32_t *a)
-{ (void)c; (void)s; compter_draw(); if (!d3dv_actif() || dessin_reel(A(0), A(2), 0, 0, 0, 0, A(1), NULL, 0, NULL, 0)) lumiere(A(0), A(2)); return 0; }
+{ (void)c; (void)s; compter_draw(A(0), 0); if (!d3dv_actif() || dessin_reel(A(0), A(2), 0, 0, 0, 0, A(1), NULL, 0, NULL, 0)) lumiere(A(0), A(2)); return 0; }
 /* (Type, BaseVertexIndex, MinVertexIndex, NumVertices, StartIndex, PrimCount) */
 static uint32_t v_DrawIndexedPrimitive(CPU *c, uint32_t s, const uint32_t *a)
-{ (void)c; (void)s; compter_draw(); if (!d3dv_actif() || dessin_reel(A(0), A(5), 1, (int32_t)A(1), A(2), A(3), A(4), NULL, 0, NULL, 0)) lumiere(A(0), A(5)); return 0; }
+{ (void)c; (void)s; compter_draw(A(0), 1); if (!d3dv_actif() || dessin_reel(A(0), A(5), 1, (int32_t)A(1), A(2), A(3), A(4), NULL, 0, NULL, 0)) lumiere(A(0), A(5)); return 0; }
 /* (Type, PrimCount, pVertexStreamZeroData, Stride) */
 static uint32_t v_DrawPrimitiveUP(CPU *c, uint32_t s, const uint32_t *a)
-{ (void)c; (void)s; compter_draw(); if (!d3dv_actif() || dessin_reel(A(0), A(1), 0, 0, 0, 0, 0, GPTR(A(2)), A(3), NULL, 0)) lumiere(A(0), A(1)); return 0; }
+{ (void)c; (void)s; compter_draw(A(0), 0); if (!d3dv_actif() || dessin_reel(A(0), A(1), 0, 0, 0, 0, 0, GPTR(A(2)), A(3), NULL, 0)) lumiere(A(0), A(1)); return 0; }
 /* (Type, MinVertexIndex, NumVertices, PrimCount, pIndexData, IndexFormat, pVertexData, Stride) */
 static uint32_t v_DrawIndexedPrimitiveUP(CPU *c, uint32_t s, const uint32_t *a)
-{ (void)c; (void)s; compter_draw();
+{ (void)c; (void)s; compter_draw(A(0), 1);
   if (!d3dv_actif() || dessin_reel(A(0), A(3), 1, 0, A(1), A(2), 0, GPTR(A(6)), A(7), GPTR(A(4)), A(5) == 102)) lumiere(A(0), A(3)); return 0; }
 static uint32_t v_GetViewport(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; memcpy(GPTR(A(0)), D.vp, 24); return 0; }
 static uint32_t v_SetMaterial(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; memcpy(D.material, GPTR(A(0)), 68); return 0; }
 static uint32_t v_GetMaterial(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; memcpy(GPTR(A(0)), D.material, 68); return 0; }
 static uint32_t v_LightEnable(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; if (A(0) < 8) D.light_on[A(0)] = A(1); return 0; }
-static uint32_t v_SetClipPlane(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; if (A(0) < 6) memcpy(D.clip[A(0)], GPTR(A(1)), 16); return 0; }
+static uint32_t v_SetClipPlane(CPU *c, uint32_t s, const uint32_t *a)
+{ (void)c; (void)s; g_n_setclip++; if (A(0) < 6) memcpy(D.clip[A(0)], GPTR(A(1)), 16); return 0; }
 static uint32_t v_GetClipPlane(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; if (A(0) < 6) memcpy(GPTR(A(1)), D.clip[A(0)], 16); return 0; }
-static uint32_t v_SetRenderState(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; if (A(0) < 256) D.rs[A(0)] = A(1); return 0; }
+static uint32_t v_SetRenderState(CPU *c, uint32_t s, const uint32_t *a)
+{
+    (void)c; (void)s;
+    if (A(0) < 256) { D.rs[A(0)] = A(1); g_n_rs_pose[A(0)]++; if (g_rs_suivi[A(0)]) etats_maj(); }   /* V1.3 */
+    return 0;
+}
 static uint32_t v_GetRenderState(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; wr32(A(1), A(0) < 256 ? D.rs[A(0)] : 0); return 0; }
 static uint32_t v_CreateStateBlock(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; wr32(A(1), obj_new(&K_SB, 0)); return 0; }
 static uint32_t v_EndStateBlock(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; wr32(A(0), obj_new(&K_SB, 0)); return 0; }
@@ -1296,9 +1882,19 @@ static uint32_t v_SetTexture(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (
 static uint32_t v_GetTextureStageState(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; wr32(A(2), A(0) < 16 && A(1) < 33 ? D.tss[A(0)][A(1)] : 0); return 0; }
 static uint32_t v_SetTextureStageState(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; if (A(0) < 16 && A(1) < 33) D.tss[A(0)][A(1)] = A(2); return 0; }
 static uint32_t v_GetSamplerState(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; uint32_t k = stage(A(0)); wr32(A(2), k < 20 && A(1) < 14 ? D.ss[k][A(1)] : 0); return 0; }
-static uint32_t v_SetSamplerState(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; uint32_t k = stage(A(0)); if (k < 20 && A(1) < 14) D.ss[k][A(1)] = A(2); return 0; }
+static uint32_t v_SetSamplerState(CPU *c, uint32_t s, const uint32_t *a)
+{
+    (void)c; (void)s; uint32_t k = stage(A(0));
+    if (k < 20 && A(1) < 14) D.ss[k][A(1)] = A(2);
+    if (k < 16 && A(1) == 11) {                      /* V1.3 : SRGBTEXTURE */
+        uint32_t b = g_srgb_ss; g_srgb_ss = A(2) ? b | 1u << k : b & ~(1u << k);
+        if (g_srgb_ss != b) etats_maj();
+    }
+    return 0;
+}
 static uint32_t v_ValidateDevice(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; if (A(0)) wr32(A(0), 1); return 0; }
-static uint32_t v_SetScissorRect(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; memcpy(D.scissor, GPTR(A(0)), 16); return 0; }
+static uint32_t v_SetScissorRect(CPU *c, uint32_t s, const uint32_t *a)
+{ (void)c; (void)s; g_n_setciseau++; memcpy(D.scissor, GPTR(A(0)), 16); etats_maj(); return 0; }
 static uint32_t v_GetScissorRect(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; memcpy(GPTR(A(0)), D.scissor, 16); return 0; }
 /* Passe 5d : la déclaration est COPIÉE (D3DVERTEXELEMENT9, 8 octets, fin Stream=0xFF). */
 static uint32_t v_CreateVertexDeclaration(CPU *c, uint32_t s, const uint32_t *a)
@@ -1306,7 +1902,7 @@ static uint32_t v_CreateVertexDeclaration(CPU *c, uint32_t s, const uint32_t *a)
     (void)c; (void)s;
     uint32_t n = 0;
     while (n < 64 && rd16(A(0) + 8 * n) != 0xFF) n++;
-    uint32_t d = obj_new(&K_DECL, 0), cp = sc2_alloc(8 * (n + 1));
+    uint32_t d = obj_new(&K_DECL, 0), cp = sc2_alloc_de(8 * (n + 1), SC2_MO_D3D_SHADER);
     memcpy(GPTR(cp), GPTR(A(0)), 8 * (n + 1));
     wr32(d + O_BUF, cp); wr32(d + O_W, n);
     wr32(A(1), d); return 0;
@@ -1335,17 +1931,43 @@ static uint64_t fnv1a64(const uint8_t *p, uint32_t n)
 { uint64_t h = 0xCBF29CE484222325ull; for (uint32_t i = 0; i < n; i++) { h ^= p[i]; h *= 0x100000001B3ull; } return h; }
 sc2_shader_info g_shaders[SC2_MAX_SHADERS];
 int g_nshaders;
+/* Passe 10t : index (hash, ps) → id + 1 des shaders créés, adressage ouvert (2 × SC2_MAX_SHADERS cases) : la recherche
+ * linéaire coûtait jusqu'à SC2_MAX_SHADERS comparaisons par création. */
+#define IDX_SHADERS_TAILLE (2u * SC2_MAX_SHADERS)
+static int32_t g_idx_shaders[IDX_SHADERS_TAILLE];
+static uint32_t idx_shader_case(uint64_t h, int ps) { return (uint32_t)((h ^ (uint64_t)ps * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull >> 40) & (IDX_SHADERS_TAILLE - 1u); }
+static int idx_shader_trouver(uint64_t h, int ps)
+{
+    for (uint32_t c = idx_shader_case(h, ps), n = 0; n < IDX_SHADERS_TAILLE && g_idx_shaders[c]; c = (c + 1) & (IDX_SHADERS_TAILLE - 1u), n++)
+        if (g_shaders[g_idx_shaders[c] - 1].hash == h && g_shaders[g_idx_shaders[c] - 1].ps == ps) return g_idx_shaders[c] - 1;
+    return -1;
+}
+static void idx_shader_ajouter(int id)
+{
+    uint32_t c = idx_shader_case(g_shaders[id].hash, g_shaders[id].ps);
+    while (g_idx_shaders[c]) c = (c + 1) & (IDX_SHADERS_TAILLE - 1u);   /* au plus SC2_MAX_SHADERS entrées : jamais pleine */
+    g_idx_shaders[c] = id + 1;
+}
+static int cmp_draws_desc(const void *a, const void *b)   /* bilan : les plus dessinés d'abord, puis par id (ordre stable) */
+{
+    const int x = *(const int *)a, y = *(const int *)b;
+    return g_shaders[x].n_draw != g_shaders[y].n_draw ? (g_shaders[x].n_draw < g_shaders[y].n_draw ? 1 : -1) : (x > y) - (x < y);
+}
 static uint32_t shader_creer(com_class *k, uint32_t code, uint32_t out, int ps)
 {
     uint32_t o = obj_new(k, 0), n = shader_longueur(code);
     uint64_t h = n ? fnv1a64((const uint8_t *)GPTR(code), n) : 0;
-    int id = -1;
-    for (int i = 0; i < g_nshaders; i++) if (g_shaders[i].hash == h && g_shaders[i].ps == ps) { id = i; break; }
+    int id = idx_shader_trouver(h, ps);
+    if (id < 0 && g_nshaders >= SC2_MAX_SHADERS) {
+        static int dit;
+        if (!dit++) sc2_log("[D3D9] plafond de %d shaders atteint : les suivants ne sont pas suivis (dessins « lumière »)", SC2_MAX_SHADERS);
+    }
     if (id < 0 && g_nshaders < SC2_MAX_SHADERS) {
         id = g_nshaders++;
         sc2_shader_info *si = &g_shaders[id];
         si->hash = h; si->ps = ps; si->ver = n ? rd32(code) : 0; si->taille = n;
-        si->code = n ? sc2_alloc(n) : 0;
+        idx_shader_ajouter(id);
+        si->code = n ? sc2_alloc_de(n, SC2_MO_D3D_SHADER) : 0;
         if (n) memcpy(GPTR(si->code), GPTR(code), n);
         si->module = -1;
         const char *dir = getenv("SC2_SHADERS_DUMP");
@@ -1407,7 +2029,18 @@ static uint32_t v_GetStreamSource(CPU *c, uint32_t s, const uint32_t *a)
     addref_out(A(1), D.stream[k][0]); if (A(2)) wr32(A(2), D.stream[k][1]); if (A(3)) wr32(A(3), D.stream[k][2]);
     return 0;
 }
-static uint32_t v_SetStreamSourceFreq(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; if (A(0) < 16) D.freq[A(0)] = A(1); return 0; }
+static uint32_t v_SetStreamSourceFreq(CPU *c, uint32_t s, const uint32_t *a)
+{
+    (void)c; (void)s;
+    g_n_setfreq++;
+    if (A(0) < 16) {
+        D.freq[A(0)] = A(1);
+        uint32_t b = g_freq_non1;                    /* V1.3 : 0 (jamais posé) et 1 sont la fréquence normale */
+        if (A(1) > 1) { g_n_setfreq_non1++; g_freq_non1 |= 1u << A(0); } else g_freq_non1 &= ~(1u << A(0));
+        if (g_freq_non1 != b) etats_maj();
+    }
+    return 0;
+}
 static uint32_t v_GetStreamSourceFreq(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; wr32(A(1), A(0) < 16 ? D.freq[A(0)] : 1); return 0; }
 static uint32_t v_SetIndices(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; D.indices = A(0); return 0; }
 static uint32_t v_GetIndices(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; return addref_out(A(0), D.indices); }
@@ -1561,9 +2194,27 @@ static int tga_en_dds(uint32_t src, uint32_t n, uint32_t *dds, uint32_t *ndds)
     *dds = d; *ndds = taille;
     return 1;
 }
+/* 24/10 (SIGBUS intermittent de TRaynor01, 44e image) : le jeu a appelé D3DXGetImageInfoFromFileInMemory(NULL, 0, &info)
+ * depuis L_00A05DA0 (chargeur de textures : sur un retour ≠ 0 il rend 0x20060012, chemin d'erreur prévu), et rd32(0) lisait
+ * l'adresse invitée 0 (hôte 0x7000000000, non projetée) → SIGBUS. d3dx9 rend D3DERR_INVALIDCALL quand pSrcData est NULL ou
+ * SrcDataSize nul (Wine, d3dx9_36 surface.c et texture.c : « if (!data || !datasize) return D3DERR_INVALIDCALL; ») : même
+ * refus ici, avant toute lecture, pour GetImageInfo, LoadSurfaceFromFileInMemory (même chemin) et
+ * Create{,Cube,Volume}TextureFromFileInMemoryEx. Une ligne par refus (les 8 premiers), total au bilan. */
+static uint64_t g_d3dx_src_nulle;
+static int d3dx_source_nulle(CPU *c, const char *fonction, uint32_t src, uint32_t n)
+{
+    if (src && n) return 0;
+    uint64_t k = __atomic_add_fetch(&g_d3dx_src_nulle, 1, __ATOMIC_RELAXED);
+    uint32_t ret = rd32(c->esp), fn = sc2_lifted_precedente(ret);
+    if (k <= 8)
+        sc2_log("[D3DX] %s(src 0x%08X, taille %u) depuis 0x%08X (%s%08X+0x%X) : D3DERR_INVALIDCALL — source nulle (n°%llu)",
+                fonction, src, n, ret, fn ? "L_" : "?", fn, fn ? ret - fn : 0, (unsigned long long)k);
+    return 1;
+}
 uint32_t sc2_d3dx_image_info(CPU *c, const uint32_t *a)          /* (src, taille, *info) */
 {
-    (void)c; uint32_t i[7];
+    uint32_t i[7];
+    if (d3dx_source_nulle(c, "D3DXGetImageInfoFromFileInMemory", A(0), A(1))) return 0x8876086Cu;
     uint32_t b2[3] = { A(0), A(1), A(2) };
     if (rd32(A(0)) != 0x20534444u && tga_en_dds(A(0), A(1), &b2[0], &b2[1])) {
         if (!dds_info(b2[0], b2[1], i)) return 0x8876086Cu;
@@ -1582,8 +2233,10 @@ static uint32_t val(uint32_t v, uint32_t f) { return v >= 0xFFFFFFFDu || v == 0 
 static uint32_t n_dds_ok, n_dds_ko;         /* passe 5e : au bilan */
 uint32_t sc2_d3dx_create_texture(CPU *c, const uint32_t *a, int genre)   /* 3 tex, 5 cube, 4 volume */
 {
-    (void)c; uint32_t i[7];
+    uint32_t i[7];
     int vol = genre == 4, cube = genre == 5;
+    if (d3dx_source_nulle(c, vol ? "D3DXCreateVolumeTextureFromFileInMemoryEx" : cube ? "D3DXCreateCubeTextureFromFileInMemoryEx"
+                          : "D3DXCreateTextureFromFileInMemoryEx", A(1), A(2))) return 0x8876086Cu;
     uint32_t a2[17]; memcpy(a2, a, sizeof a2);                  /* passe 7w : TGA → DDS (src, taille remplacés) */
     if (rd32(A(1)) != 0x20534444u && tga_en_dds(A(1), A(2), &a2[1], &a2[2])) a = a2;
     const uint32_t *b = a + (vol ? 1 : 0);                        /* volume : un argument Depth de plus */
@@ -1592,6 +2245,7 @@ uint32_t sc2_d3dx_create_texture(CPU *c, const uint32_t *a, int genre)   /* 3 te
     if (cube) b = a - 1;                                           /* cube : Size seul (pas de Height) */
     uint32_t mips = b[5] == 0xFFFFFFFDu || b[5] == 0xFFFFFFFFu || !b[5] ? i[3] : b[5];
     uint32_t fmt = b[7] >= 0xFFFFFFFDu || !b[7] ? i[4] : b[7];
+    if (!b[14]) { sc2_log("[D3DX] CreateTextureFromFileInMemoryEx : ppTexture NULL → D3DERR_INVALIDCALL"); return 0x8876086Cu; }
     uint32_t t = obj_new(vol ? &K_VOL : cube ? &K_CUBE : &K_TEX, (uint32_t)genre);
     wr32(t + O_W, w); wr32(t + O_H, h); wr32(t + O_LEVELS, mips); wr32(t + O_USAGE, b[6]);
     wr32(t + O_FMT, fmt); wr32(t + O_POOL, b[8]);
@@ -1847,9 +2501,12 @@ static uint32_t bi_precedent(uint32_t o, int32_t depuis)
 }
 static uint32_t bi_setText(CPU *c, uint32_t s, const uint32_t *a)    /* (const UnicodeString&) */
 {
-    uint32_t us = A(0), n = rd32(us + 4), src = rd32(us + 12), b = sc2_alloc(2 * n + 2);
+    uint32_t us = A(0), n = rd32(us + 4), src = rd32(us + 12), b = sc2_alloc(2 * n + 2), ancien = rd32(s + BI_TXT);
     if (n) memcpy(GPTR(b), GPTR(src), 2 * n);
     wr32(s + BI_TXT, b); wr32(s + BI_LEN, n); wr32(s + BI_POS, 0);
+    /* V5.1 : le texte remplacé est rendu (chaque itérateur possède le sien, cf. bi_clone) — avant, un bloc de plus à
+     * chaque mise en page : ≈ 450 000 blocs par passage au menu de missions (marathon acte1, lignes [MEM] « autre ») */
+    if (ancien && ancien != b && liberer_actif()) sc2_free(ancien);
     /* passe 7l : les textes que le jeu met en page (32 premiers, UTF-8) — diagnostic du rendu de police */
     static int ntxt, ntxt_max = -1;
     if (ntxt_max < 0) { const char *e = getenv("SC2_TEXTE_MAX"); ntxt_max = e ? atoi(e) : 32; }   /* passe 7p */
@@ -1887,8 +2544,22 @@ static uint32_t bi_isBoundary(CPU *c, uint32_t s, const uint32_t *a)
 { (void)c; int r = bi_frontiere(s, (int32_t)A(0)); if (r) wr32(s + BI_POS, A(0)); return (uint32_t)r; }
 static com_class K_BRKI;
 static uint32_t bi_clone(CPU *c, uint32_t s, const uint32_t *a)
-{ (void)c; (void)a; uint32_t o = sc2_alloc(O_SIZEOF); memcpy(GPTR(o), GPTR(s), O_SIZEOF); wr32(o + O_REF, 1); return o; }
-static uint32_t bi_ddtor(CPU *c, uint32_t s, const uint32_t *a) { (void)c; if (A(0) & 1) sc2_free(s); return s; }
+{
+    (void)c; (void)a; uint32_t o = sc2_alloc(O_SIZEOF); memcpy(GPTR(o), GPTR(s), O_SIZEOF); wr32(o + O_REF, 1);
+    if (liberer_actif()) {                           /* V5.1 : copie PROFONDE du texte (sans : partagé, jamais rendu) */
+        uint32_t n = rd32(s + BI_LEN), t = rd32(s + BI_TXT), b = sc2_alloc(2 * n + 2);
+        if (n && t) memcpy(GPTR(b), GPTR(t), 2 * n);
+        wr32(o + BI_TXT, b);
+    }
+    return o;
+}
+static uint32_t bi_ddtor(CPU *c, uint32_t s, const uint32_t *a)
+{
+    (void)c;
+    if (liberer_actif()) { sc2_free(rd32(s + BI_TXT)); wr32(s + BI_TXT, 0); wr32(s + BI_LEN, 0); }   /* V5.1 : son texte */
+    if (A(0) & 1) { sc2_free(s); __atomic_add_fetch(&g_mo_liberes[0], 1, __ATOMIC_RELAXED); }   /* V5.1 : compté [MEM] */
+    return s;
+}
 static uint32_t bi_classid(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; (void)a; return 0x7FE90000u; }
 static uint32_t bi_null(CPU *c, uint32_t s, const uint32_t *a) { (void)c; (void)s; (void)a; return 0; }
 static com_meth M_BRKI[] = {
@@ -2190,17 +2861,64 @@ void sc2_com_report(void)
            (unsigned long long)g_n_surfc_neuves, (unsigned long long)g_n_surfc_reprises);
     d3dv_bilan();
     /* Passe 5d : shaders créés / liés / utilisés par des draws (les plus dessinés d'abord). */
-    int nps = 0, nvs = 0, ord[SC2_MAX_SHADERS];
+    static int ord[SC2_MAX_SHADERS];   /* passe 10t : statique (128 Ko) et qsort — 32 768 entrées possibles */
+    int nps = 0, nvs = 0;
     for (int i = 0; i < g_nshaders; i++) { ord[i] = i; if (g_shaders[i].ps) nps++; else nvs++; }
-    for (int i = 1; i < g_nshaders; i++) for (int j = i; j > 0 && g_shaders[ord[j]].n_draw > g_shaders[ord[j - 1]].n_draw; j--)
-        { int t = ord[j]; ord[j] = ord[j - 1]; ord[j - 1] = t; }
+    qsort(ord, (size_t)g_nshaders, sizeof ord[0], cmp_draws_desc);
     printf("[BILAN] draws : %llu RÉELS (shaders traduits), %llu « lumière » (sans SPIR-V %llu, sans déclaration %llu, sans données %llu) ; "
            "table SPIR-V embarquée : %d shaders\n", (unsigned long long)g_n_reels, (unsigned long long)g_n_lumiere,
            (unsigned long long)g_n_sans_spv, (unsigned long long)g_n_sans_decl, (unsigned long long)g_n_sans_donnees, SC2_NB_SPV);
+    /* V1.3 (22/10) : états non traduits — quatre lignes, toujours (hors SC2_TRACE). Dessins = réels + « lumière ». */
+    {
+#define U(x) (unsigned long long)(x)
+#define N(e) U(etats_dessins(e))
+        printf("[BILAN] [ETATS] V1.3 sur %llu dessins : clip152 %llu (plans OR 0x%X, max %u ; SetClipPlane ×%llu) ; "
+               "ciseau174 %llu (rect ≠ RT0 entière %llu ; SetScissorRect ×%llu) ; blendfactor14/15 %llu (rs193 blanc %llu, "
+               "0 %llu, autre %llu, dernier 0x%X) ; srgbwrite194 %llu (back buffer %llu) ; srgbtexture %llu (texture liée %llu, "
+               "lue par le PS %llu)\n", U(etats_n_dessins()), N(E_CLIP), g_clip_or, g_clip_max, U(g_n_setclip),
+               N(E_CISEAU), N(E_CISEAU_PARTIEL), U(g_n_setciseau), N(E_BF), N(E_BF_BLANC), N(E_BF_ZERO), N(E_BF_AUTRE),
+               g_bf_dernier, N(E_SRGBW), N(E_SRGBW_BB), N(E_SRGBT), U(g_et.srgbt_lie), U(g_et.srgbt_lu));
+        printf("[BILAN] [ETATS] cibles : rt1 %llu, rt2 %llu, rt3 %llu (dessins MRT %llu, dont masque 190-192 nul %llu) ; "
+               "cwe190-192 ≠ 0 %llu (≠ 0xF sur une RT liée %llu) ; rt0 NULL %llu ; fillmode point %llu, fil %llu ; msaa161 %llu ; "
+               "aaligne176 %llu (lignes %llu)\n", N(E_RT1), N(E_RT2), N(E_RT3), N(E_MRT), N(E_MRT_CWE0), N(E_CWE),
+               N(E_CWE_PARTIEL), N(E_RT0NULL), N(E_FILL_POINT), N(E_FILL_FIL), N(E_MSAA), N(E_AALIGNE), U(g_et.aaligne_lignes));
+        printf("[BILAN] [ETATS] freq : %llu dessins avec un flux ≠ 1 (indexés %llu, non indexés %llu) ; INDEXEDDATA N (par flux) "
+               "1:%llu 2-15:%llu 16-63:%llu 64-255:%llu ≥256:%llu (max %u, Σ %llu) ; INSTANCEDATA d=1 %llu, d>1 %llu (max %u) ; "
+               "autres %llu (max 0x%X, dernier 0x%X) ; SetStreamSourceFreq ×%llu (∉ {0, 1} : %llu)\n", N(E_FREQ),
+               U(g_et.freq_idx), U(g_et.freq_nonidx), U(g_et.idx_hist[0]), U(g_et.idx_hist[1]), U(g_et.idx_hist[2]),
+               U(g_et.idx_hist[3]), U(g_et.idx_hist[4]), g_et.idx_max, U(g_et.idx_somme), U(g_et.inst1), U(g_et.instn),
+               g_et.inst_max, U(g_et.autres), g_et.autres_max, g_et.autres_dernier, U(g_n_setfreq), U(g_n_setfreq_non1));
+#undef N
+        static const struct { uint16_t n; const char *nom; } suivis[] = { { 8, "FILLMODE" }, { 152, "CLIPPLANEENABLE" },
+            { 161, "MULTISAMPLEANTIALIAS" }, { 174, "SCISSORTESTENABLE" }, { 176, "ANTIALIASEDLINEENABLE" },
+            { 190, "COLORWRITEENABLE1" }, { 191, "COLORWRITEENABLE2" }, { 192, "COLORWRITEENABLE3" }, { 193, "BLENDFACTOR" },
+            { 194, "SRGBWRITEENABLE" } };
+        char l[900]; size_t o = 0;
+        for (size_t i = 0; i < sizeof suivis / sizeof suivis[0]; i++)
+            o += (size_t)snprintf(l + o, sizeof l - o, "%s%u %s ×%llu (dernier 0x%X)", i ? ", " : "", suivis[i].n, suivis[i].nom,
+                                  U(g_n_rs_pose[suivis[i].n]), D.rs[suivis[i].n]);
+        printf("[BILAN] [ETATS] SetRenderState posés : %s\n", l);
+        /* V2.2 : instanciation — candidats + UP = « freq … indexés » ci-dessus ; dessinés = backend « [BILAN] [INST] backend » */
+        printf("[BILAN] [INST] V2.2 : %s ; %llu dessins candidats (Σ N %llu), %llu dessinés (Σ %llu instances, max %u), %llu vides, "
+               "%llu flux tronqués ; replis : diviseur > 1 %llu, N différents %llu, drapeaux %llu ; DrawIndexedPrimitiveUP ignorés "
+               "%llu (Σ N %llu) ; flux INDEXEDDATA 0x%X, INSTANCEDATA 0x%X\n", instances_actives() ? "actif" : "COUPÉ (SC2_INSTANCES=0)",
+               U(g_inst.candidats), U(g_inst.somme_cand), U(g_inst.dessines), U(g_inst.somme), g_inst.max, U(g_inst.vides),
+               U(g_inst.tronques), U(g_inst.replis[INST_REPLI_DIVISEUR]), U(g_inst.replis[INST_REPLI_N]),
+               U(g_inst.replis[INST_REPLI_DRAPEAUX]), U(g_inst.up), U(g_inst.somme_up), g_inst.idx_or, g_inst.inst_or);
+#undef U
+    }
+    /* passe 10t : pack SPIR-V externe (sc2-spirv.pak), consulté quand la table embarquée manque un shader */
+    if (sc2_spv_pack_chemin())
+        printf("[BILAN] [SPV] pack %s : %u entrées, %llu shaders servis par le pack\n",
+               sc2_spv_pack_chemin(), sc2_spv_pack_n(), (unsigned long long)g_n_spv_pack);
+    else
+        printf("[BILAN] [SPV] pack absent (%s)\n", sc2_spv_pack_raison());
     printf("[BILAN] textures D3DX (DDS) : %u remplies (pixels copiés), %u NON remplies\n", n_dds_ok, n_dds_ko);
     printf("[BILAN] [D3DX] D3DXLoadSurfaceFromMemory : %llu appels, %llu copiés, %llu refusés (D3DERR_INVALIDCALL), %llu conversions "
            "non gérées (S_OK sans copie)\n", (unsigned long long)g_lsm_appels, (unsigned long long)g_lsm_copies,
            (unsigned long long)g_lsm_refus, (unsigned long long)g_lsm_non_geres);   /* passe 9h */
+    printf("[BILAN] [D3DX] sources nulles refusées (pSrcData NULL ou taille 0 → D3DERR_INVALIDCALL) : %llu\n",
+           (unsigned long long)__atomic_load_n(&g_d3dx_src_nulle, __ATOMIC_RELAXED));
     printf("[BILAN] [TEX] LockRect/LockBox avec sous-rectangle (pRect/pBox respectés) : %llu\n", (unsigned long long)g_n_lock_rect);
     printf("[BILAN] [VIDEO-TEX] textures L8/A8L8 (D3DFMT 50/51) : %llu LockRect, %llu UpdateTexture/UpdateSurface, %llu liaisons "
            "aux draws, %llu changements (texture, génération) vus au draw\n", (unsigned long long)g_n_lock_lum,

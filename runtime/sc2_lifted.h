@@ -208,4 +208,48 @@ void sc2_x87_ecart(const char *fn, uint32_t ecarts, uint32_t masque);
 #define SC2_X87_FCOM(a, b) fcompare_sw(&x87->sw, (a), (b))
 #define SC2_X87_FNSTSW() ((x87->sw & ~0x3800u & 0xFFFFu) | ((x87->t & 7u) << 11))
 
+/* Passe 10u : registres SSE xmm0..xmm7 en variable locale (scripts/registres-locaux.py --sse, option CMake
+ * SC2_RL_SSE). Dans une fonction transformée, chaque c->xmm[K] (K littéral 0..7, toutes formes : champ
+ * .f32/.u32/.u64…, registre entier, &sse->x[K] de sse_load_ss/sse_load_sd, valeur passée à wrxm) devient
+ * sse->x[K] : indices constants, clang scalarise les 8 × 16 octets en registres hôtes au lieu d'un accès
+ * mémoire à *c par lecture/écriture. Synchronisé avec *c aux MÊMES frontières que rl (masque 8 bits par flot
+ * de données : xmm0..xmm7 = 0x01..0x80), SC2_SSE_VIDE juste après SC2_RL_VIDE/SC2_RL_VIDEX (et SC2_X87_VIDE),
+ * SC2_SSE_CHARGE juste après SC2_RL_CHARGE (et SC2_X87_CHARGE). La structure est définie DANS le corps de la
+ * fonction : sc2_lifted.h est incluse avant cpu.h, où XMM n'existe pas encore ; au développement de la macro,
+ * cpu.h est déjà lu. TRACE-PASSE10S.md. */
+#define SC2_SSE_DECL(c) struct sc2_sse { XMM x[8]; } sc2_sse_; \
+    struct sc2_sse *const sse = &sc2_sse_; SC2_SSE_CHARGE(c)
+#define SC2_SSE_CHARGE(c) do { \
+        sse->x[0] = (c)->xmm[0]; sse->x[1] = (c)->xmm[1]; sse->x[2] = (c)->xmm[2]; sse->x[3] = (c)->xmm[3]; \
+        sse->x[4] = (c)->xmm[4]; sse->x[5] = (c)->xmm[5]; sse->x[6] = (c)->xmm[6]; sse->x[7] = (c)->xmm[7]; \
+    } while (0)
+#ifdef SC2_RL_CONTROLE
+/* Build de contrôle : un registre ABSENT du masque doit déjà être égal (bit à bit, memcmp — un NaN ne passe
+ * pas ==) entre sse et *c à la frontière ; rapport par sc2_sse_ecart (runtime/sc2_runtime.c). */
+void sc2_sse_ecart(const char *fn, uint32_t ecarts, uint32_t masque);
+#define SC2_SSE_CONTROLE_(c, m) do { uint32_t e_ = 0; \
+        e_ |= memcmp(&sse->x[0], &(c)->xmm[0], sizeof(XMM)) ? 0x01u : 0; \
+        e_ |= memcmp(&sse->x[1], &(c)->xmm[1], sizeof(XMM)) ? 0x02u : 0; \
+        e_ |= memcmp(&sse->x[2], &(c)->xmm[2], sizeof(XMM)) ? 0x04u : 0; \
+        e_ |= memcmp(&sse->x[3], &(c)->xmm[3], sizeof(XMM)) ? 0x08u : 0; \
+        e_ |= memcmp(&sse->x[4], &(c)->xmm[4], sizeof(XMM)) ? 0x10u : 0; \
+        e_ |= memcmp(&sse->x[5], &(c)->xmm[5], sizeof(XMM)) ? 0x20u : 0; \
+        e_ |= memcmp(&sse->x[6], &(c)->xmm[6], sizeof(XMM)) ? 0x40u : 0; \
+        e_ |= memcmp(&sse->x[7], &(c)->xmm[7], sizeof(XMM)) ? 0x80u : 0; \
+        if (e_ & ~(uint32_t)(m)) sc2_sse_ecart(__func__, e_ & ~(uint32_t)(m), (uint32_t)(m)); \
+    } while (0)
+#else
+#define SC2_SSE_CONTROLE_(c, m) do { } while (0)
+#endif
+#define SC2_SSE_VIDE(c, m) do { SC2_SSE_CONTROLE_(c, m); \
+        if ((m) & 0x01u) (c)->xmm[0] = sse->x[0]; \
+        if ((m) & 0x02u) (c)->xmm[1] = sse->x[1]; \
+        if ((m) & 0x04u) (c)->xmm[2] = sse->x[2]; \
+        if ((m) & 0x08u) (c)->xmm[3] = sse->x[3]; \
+        if ((m) & 0x10u) (c)->xmm[4] = sse->x[4]; \
+        if ((m) & 0x20u) (c)->xmm[5] = sse->x[5]; \
+        if ((m) & 0x40u) (c)->xmm[6] = sse->x[6]; \
+        if ((m) & 0x80u) (c)->xmm[7] = sse->x[7]; \
+    } while (0)
+
 #endif

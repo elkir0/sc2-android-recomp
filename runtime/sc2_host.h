@@ -14,6 +14,7 @@
 #define RECOMP_SC2_HOST_H
 
 #include <stdarg.h>
+#include <stddef.h>          /* V5.1 : size_t (sc2_d3d9_mem) */
 #include <stdint.h>
 #include <setjmp.h>
 #include "sc2_lifted.h"   /* avant cpu.h : notre RECOMP_TODO */
@@ -37,6 +38,10 @@ int  sc2_trace_actif(void);
 #define sc2_trace(...) do { if (sc2_trace_actif()) sc2_log(__VA_ARGS__); } while (0)
 /* Arrêt propre ou sur point identifié : raison + pile fantôme + bilan, puis exit(code). */
 void sc2_stop(int code, const char *fmt, ...) __attribute__((noreturn, format(printf, 2, 3)));
+/* M10 (24/10) : crochet FAIBLE de sortie — appelé par sc2_stop sur le fil appelant, après son bilan et fflush, juste avant
+ * exit(code). NULL (sa définition dans sc2_runtime.c ; banc, Android, runner) : exit(code) comme avant. L'hôte Mac le pose
+ * en mode fenêtre (mac/sc2_mac_sortie.m : exit() renvoyé au fil principal, _exit sur une faute) ; il ne revient pas. */
+extern void (*sc2_sortie_crochet)(int code);
 
 /* ---- arène invitée (< 4 Go) ------------------------------------------------ */
 uint32_t sc2_alloc(uint32_t size);              /* zéro-initialisé, aligné 16 */
@@ -48,6 +53,18 @@ uint32_t sc2_arena_top(void);                   /* fin de la partie servie de l'
 uint32_t sc2_arena2_top(void);                  /* passe 7h : fin de l'arène de débordement (0 : pas ouverte) */
 uint32_t sc2_arena2_base(void);                 /* passe 7h : début de l'arène de débordement */
 uint32_t sc2_reserve_stack(uint32_t size, uint32_t *limit); /* rend le sommet */
+/* V5.1 (24/10) : ORIGINE d'un bloc d'arène, gardée dans son en-tête (bits 24..30 du mot [12], recyclage actif) — octets
+ * vivants et servis par origine, lignes [MEM] à chaque carte chargée (sc2_mpq.c) et à l'arrêt. sc2_alloc = SC2_MO_AUTRE ;
+ * sc2_realloc garde l'origine du bloc d'avant. */
+enum { SC2_MO_AUTRE, SC2_MO_MALLOC, SC2_MO_TAS, SC2_MO_VIRT, SC2_MO_SECTION, SC2_MO_D3D_OBJ, SC2_MO_D3D_TEX,
+       SC2_MO_D3D_CUBE, SC2_MO_D3D_VOL, SC2_MO_D3D_SURF, SC2_MO_D3D_VB, SC2_MO_D3D_IB, SC2_MO_D3D_SHADER, SC2_MO_N };
+uint32_t sc2_alloc_de(uint32_t size, unsigned origine);
+/* V5.1 : 1 si la mémoire rendue par le jeu retourne à l'arène (ressources D3D9 au dernier Release, tableaux remplacés des
+ * UnicodeString) — SC2_MEM_LIBERER ≠ 0 ET recyclage actif ; lu une fois, journalisé */
+int      sc2_mem_liberer(void);
+void     sc2_mem_ligne(const char *motif);      /* lignes [MEM] : occupation de l'arène, vivants par origine, objets D3D9 */
+void     sc2_d3d9_mem(char *o, size_t n) __attribute__((weak));   /* sc2_d3d9.c : objets D3D9 vivants et libérés */
+void     sc2_virt_mem(char *o, size_t n) __attribute__((weak));   /* V5.1, sc2_iat.c : granules de VirtualAlloc */
 
 /* ---- image, TEB ------------------------------------------------------------ */
 int      sc2_load_image(const char *exe_path);  /* 0 = OK */

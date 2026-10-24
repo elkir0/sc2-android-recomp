@@ -13,6 +13,9 @@ extern const imp_def *sc2_audio_find(const char *nom) __attribute__((weak));
 /* Passe 5f : entrées injectables (runtime/sc2_input_*.c), même principe : référence FAIBLE. */
 extern const imp_def *sc2_input_find(const char *nom) __attribute__((weak));
 #include "sc2_d3d9.h"
+#include "sc2_ddraw.h"      /* V2.5a : décisions de l'IDirectDraw7 factice (logique pure) */
+#include "sc2_icu_nombres.h" /* L5 : NumberFormat d'ICU 4.4 en_US (logique pure) */
+#include "sc2_documents.h"  /* sc2_gpu_device_id : DeviceId annoncé (sc2_d3d9.c) */
 #include "sc2_image.h"
 #include "win32_compat.h"
 
@@ -25,6 +28,9 @@ extern const imp_def *sc2_input_find(const char *nom) __attribute__((weak));
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "sc2_attentes.h"   /* SC2_ATTENTES : temps bloqué par fil/cause (références FAIBLES : ce module
+                             * et sc2_iat.c sont des unités séparées ; le module n'est lié qu'avec lui) */
 
 #define A(i)  (a[(i)])
 #define STR(va) ((const char *)GPTR(va))
@@ -191,7 +197,8 @@ static uint32_t p_reg_fin(CPU *c, const uint32_t *a)    { (void)c; (void)a; retu
 static uint32_t p_alloc(CPU *c, const uint32_t *a)   { (void)c; return sc2_alloc(A(1) ? A(1) : 1); }  /* (flags, taille) */
 static uint32_t p_arg0(CPU *c, const uint32_t *a)    { (void)c; return A(0); }
 static uint32_t p_size(CPU *c, const uint32_t *a)    { (void)c; return sc2_alloc_size(A(0)); }
-static uint32_t p_SleepEx(CPU *c, const uint32_t *a) { (void)c; usleep(A(0) > 1000 ? 1000000 : A(0) * 1000u); return 0; }
+static uint32_t p_SleepEx(CPU *c, const uint32_t *a) { (void)c; uint64_t t0 = &sc2_att_debut ? sc2_att_debut() : 0;
+    usleep(A(0) > 1000 ? 1000000 : A(0) * 1000u); if (t0) sc2_att_fin(ATT_SLEEPEX, A(0), t0, rd32(c->esp)); return 0; }
 static uint32_t p_GetProcessId(CPU *c, const uint32_t *a) { (void)c; (void)a; return (uint32_t)getpid(); }
 static uint32_t p_DuplicateHandle(CPU *c, const uint32_t *a)   /* (proc, h, proc2, *h2, accès, hérit, options) */
 { (void)c; if (A(3)) wr32(A(3), A(1)); return 1; }
@@ -425,7 +432,9 @@ static uint32_t p_GetWindowInfo(CPU *c, const uint32_t *a)
 static uint32_t p_PeekMessage(CPU *c, const uint32_t *a)                                   /* file vide */
 { (void)a; if (rd32(c->esp) == 0x0099A3CCu) sc2_glue_pompe(c); return 0; }   /* passe 10k : pompe du jeu */
 static uint32_t p_MsgWait(CPU *c, const uint32_t *a)                                       /* (n, handles, tous, ms, masque) */
-{ (void)c; if (A(3) && A(3) != 0xFFFFFFFFu) usleep(A(3) > 100 ? 100000 : A(3) * 1000u); return 0x102u; }   /* WAIT_TIMEOUT */
+{ (void)c; uint64_t t0 = &sc2_att_debut ? sc2_att_debut() : 0;
+  if (A(3) && A(3) != 0xFFFFFFFFu) usleep(A(3) > 100 ? 100000 : A(3) * 1000u);
+  if (t0) sc2_att_fin(ATT_MSGWAIT, A(3), t0, rd32(c->esp)); return 0x102u; }   /* WAIT_TIMEOUT */
 
 /* ---- GDI32 ------------------------------------------------------------------------ */
 static uint32_t p_GetDeviceCaps(CPU *c, const uint32_t *a)
@@ -540,13 +549,18 @@ static uint32_t p_bnet_create(CPU *c, const uint32_t *a)
 /* Dispositions mémoire d'ICU 4.4 (le code inline de SC2.exe lit les champs) :
  *   UnicodeString (32 o) : +0 vptr, +4 fLength, +8 fCapacity, +12 fArray (UChar*),
  *                          +16 fFlags (0 = tampon modifiable), +18 fStackBuffer[7]
+ *     (L5, 24/10 : c'est la disposition d'avant ICU 4.4. Celle que le code en ligne de SC2.exe relit est celle d'ICU
+ *     4.4, 36 o : +4 fShortLength (int8), +5 fFlags (2 = tampon interne de 13 UChar en +8), sinon +12 fLength,
+ *     +16 fArray, +20 fCapacity — vu dans L_00B6EF20 et L_00B6EFC0 après getTerminatedBuffer. Seul
+ *     NumberFormat::format y écrit fCapacity, cf. us_ajouter.)
  *   Locale : +0 vptr, +4 language[12], +16 script[6], +22 country[4], +28 variantBegin,
  *            +32 fullName (char*), +36 fullNameBuffer[157], +196 baseName, +200 baseNameBuffer
  * Vtable UnicodeString (Replaceable, MSVC) : [0] dtor deleting, [1] getDynamicClassID,
  *   [2] extractBetween, [3] handleReplaceBetween, [4] copy, [5] hasMetaData, [6] clone,
  *   [7] getLength, [8] getCharAt, [9] getChar32At — entrées = stubs des imports.
  * Les méthodes C++ importées sont des stubs STD dont `this` est dans ecx (thiscall).
- * BreakIterator / NumberFormat / DateFormat : U_UNSUPPORTED_ERROR et NULL. */
+ * BreakIterator : factice (sc2_d3d9.c). NumberFormat : DecimalFormat en_US factice (L5, plus bas ; monnaie : NULL).
+ * DateFormat : NULL. */
 #define US_LEN 4
 #define US_CAP 8
 #define US_ARR 12
@@ -583,10 +597,19 @@ static uint32_t icu_us_ctor_w(CPU *c, const uint32_t *a) { icu_vtables(); us_set
 static uint32_t icu_us_dtor(CPU *c, const uint32_t *a) { (void)a; sc2_free(rd32(c->ecx + US_ARR)); return 0; }
 static uint32_t icu_us_ddtor(CPU *c, const uint32_t *a)  /* (flags) */
 { sc2_free(rd32(c->ecx + US_ARR)); if (A(0) & 1) sc2_free(c->ecx); return c->ecx; }
+/* V5.1 (24/10) : setTo, operator=, extractBetween, handleReplaceBetween et copy rendent l'ANCIEN tableau de la chaîne
+ * qu'ils remplacent (comme us_ajouter) — avant, il restait dans l'arène : ~1,5 million de setTo en 10 min de campagne
+ * (constructeur depuis un wchar_t*, setTo, destructeur), 846 000 blocs et 80 Mo de plus par mission (marathon acte1,
+ * lignes [MEM] « autre »). Le tableau remplacé ne sert qu'à cette chaîne (us_set en alloue un par objet). Avec
+ * SC2_MEM_LIBERER=0 : gardé, comme avant. */
+static void us_rendre(uint32_t ancien, uint32_t o)
+{
+    if (ancien && ancien != rd32(o + US_ARR) && sc2_mem_liberer()) sc2_free(ancien);
+}
 static uint32_t icu_us_assign(CPU *c, const uint32_t *a)   /* operator= / setTo (const UnicodeString&) */
 {
     uint32_t s = A(0);
-    if (s != c->ecx) us_set(c->ecx, rd32(s + US_ARR), rd32(s + US_LEN));
+    if (s != c->ecx) { uint32_t ancien = rd32(c->ecx + US_ARR); us_set(c->ecx, rd32(s + US_ARR), rd32(s + US_LEN)); us_rendre(ancien, c->ecx); }
     return c->ecx;
 }
 static uint32_t icu_us_terminated(CPU *c, const uint32_t *a)
@@ -608,7 +631,9 @@ static uint32_t icu_us_extract(CPU *c, const uint32_t *a)   /* (début, fin, Uni
 {
     uint32_t o = c->ecx, n = rd32(o + US_LEN), d = A(0) < n ? A(0) : n, f = A(1) < n ? A(1) : n;
     if (f < d) f = d;
+    uint32_t ancien = rd32(A(2) + US_ARR);
     us_set(A(2), rd32(o + US_ARR) + 2 * d, f - d);
+    us_rendre(ancien, A(2));                             /* V5.1 (cible = source : lu avant) */
     return 0;
 }
 static uint32_t icu_us_replace(CPU *c, const uint32_t *a)   /* (début, fin, const UnicodeString& texte) */
@@ -620,6 +645,7 @@ static uint32_t icu_us_replace(CPU *c, const uint32_t *a)   /* (début, fin, con
     memcpy(GPTR(b), GPTR(ar), 2 * d); memcpy(GPTR(b + 2 * d), GPTR(ta), 2 * tn);
     memcpy(GPTR(b + 2 * (d + tn)), GPTR(ar + 2 * f), 2 * (n - f)); wr16(b + 2 * m, 0);
     wr32(o + US_ARR, b); wr32(o + US_LEN, m); wr32(o + US_CAP, m + 1);
+    us_rendre(ar, o);                                    /* V5.1 (texte = soi-même compris : b est déjà construit) */
     return 0;
 }
 static uint32_t icu_us_copy(CPU *c, const uint32_t *a)      /* (début, fin, dest) : insère [début,fin) en dest */
@@ -630,6 +656,7 @@ static uint32_t icu_us_copy(CPU *c, const uint32_t *a)      /* (début, fin, des
     memcpy(GPTR(b), GPTR(ar), 2 * x); memcpy(GPTR(b + 2 * x), GPTR(ar + 2 * d), 2 * k);
     memcpy(GPTR(b + 2 * (x + k)), GPTR(ar + 2 * x), 2 * (n - x)); wr16(b + 2 * m, 0);
     wr32(o + US_ARR, b); wr32(o + US_LEN, m); wr32(o + US_CAP, m + 1);
+    us_rendre(ar, o);                                    /* V5.1 */
     return 0;
 }
 static uint32_t icu_us_clone(CPU *c, const uint32_t *a)
@@ -683,10 +710,268 @@ static uint32_t icu_bi_car(CPU *c, const uint32_t *a) { return icu_bi(c, a, 0, "
 static uint32_t icu_bi_mot(CPU *c, const uint32_t *a) { return icu_bi(c, a, 1, "Word"); }
 static uint32_t icu_bi_ligne(CPU *c, const uint32_t *a) { return icu_bi(c, a, 2, "Line"); }
 static uint32_t icu_bi_phrase(CPU *c, const uint32_t *a) { return icu_bi(c, a, 3, "Sentence"); }
+/* NumberFormat (L5, 24/10) : sans lui, AUCUN nombre formaté ne s'affiche (« Credits: » du hub, « Credits Available: »
+ * et coût de l'armurerie vides). Le jeu n'atteint l'objet que par deux aides (sc2_icu_nombres.h) : vtable [0] destructeur
+ * (drapeau 1, à l'arrêt), [20] setGroupingUsed, [23] setMaximumFractionDigits, [24] setMinimumFractionDigits, et les
+ * imports non virtuels format(int32_t, UnicodeString&) et format(double, UnicodeString&). Objet invité de NF_TAILLE
+ * octets : +0 vptr, +4.. les sept champs de sc2_nf (genre, groupes, max/min entiers, max/min décimales, entier seul).
+ * Vtable de NF_VT_N entrées (DecimalFormat en a 37) : les dix méthodes ci-dessous ont un stub hors IAT (g_extra de
+ * sc2_iat.c) ; les autres (format(Formattable/DigitList…, FieldPosition…), parse…) pointent sur un stub SANS
+ * implémentation, qui arrête le run en nommant l'appelant. La chaîne rendue suit la disposition de UnicodeString de ce
+ * fichier, plus fCapacity d'ICU 4.4 en +20 : après getTerminatedBuffer, les aides relisent EN LIGNE fFlags (+5, bit 2
+ * = tampon interne → 13) et fCapacity (+20), borne de la conversion UTF-16 → UTF-8 du jeu (L_009AFF30 : fin = tampon
+ * + 2 × capacité), sinon prise dans la pile non initialisée. SC2_ICU_NOMBRES=0 : NULL comme avant (témoin A/B). */
+#define NF_TAILLE 32
+#define NF_VT_N 40
+#define US_CAP44 20
+static uint32_t g_nf_vtbl, g_nf_classid;
+static int nf_actif(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("SC2_ICU_NOMBRES");
+        if (e && *e && strcmp(e, "0") && strcmp(e, "1")) sc2_log("[ICU] SC2_ICU_NOMBRES=« %s » invalide : NumberFormat fourni", e);
+        v = !(e && !strcmp(e, "0"));
+    }
+    return v;
+}
+static void nf_lire(uint32_t o, sc2_nf *f)
+{ int32_t *p = &f->genre; for (int k = 0; k < 7; k++) p[k] = (int32_t)rd32(o + 4 + 4 * (uint32_t)k); }
+static void nf_ecrire(uint32_t o, const sc2_nf *f)
+{ const int32_t *p = &f->genre; for (int k = 0; k < 7; k++) wr32(o + 4 + 4 * (uint32_t)k, (uint32_t)p[k]); }
+static uint32_t nf_objet(CPU *c, uint32_t o, const char *quoi)   /* this : un NumberFormat de ce fichier */
+{
+    if (!o || !g_nf_vtbl || rd32(o) != g_nf_vtbl)
+        sc2_stop(6, "[ICU] NumberFormat::%s sur 0x%08X (vptr 0x%08X) : pas un NumberFormat factice (appelant 0x%08X)",
+                 quoi, o, o ? rd32(o) : 0, rd32(c->esp));
+    return o;
+}
+static void nf_vtable(void)
+{
+    if (g_nf_vtbl) return;
+    static const char *const m[NF_VT_N] = {
+        [0] = "icu:NumberFormat::`scalar deleting destructor'", [1] = "icu:NumberFormat::getDynamicClassID",
+        [2] = "icu:NumberFormat::operator==", [3] = "icu:NumberFormat::clone",
+        [19] = "icu:NumberFormat::setParseIntegerOnly", [20] = "icu:NumberFormat::setGroupingUsed",
+        [21] = "icu:NumberFormat::setMaximumIntegerDigits", [22] = "icu:NumberFormat::setMinimumIntegerDigits",
+        [23] = "icu:NumberFormat::setMaximumFractionDigits", [24] = "icu:NumberFormat::setMinimumFractionDigits" };
+    uint32_t v = sc2_alloc(4 * NF_VT_N);
+    for (uint32_t k = 0; k < NF_VT_N; k++) wr32(v + 4 * k, sc2_stub_va(m[k] ? m[k] : "icu:NumberFormat::(méthode non fournie)"));
+    g_nf_classid = sc2_alloc(4);
+    g_nf_vtbl = v;
+}
+static uint32_t nf_nouveau(const sc2_nf *f)
+{ uint32_t o = sc2_alloc(NF_TAILLE); wr32(o, g_nf_vtbl); nf_ecrire(o, f); return o; }
+static uint32_t icu_nf_creer(CPU *c, const uint32_t *a, int genre, const char *nom)   /* (const Locale&, UErrorCode&) */
+{
+    if (!nf_actif()) return icu_non_fourni(c, a);
+    nf_vtable();
+    sc2_nf f; sc2_nf_init(&f, genre);
+    uint32_t o = nf_nouveau(&f);                         /* UErrorCode laissé tel quel (U_ZERO_ERROR de l'appelant) */
+    static int n;
+    uint32_t nl = A(0) ? rd32(A(0) + 32) : 0;            /* Locale::fullName (loc_set) */
+    if (!n++)
+        sc2_log("[ICU] NumberFormat fourni : %s(« %s ») depuis 0x%08X → DecimalFormat en_US factice 0x%08X (« #,##0.### », "
+                "« #,##0%% », arrondi au pair ; SC2_ICU_NOMBRES=0 : NULL)", nom, nl ? STR(nl) : "?", rd32(c->esp), o);
+    else sc2_trace("[ICU] NumberFormat::%s(« %s ») depuis 0x%08X → 0x%08X", nom, nl ? STR(nl) : "?", rd32(c->esp), o);
+    return o;
+}
+static uint32_t icu_nf_nombre(CPU *c, const uint32_t *a) { return icu_nf_creer(c, a, SC2_NF_NOMBRE, "createInstance"); }
+static uint32_t icu_nf_pourcent(CPU *c, const uint32_t *a) { return icu_nf_creer(c, a, SC2_NF_POURCENT, "createPercentInstance"); }
+static void us_ajouter(uint32_t o, const uint16_t *s, uint32_t n)   /* UnicodeString::append */
+{
+    uint32_t n0 = rd32(o + US_LEN), a0 = rd32(o + US_ARR), m = n0 + n, b = sc2_alloc(2 * m + 2);
+    if (n0 && a0) memcpy(GPTR(b), GPTR(a0), 2 * n0);
+    memcpy(GPTR(b + 2 * n0), s, 2 * n); wr16(b + 2 * m, 0);
+    wr32(o + US_LEN, m); wr32(o + US_CAP, m + 1); wr32(o + US_ARR, b); wr16(o + US_FLG, 0);
+    wr32(o + US_CAP44, m + 1);
+    sc2_free(a0);
+}
+static uint32_t nf_formater(CPU *c, int dbl, int32_t i, double d, uint32_t us)
+{
+    uint32_t o = nf_objet(c, c->ecx, "format");
+    sc2_nf f; nf_lire(o, &f);
+    uint16_t t[SC2_NF_MAX_CAR];
+    int n = dbl ? sc2_nf_format_double(&f, d, t, SC2_NF_MAX_CAR) : sc2_nf_format_entier(&f, i, t, SC2_NF_MAX_CAR);
+    us_ajouter(us, t, (uint32_t)n);
+    static int nj;                                       /* 8 premiers au journal, 64 sous SC2_TRACE */
+    if (nj < 8 || (nj < 64 && sc2_trace_actif())) {
+        char u[64], v[40]; int k = 0;
+        for (int j = 0; j < n && k < (int)sizeof u - 4; j++) u[k++] = t[j] < 0x80 ? (char)t[j] : '?';
+        u[k] = 0;
+        if (dbl) snprintf(v, sizeof v, "double %.9g", d); else snprintf(v, sizeof v, "int32 %d", i);
+        sc2_log("[ICU] NumberFormat::format n°%d (%s ; genre %d, groupes %d, décimales %d-%d) → « %s »  ← 0x%08X",
+                ++nj, v, f.genre, f.groupe, f.min_frac, f.max_frac, u, rd32(c->esp));
+    }
+    return us;
+}
+static uint32_t icu_nf_format_ent(CPU *c, const uint32_t *a)   /* format(int32_t, UnicodeString&) const */
+{ return nf_formater(c, 0, (int32_t)A(0), 0.0, A(1)); }
+static uint32_t icu_nf_format_dbl(CPU *c, const uint32_t *a)   /* format(double, UnicodeString&) const */
+{ double d; memcpy(&d, &a[0], 8); return nf_formater(c, 1, 0, d, A(2)); }
+static uint32_t icu_nf_ddtor(CPU *c, const uint32_t *a)
+{ uint32_t o = nf_objet(c, c->ecx, "~NumberFormat"); if (A(0) & 1) sc2_free(o); return o; }
+static uint32_t icu_nf_classid(CPU *c, const uint32_t *a) { (void)c; (void)a; return g_nf_classid; }
+static uint32_t icu_nf_egal(CPU *c, const uint32_t *a)        /* operator==(const Format&) */
+{
+    uint32_t o = nf_objet(c, c->ecx, "operator=="), x = A(0);
+    if (x == o) return 1;
+    if (!x || rd32(x) != g_nf_vtbl) return 0;
+    for (uint32_t k = 4; k < 4 + 4 * 7; k += 4) if (rd32(o + k) != rd32(x + k)) return 0;
+    return 1;
+}
+static uint32_t icu_nf_clone(CPU *c, const uint32_t *a)
+{ (void)a; sc2_nf f; nf_lire(nf_objet(c, c->ecx, "clone"), &f); return nf_nouveau(&f); }
+static uint32_t nf_regler(CPU *c, const char *quoi, void (*r)(sc2_nf *, int32_t), int32_t v)
+{ uint32_t o = nf_objet(c, c->ecx, quoi); sc2_nf f; nf_lire(o, &f); r(&f, v); nf_ecrire(o, &f); return 0; }
+static void nf_groupes(sc2_nf *f, int32_t v) { f->groupe = (v & 0xFF) != 0; }    /* UBool : octet bas */
+static void nf_entier_seul(sc2_nf *f, int32_t v) { f->entier_seul = (v & 0xFF) != 0; }
+static uint32_t icu_nf_entier_seul(CPU *c, const uint32_t *a) { return nf_regler(c, "setParseIntegerOnly", nf_entier_seul, (int32_t)A(0)); }
+static uint32_t icu_nf_groupes(CPU *c, const uint32_t *a) { return nf_regler(c, "setGroupingUsed", nf_groupes, (int32_t)A(0)); }
+static uint32_t icu_nf_max_ent(CPU *c, const uint32_t *a) { return nf_regler(c, "setMaximumIntegerDigits", sc2_nf_max_ent, (int32_t)A(0)); }
+static uint32_t icu_nf_min_ent(CPU *c, const uint32_t *a) { return nf_regler(c, "setMinimumIntegerDigits", sc2_nf_min_ent, (int32_t)A(0)); }
+static uint32_t icu_nf_max_frac(CPU *c, const uint32_t *a) { return nf_regler(c, "setMaximumFractionDigits", sc2_nf_max_frac, (int32_t)A(0)); }
+static uint32_t icu_nf_min_frac(CPU *c, const uint32_t *a) { return nf_regler(c, "setMinimumFractionDigits", sc2_nf_min_frac, (int32_t)A(0)); }
 static uint32_t icu_nul(CPU *c, const uint32_t *a) { (void)a; sc2_trace("[ICU] DateFormat non fourni depuis 0x%08X → NULL", rd32(c->esp)); return 0; }
 
+/* ---- ddraw.dll : IDirectDraw7 factice (V2.5a, 22/10) ------------------------------------------------------------ */
+/* La sonde de mémoire vidéo du jeu (L_00A00FC0, lift 00A01098-00A0110B) appelle DirectDrawCreateEx(NULL, &dd,
+ * IID_IDirectDraw7 [0x01509AA0], NULL) puis, si le résultat vaut 0 et dd ≠ 0 :
+ *   dd->GetAvailableVidMem (vtbl+0x5C, n° 23), DDSCAPS2 {0x10004000 LOCALVIDMEM|VIDEOMEMORY} → total en [+0x2BC0],
+ *   puis {0x20005000 NONLOCALVIDMEM|VIDEOMEMORY|TEXTURE} → total en [+0x2BC4] (le « libre » va dans une case jetable) ;
+ *   dd->Release (vtbl+8, n° 2).
+ * Rien d'autre : ni QueryInterface ni AddRef, et les codes de retour de GetAvailableVidMem et de Release ne sont pas lus.
+ * Sinon (refus) : [+0x2BC0] = [+0x2BC4] = 0. Le seul lecteur trouvé de [+0x2BC0], L_00BFB810, en tire la SUGGESTION de
+ * GraphicsOptionTextureQuality (premier lancement sans Variables.txt, ou « Restore Defaults ») : palier 3 si > 768 Mo
+ * (et TotalVirtual ≥ 3 Go), 2 si > 384 Mo, 1 si > 192 Mo, 0 sinon (seuils STRICTS), borné par le niveau du GPU
+ * (GPUQualityLevels.txt : GTX 285 Ultra, 8600 GT Medium). Conception : sc2-bancs/20261022/conception/v2-5-adaptateur.md §1.2.
+ * Décision et mémoire : sc2_ddraw.h (logique pure, test hôte test_ddraw), d'après le DeviceId que sc2_d3d9.c annonce
+ * (sc2_gpu_device_id : la grammaire de SC2_GPU_PROFIL n'existe qu'à un endroit) :
+ *   historique (0x0402, canon) : refus d'avant, à l'octet (DDERR_NODIRECTDRAWHW, *lplpDD = 0, même ligne de journal) ;
+ *   moderne (dx10)             : IDirectDraw7 factice ; GetAvailableVidMem rend SC2_VRAM_MO (défaut 1024) en mémoire
+ *                                locale, 0 en non locale (pas d'AGP) ; SC2_VRAM_MO=768 → textures High suggérées… ;
+ *   Android                    : refus par défaut même en dx10 (garde-fou du 23/10 : PSS du Fold non mesuré en
+ *                                textures High/Ultra), SC2_DDRAW=1 pour le servir ;
+ *   SC2_DDRAW=0|1 (diagnostic) : refus ou service forcés, tous profils.
+ * Seule différence de journal en historique : la ligne « [GPU] profil … » (premier appel de sc2_gpu_device_id) passe
+ * AVANT la ligne [DDRAW] au lieu de la suivre ; aucune réponse au jeu ne change.
+ * Mécanisme. Ce fichier n'a ni table de classes COM (sc2_d3d9.c) ni entrées hors IAT (g_extra, sc2_iat.c) : les deux
+ * méthodes appelées réutilisent le stub d'un import de CE fichier à la même convention (stdcall, même nombre de mots
+ * dépilés par l'appelé), qui reconnaît l'objet en premier argument :
+ *   n° 23 GetAvailableVidMem(this, caps, total, libre) → stub de DirectDrawCreateEx (stdcall, 4 mots) ;
+ *   n° 2  Release(this)                              → stub de Direct3DCreate9 (stdcall, 1 mot).
+ * Le premier argument d'un vrai appel (lpGUID : NULL, 1, 2 ou un GUID ; SDKVersion 32) ne vaut jamais l'objet (arène).
+ * Effet visible : en dx10, le [BILAN] des imports compte DirectDrawCreateEx×3 et Direct3DCreate9×2. Les 28 autres
+ * méthodes pointent vers DD7_ARRET + 16 × n°, hors de toute plage servie : un appel imprévu arrête le run par
+ * « MANQUE : saut hors image vers 0xF2DD00xx » (n° = (adresse − 0xF2DD0000) / 16 ; ordre de la vtable : annexe B de la
+ * conception). L'objet et sa vtable ne sont alloués qu'au premier DirectDrawCreateEx SERVI : jamais en historique, dont
+ * les adresses d'arène restent celles d'avant. */
+#define DD7_NM     30u
+#define DD7_ARRET  0xF2DD0000u
+static const uint8_t IID_DD7[16] = { 0xC0, 0x5E, 0xE6, 0x15, 0x9C, 0x3B, 0xD2, 0x11,      /* 15e65ec0-3b9c-11d2- */
+                                     0xB9, 0x2F, 0x00, 0x60, 0x97, 0x97, 0xEA, 0x5B };    /* b92f-00609797ea5b   */
+static uint32_t g_dd7, g_dd7_vtbl;            /* objet { lpVtbl, compteur } et vtable, dans l'arène (fil du jeu) */
+static unsigned g_dd7_n_vidmem, g_dd7_n_release;
+#ifdef __ANDROID__
+#define DD7_ANDROID 1
+#else
+#define DD7_ANDROID 0
+#endif
+static int ddraw_servi(void)
+{
+    static int servi = -1;
+    if (servi < 0) {
+        const char *d = getenv("SC2_DDRAW");
+        int invalide, f = sc2_ddraw_forcage(d, &invalide);
+        unsigned dev = sc2_gpu_device_id();
+        servi = sc2_ddraw_servi_decider(dev, f, DD7_ANDROID);
+        if (invalide) sc2_log("[DDRAW] SC2_DDRAW « %s » invalide (0|1) → règle par défaut", d);
+        if (f >= 0)
+            sc2_log("[DDRAW] SC2_DDRAW=%d : DirectDraw %s (diagnostic, DeviceId 0x%04X)", f, servi ? "servi" : "refusé", dev);
+        else if (sc2_ddraw_moderne(dev) && !servi)
+            sc2_log("[DDRAW] Android : DirectDraw refusé malgré le profil moderne (DeviceId 0x%04X) — garde-fou V2.5a, "
+                    "PSS du Fold non mesuré en textures High/Ultra ; SC2_DDRAW=1 pour le servir", dev);
+    }
+    return servi;
+}
+static uint32_t dd7_vram_mo(void)
+{
+    static uint32_t mo;
+    if (!mo) {
+        const char *e = getenv("SC2_VRAM_MO");
+        int invalide;
+        mo = sc2_ddraw_vram_mo(e, sc2_gpu_device_id(), &invalide);
+        if (invalide) sc2_log("[DDRAW] SC2_VRAM_MO « %s » invalide (1 à 4095 Mo) → %u", e, mo);
+    }
+    return mo;
+}
+static uint32_t dd7_creer(void)
+{
+    if (!g_dd7) {
+        g_dd7_vtbl = sc2_alloc(4u * DD7_NM);
+        for (uint32_t k = 0; k < DD7_NM; k++) wr32(g_dd7_vtbl + 4u * k, DD7_ARRET + 16u * k);
+        wr32(g_dd7_vtbl + 4u * 2u, sc2_stub_va("Direct3DCreate9"));         /* Release */
+        wr32(g_dd7_vtbl + 4u * 23u, sc2_stub_va("DirectDrawCreateEx"));     /* GetAvailableVidMem */
+        g_dd7 = sc2_alloc(8);
+        wr32(g_dd7, g_dd7_vtbl); wr32(g_dd7 + 4, 0);
+    }
+    wr32(g_dd7 + 4, rd32(g_dd7 + 4) + 1u);
+    return g_dd7;
+}
+/* n° 23, (this, LPDDSCAPS2, LPDWORD total, LPDWORD libre) : total = libre = la mémoire annoncée */
+static uint32_t dd7_GetAvailableVidMem(CPU *c, const uint32_t *a)
+{
+    if (!A(1) || (!A(2) && !A(3))) return 0x80070057u;                          /* DDERR_INVALIDPARAMS */
+    uint32_t caps = rd32(A(1)), o = sc2_ddraw_vidmem_octets(caps, dd7_vram_mo());   /* NONLOCALVIDMEM : 0, pas d'AGP */
+    if (A(2)) wr32(A(2), o);
+    if (A(3)) wr32(A(3), o);
+    if (++g_dd7_n_vidmem <= 4)
+        sc2_log("[DDRAW] IDirectDraw7::GetAvailableVidMem(caps 0x%08X) → %u Mo (total = libre) depuis 0x%08X",
+                caps, o >> 20, rd32(c->esp));
+    return 0;
+}
+/* n° 2, (this) : l'objet est gardé (unique, repris au DirectDrawCreateEx suivant) */
+static uint32_t dd7_Release(CPU *c, const uint32_t *a)
+{
+    (void)a;
+    uint32_t n = rd32(g_dd7 + 4);
+    if (n) n--;
+    wr32(g_dd7 + 4, n);
+    if (++g_dd7_n_release <= 4)
+        sc2_log("[DDRAW] IDirectDraw7::Release depuis 0x%08X → %u (GetAvailableVidMem ×%u)", rd32(c->esp), n, g_dd7_n_vidmem);
+    return n;
+}
+/* (lpGUID, LPVOID *lplpDD, REFIID, IUnknown *pUnkOuter) ; aussi la méthode n° 23 de l'objet (voir plus haut) */
+static uint32_t p_DirectDrawCreateEx(CPU *c, const uint32_t *a)
+{
+    if (g_dd7 && A(0) == g_dd7) return dd7_GetAvailableVidMem(c, a);
+    if (!ddraw_servi()) {                                         /* historique : refus d'avant, à l'octet */
+        if (A(1)) wr32(A(1), 0);
+        sc2_log("[DDRAW] DirectDrawCreateEx depuis 0x%08X → DDERR_NODIRECTDRAWHW (pas de DirectDraw)", rd32(c->esp));
+        return 0x88760233u;
+    }
+    if (!A(1)) return 0x80070057u;                                /* DDERR_INVALIDPARAMS */
+    wr32(A(1), 0);
+    if (A(3)) {
+        sc2_log("[DDRAW] DirectDrawCreateEx depuis 0x%08X : agrégation demandée → CLASS_E_NOAGGREGATION", rd32(c->esp));
+        return 0x80040110u;
+    }
+    if (!A(2) || memcmp(GPTR(A(2)), IID_DD7, 16)) {
+        sc2_log("[DDRAW] DirectDrawCreateEx depuis 0x%08X : IID autre que IDirectDraw7 → DDERR_INVALIDPARAMS", rd32(c->esp));
+        return 0x80070057u;
+    }
+    uint32_t o = dd7_creer();
+    wr32(A(1), o);
+    sc2_log("[DDRAW] DirectDrawCreateEx depuis 0x%08X → IDirectDraw7 factice 0x%08X (DeviceId 0x%04X, VRAM %u Mo locale, "
+            "0 non locale ; vtable 0x%08X : n° 2 Release et n° 23 GetAvailableVidMem servis, autres → arrêt 0x%08X + 16 × n°)",
+            rd32(c->esp), o, sc2_gpu_device_id(), dd7_vram_mo(), g_dd7_vtbl, DD7_ARRET);
+    return 0;
+}
+
 /* ---- d3d9.dll ------------------------------------------------------------------- */
-static uint32_t p_Direct3DCreate9(CPU *c, const uint32_t *a) { (void)c; return sc2_d3d9_create(A(0)); }
+/* aussi la méthode n° 2 (Release) de l'IDirectDraw7 factice (plus haut) */
+static uint32_t p_Direct3DCreate9(CPU *c, const uint32_t *a)
+{ if (g_dd7 && A(0) == g_dd7) return dd7_Release(c, a); return sc2_d3d9_create(A(0)); }
 static uint32_t p_d3dx_info(CPU *c, const uint32_t *a) { return sc2_d3dx_image_info(c, a); }
 static uint32_t p_d3dx_tex(CPU *c, const uint32_t *a)  { return sc2_d3dx_create_texture(c, a, 3); }
 static uint32_t p_d3dx_cube(CPU *c, const uint32_t *a) { return sc2_d3dx_create_texture(c, a, 5); }
@@ -733,13 +1018,6 @@ static uint32_t p_d3dx_ps_profile(CPU *c, const uint32_t *a)
 { (void)c; (void)a; if (!g_ps_profil) { g_ps_profil = sc2_alloc(8); strcpy((char *)GPTR(g_ps_profil), "ps_3_0"); } return g_ps_profil; }
 static uint32_t p_d3dx_echec(CPU *c, const uint32_t *a)
 { sc2_log("[D3DX] fonction non fournie (sauvegarde/compilation) depuis 0x%08X → D3DERR_INVALIDCALL", rd32(c->esp)); (void)a; return 0x8876086Cu; }
-/* DirectDraw (sonde de mémoire vidéo de 0x00A00FC0) : absent, le jeu a un repli. */
-static uint32_t p_ddraw_absent(CPU *c, const uint32_t *a)
-{
-    if (A(1)) wr32(A(1), 0);
-    sc2_log("[DDRAW] DirectDrawCreateEx depuis 0x%08X → DDERR_NODIRECTDRAWHW (pas de DirectDraw)", rd32(c->esp));
-    return 0x88760233u;
-}
 
 /* longjmp invité : retour au SC2_SETJMP3 correspondant (runtime/sc2_runtime.c). Le
  * _setjmp3 de l'IAT n'est jamais appelé : lift-boot.py a réécrit ses appels. */
@@ -883,9 +1161,21 @@ static const imp_def g_p4[] = {
     { "?createLineInstance@BreakIterator@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_bi_ligne },
     { "?createSentenceInstance@BreakIterator@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_bi_phrase },
     { "?createWordInstance@BreakIterator@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_bi_mot },
-    { "?createInstance@NumberFormat@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_non_fourni },
+    { "?createInstance@NumberFormat@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_nf_nombre },
     { "?createCurrencyInstance@NumberFormat@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_non_fourni },
-    { "?createPercentInstance@NumberFormat@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_non_fourni },
+    { "?createPercentInstance@NumberFormat@icu_44@@SAPAV12@ABVLocale@2@AAW4UErrorCode@@@Z", 2, CDECL, icu_nf_pourcent },
+    { "?format@NumberFormat@icu_44@@QBEAAVUnicodeString@2@HAAV32@@Z", 2, STD, icu_nf_format_ent },
+    { "?format@NumberFormat@icu_44@@QBEAAVUnicodeString@2@NAAV32@@Z", 3, STD, icu_nf_format_dbl },
+    /* vtable du NumberFormat factice (stubs hors IAT, g_extra de sc2_iat.c) ; « (méthode non fournie) » n'a pas
+     * d'entrée ici : son stub arrête le run en nommant l'appelant */
+    { "icu:NumberFormat::`scalar deleting destructor'", 1, STD, icu_nf_ddtor },
+    { "icu:NumberFormat::getDynamicClassID", 0, STD, icu_nf_classid }, { "icu:NumberFormat::operator==", 1, STD, icu_nf_egal },
+    { "icu:NumberFormat::clone", 0, STD, icu_nf_clone }, { "icu:NumberFormat::setParseIntegerOnly", 1, STD, icu_nf_entier_seul },
+    { "icu:NumberFormat::setGroupingUsed", 1, STD, icu_nf_groupes },
+    { "icu:NumberFormat::setMaximumIntegerDigits", 1, STD, icu_nf_max_ent },
+    { "icu:NumberFormat::setMinimumIntegerDigits", 1, STD, icu_nf_min_ent },
+    { "icu:NumberFormat::setMaximumFractionDigits", 1, STD, icu_nf_max_frac },
+    { "icu:NumberFormat::setMinimumFractionDigits", 1, STD, icu_nf_min_frac },
     { "?createDateInstance@DateFormat@icu_44@@SAPAV12@W4EStyle@12@ABVLocale@2@@Z", 2, CDECL, icu_nul },
     { "?createTimeInstance@DateFormat@icu_44@@SAPAV12@W4EStyle@12@ABVLocale@2@@Z", 2, CDECL, icu_nul },
     { "?createDateTimeInstance@DateFormat@icu_44@@SAPAV12@W4EStyle@12@0ABVLocale@2@@Z", 3, CDECL, icu_nul },
@@ -897,7 +1187,7 @@ static const imp_def g_p4[] = {
     { "#3 Create", 3, CDECL, p_bnet_create }, { "#4 Destroy", 1, CDECL, p_ret0 },
     /* d3d9.dll */
     { "Direct3DCreate9", 1, STD, p_Direct3DCreate9 },
-    { "DirectDrawCreateEx", 4, STD, p_ddraw_absent },
+    { "DirectDrawCreateEx", 4, STD, p_DirectDrawCreateEx },   /* V2.5a : IDirectDraw7 factice en dx10 */
     /* d3dx9_41 (stdcall) : images DDS */
     { "D3DXGetImageInfoFromFileInMemory", 3, STD, p_d3dx_info },
     { "D3DXCreateTextureFromFileInMemoryEx", 15, STD, p_d3dx_tex },

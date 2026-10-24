@@ -33,4 +33,19 @@ void     sc2_input_bouton(int bouton, int bas);       /* 0 gauche, 1 milieu, 2 d
 uint32_t sc2_input_async(uint32_t vk);                /* GetAsyncKeyState (SHORT : bit 15 = enfoncé) */
 uint32_t sc2_input_etat(uint32_t vk);                 /* GetKeyState (bit 15 enfoncé, bit 0 bascule) */
 
+/* V3 (M1, 22/10) : glue d'une plate-forme qui fournit ses CARACTÈRES (Mac : NSEvent.characters). Tous les fils (I.mu
+ * récursif). Rien ne change pour SC2_INPUT_SIM, SC2_BANC_ENTREES ni Android tant qu'elles ne sont pas appelées. */
+void sc2_input_touche_plateforme(uint32_t vk, int bas); /* = sc2_input_touche, message MARQUÉ : i_TranslateMessage n'en
+                                                         * synthétise aucun WM_CHAR (la synthèse US reste pour le banc,
+                                                         * SC2_BANC_ENTREES et Android) ; mémorise le lParam du KEYDOWN */
+void sc2_input_caractere(uint32_t cp);                  /* UTF-32 → WM_CHAR (WM_SYSCHAR si VK_MENU tenue) ; deux unités
+                                                         * UTF-16 hors BMP ; lParam = celui du dernier KEYDOWN plate-forme */
+void sc2_input_activation(int actif);                   /* 0 : WM_ACTIVATEAPP(0) + WM_ACTIVATE(WA_INACTIVE) postés,
+                                                         * activation() SUSPENDUE ; 1 : reprise + WM_ACTIVATEAPP(1) +
+                                                         * WM_ACTIVATE(WA_ACTIVE). Module inactif : état mémorisé, rien de
+                                                         * posté ; SC2_ACTIVATION=0 : rien de posté ; état inchangé : rien.
+                                                         * Journal « [ACTIVATION] hôte : actif|inactif (tour N) … » */
+void sc2_input_tout_relacher(void);                     /* KEYUP (ou SYSKEYUP) de chaque I.bas[vk], vk ∉ {1, 2, 4}, puis
+                                                         * boutons relâchés (sc2_input_bouton(b, 0)) ; état bascule intact */
+
 #endif

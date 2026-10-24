@@ -101,6 +101,22 @@ static void volatils_noter(uint32_t obj, uint32_t gen, uint32_t decalage, uint32
         h = (h + 1) & VOLATILS_MASQUE;
     }
 }
+/* Passe 10t : plage de constantes lue par le shader (bloc autonome, testé par tests/test_d3d9v.c). Le bloc fait toujours
+ * D3DV_CONST_TAILLE octets dans l'anneau (range du descripteur inchangé), mais seuls les 16 × nconst premiers sont
+ * recopiés : le shader ne lit rien au-delà (nconst = plus grand registre c lu + 1, calculé par scripts/d3d9-vers-spirv.py
+ * sur le GLSL). 0 — registres i/b, adressage relatif, ancienne table sans le champ — ou `completes`
+ * (SC2_VK_CONSTS_COMPLETES=1) : bloc entier, comme avant. */
+static uint64_t consts_a_copier(uint16_t nconst, int completes)
+{
+    return completes || nconst == 0 || nconst > 256 ? (uint64_t)D3DV_CONST_TAILLE : 16u * (uint64_t)nconst;
+}
+/* Un bloc déjà dans l'anneau (époque, génération, octets recopiés) sert-il un dessin (époque et génération courantes,
+ * besoin en octets) ? Il faut la même génération, la même époque de l'anneau, et assez de registres recopiés. */
+static int bloc_consts_reutilisable(uint64_t epoque_bloc, uint32_t gen_bloc, uint64_t etendue_bloc,
+                                    uint64_t epoque, uint32_t gen, uint64_t besoin)
+{
+    return epoque_bloc == epoque && gen_bloc == gen && etendue_bloc >= besoin;
+}
 #ifndef SC2_D3D9V_TABLE_VOLATILS   /* inclusion « table seule » (tests/test_d3d9v.c) : s'arrête ici */
 #define VK_NO_PROTOTYPES
 #ifdef __APPLE__
@@ -117,6 +133,8 @@ static void volatils_noter(uint32_t obj, uint32_t gen, uint32_t decalage, uint32
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>                            /* passe 10r (v13) : cumul du temps d'attente des fences */
+#include <unistd.h>                          /* V5.1 : usleep (d3dv_oublis, verrou essayé) */
+#include "sc2_attentes.h"                     /* SC2_ATTENTES : fences bloquées, ligne par image du fil du jeu */
 
 #ifdef __APPLE__
 #include <libgen.h>
@@ -149,6 +167,7 @@ static PFN_vkGetInstanceProcAddr gipa;
     X(vkMapMemory) X(vkUnmapMemory) X(vkCmdPipelineBarrier) X(vkCmdClearDepthStencilImage) \
     X(vkCmdClearAttachments) X(vkCmdBeginRendering) X(vkCmdEndRendering) X(vkCmdBindPipeline) \
     X(vkCmdSetViewport) X(vkCmdSetScissor) X(vkCmdDraw) X(vkCmdCopyImageToBuffer) \
+    X(vkCmdSetStencilReference)   /* 21/10 : stencil D3D9 (référence = état dynamique) */ \
     X(vkCreateShaderModule) X(vkCreatePipelineLayout) X(vkCreateGraphicsPipelines) \
     X(vkCreateDescriptorSetLayout) X(vkCmdBindVertexBuffers) X(vkCmdBindIndexBuffer) X(vkCmdDrawIndexed) \
     X(vkCmdPushConstants) X(vkCreateSampler) X(vkCmdCopyBufferToImage) X(vkCmdClearColorImage) \
@@ -203,7 +222,9 @@ static struct {
         VkSemaphore sem_rendu;
         VkDeviceSize base;                   /* début de sa moitié de l'anneau */
         uint32_t n_lib;                      /* libérations différées de cet emplacement */
-        struct { VkBuffer b; VkDeviceMemory m; } lib[A_LIBERER];
+        struct { VkBuffer b; VkDeviceMemory m; int dalle; uint32_t off, taille; VkImage img; VkImageView vue, vue2; } lib[A_LIBERER];
+        /* 21/10 : b nul + dalle ≥ 0 ⇒ PLAGE de dalle à rendre (le VkBuffer vit avec elle) ;
+         * V5.1 : img non nulle ⇒ IMAGE de texture ou de cible oubliée (vue, vue2, image, mémoire m) */
         VkDescriptorPool pool;               /* voie des descripteurs classiques (sans push) */
         uint32_t pool_en_cours;              /* sets alloués depuis la dernière remise à zéro */
         int en_cours;                        /* soumission en vol : sa fence se signalera */
@@ -213,6 +234,7 @@ static struct {
     int cb_ouvert;
     int rendu;                     /* cible du rendu dynamique ouvert, -1 */
     int rendu_ds;                  /* passe 7n : surface de profondeur attachée à ce rendu, -1 */
+    int rendu_st;                  /* 21/10 : ce rendu attache aussi le STENCIL (vue deux aspects) */
     cible c[MAX_CIBLES];
     int nc, rt, ds;
     uint32_t vp[4]; float zmin, zmax;
@@ -233,6 +255,7 @@ static struct {
     PFN_vkCmdPushDescriptorSetKHR push_desc;
     int bc;
     int sans_push;                           /* passe 7c : SC2_VK_SANS_PUSH_DESCRIPTOR=1 (extension non demandée) */
+    int ombres_refus;                        /* 21/10 : GPU sans assez d'échantillonneurs par étage → pas d'ombres */
     int bc_device, sans_bc;                  /* passe 7l : BC offert par le device ; SC2_VK_SANS_BC=1 (repli logiciel forcé) */
     float aniso_max, biais_max;              /* passe 7l : limites des samplers (0 : pas d'anisotropie) */
 #ifdef __APPLE__
@@ -243,9 +266,10 @@ static struct {
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 
 /* ---- passe 5d : état des draws réels ------------------------------------------ */
-#define MAX_MODULES  4096   /* passe 7q : un module par shader traduit utilisé (mission > 1 024) */
+#define MAX_MODULES  16384  /* passe 7q : un module par shader traduit utilisé (mission > 1 024) ; passe 10t : ≈ 500 par mission,
+                            * ils s'accumulent quand les missions s'enchaînent dans un même lancement */
 #define MAX_TEX      4096
-#define MAX_PIPES    2048   /* passe 7q */
+#define MAX_PIPES    16384  /* passe 7q ; passe 10t : 300 à 470 par mission (2 048 ≈ 5 missions d'affilée) */
 #define MAX_SAMPLERS 64
 /* sommets, index, constantes, téléversements : 1 frame par emplacement. Passe 10s : SC2_VK_ANNEAU_MO (Mio par
  * emplacement, 16 à 1024, défaut 256), lu une fois — une moitié qui déborde en cours de frame force une soumission
@@ -275,15 +299,27 @@ typedef struct {
     uint32_t blend, src, dst, op, src_a, dst_a, op_a, masque;
     uint32_t prof;                           /* passe 7v2 : bit k = le sampler k lit une PROFONDEUR (SC2_OMBRES=1 seulement) */
     uint32_t zbiais, zpente;                 /* passe 7v3 : D3DRS DEPTHBIAS / SLOPESCALEDEPTHBIAS (SC2_OMBRES=1 seulement) */
+    /* 21/10 : stencil D3D9 (op = D3DSTENCILOP, func = D3DCMP). RÉFÉRENCE exclue : état dynamique
+     * (vkCmdSetStencilReference). Inactif ⇒ tout à ZÉRO : memcmp ne voit que les états utiles,
+     * les dessins sans stencil partagent les pipelines d'avant. */
+    uint32_t st_func, st_fail, st_zfail, st_pass, st_masque, st_ecriture;
+    uint32_t st_ccw_func, st_ccw_fail, st_ccw_zfail, st_ccw_pass;
+    uint32_t sa;                             /* 21/10 : le rendu attache le stencil (format stencil déclaré) */
+    uint32_t inst;                           /* V2.2 : bit i = liaison i en VK_VERTEX_INPUT_RATE_INSTANCE (diviseur 1) ;
+                                              * 0 pour tout dessin non instancié : mêmes pipelines, même VkPipelineCache */
 } cle_pipe;
 typedef struct { uint64_t cle; int genre; uint32_t w, h, d, fmt, gen, niv; int conv; VkFormat vf;
                  VkImage img; VkDeviceMemory mem; VkImageView vue; } tex5;
 /* passe 10r : tampon de sommets/index STATIQUE de la mémoire invitée → VkBuffer dédié copié une
  * fois (cle = adresse de l'objet invité, gen = sa génération de contenu, taille = O_W entier) */
 #define MAX_TAMPONS    4096                   /* banc mission : 1 024 atteint (17,9 Mio) */
+#define DALLE_TAILLE (8u << 20)               /* 21/10 : grandes dalles de sous-allocation des petits tampons */
+#define MAX_DALLES   48
 #define TAMPONS_PLAFOND (256u << 20)          /* octets mis en cache au plus : au-delà, anneau */
 typedef struct { uint32_t cle, gen, taille; VkBuffer buf; VkDeviceMemory mem; uint8_t *map;
-                 uint32_t remplacements; int volatil; } tam10;   /* passe 10r : garde de volatilité, voir tampon_puiser */
+                 uint32_t remplacements; int volatil; int dalle; uint32_t off;
+                 } tam10;   /* passe 10r : garde de volatilité, voir tampon_puiser ; 21/10 : dalle ≥ 0 =
+                              sous-allouée dans D[dalle] à l'octet off (mem alors nulle), -1 = dédiée */
 #define TAMPON_REMPL_MAX 2                    /* au-delà : tampon « volatile », servi par l'anneau pour de bon */
 static struct {
     int pret;                                /* layout, anneau, factices créés */
@@ -300,6 +336,9 @@ static struct {
     uint64_t n_reels, n_refus_cible, n_refus_pipe, n_refus_place, n_tex_tel, o_tel, n_tex_ko;
     uint64_t n_niv_tel, n_tel_logiciel, o_logiciel, n_cubes_tel;   /* passe 7l : niveaux téléversés, téléversements décodés par le CPU */
     uint64_t n_fan;                          /* passe 7u : draws D3DPT_TRIANGLEFAN (portability_subset : triangleFans) */
+    uint64_t n_stencil;                      /* 21/10 : draws avec test stencil actif (surlignage de sélection) */
+    uint64_t n_inst_dessins, n_inst;         /* V2.2 : dessins à flux d'instance (ou instanceCount > 1), Σ instanceCount */
+    uint32_t inst_max; int n_pipes_inst;     /* V2.2 : plus grand instanceCount ; pipelines à flux d'instance créés */
     /* passe 7c : descripteurs CLASSIQUES (sans VK_KHR_push_descriptor) — un set par draw, pris
      * dans le pool de SON emplacement (passe 10r v13 : V.empl[].pool), remis à zéro quand
      * l'emplacement revient (sa fence attendue : aucun set encore référencé par le GPU). */
@@ -309,13 +348,17 @@ static struct {
      * envoyé : génération, emplacement dans l'anneau, époque de l'anneau — celle-ci est
      * incrémentée à chaque remise à zéro dans soumettre(), un emplacement réservé avant ne
      * vaut que pour son époque (0 = jamais envoyé, d'où R.epoque qui démarre à 1). */
-    struct { uint32_t gen; VkDeviceSize off; uint64_t epoque; } cblk[2];
+    struct { uint32_t gen; VkDeviceSize off; uint64_t epoque; VkDeviceSize etendue; } cblk[2];   /* passe 10t : etendue = octets recopiés */
     uint64_t epoque;
     tam10 tam[MAX_TAMPONS]; int ntam; uint64_t o_tam;   /* cache des tampons statiques (octets : o_tam) */
+    struct { VkBuffer buf; VkDeviceMemory mem; uint8_t *map; } dalle[MAX_DALLES]; int ndalles;
+    uint64_t o_dalles;                        /* 21/10 : octets réellement pris dans les dalles (bilan) */
     uint64_t n_cache_cvs, n_cache_cps, n_tam_flux, n_tam_index, o_evites, n_tam_remplaces;
     uint32_t n_tam_plafond;                  /* créations refusées par TAMPONS_PLAFOND */
     uint64_t n_tam_volatils, n_tam_volatils_servis;   /* passe 10r : tampons sortis du cache, dessins qu'ils ont renvoyés à l'anneau */
     uint64_t n_volatils_flux, n_volatils_index, o_volatils;   /* passe 10t : plages volatiles réutilisées sans recopie (octets : o_volatils) */
+    uint64_t n_blocs, n_blocs_entiers, o_consts, o_plage;   /* passe 10t : blocs de constantes recopiés, dont entiers ; octets recopiés,
+                                                             * octets épargnés par la plage lue (D3DV_CONST_TAILLE − recopié) */
 } R;
 #define POOL_SETS 4096                       /* sets par soumission (2 UBO + 16 samplers chacun) */
 
@@ -335,7 +378,7 @@ static struct {
 #define HACHE_TEX_BITS    13                                 /* 8 192 cases ≥ 2 × MAX_TEX (4 096) */
 #define HACHE_TEX_TAILLE    (1u << HACHE_TEX_BITS)
 #define HACHE_TEX_MASQUE    (HACHE_TEX_TAILLE - 1u)
-#define HACHE_PIPE_BITS   12                                 /* 4 096 cases ≥ 2 × MAX_PIPES (2 048) */
+#define HACHE_PIPE_BITS   15                                 /* 32 768 cases ≥ 2 × MAX_PIPES (16 384) */
 #define HACHE_PIPE_TAILLE   (1u << HACHE_PIPE_BITS)
 #define HACHE_PIPE_MASQUE   (HACHE_PIPE_TAILLE - 1u)
 #define HACHE_TAM_BITS    13                                 /* passe 10r : 8 192 cases ≥ 2 × MAX_TAMPONS (4 096) */
@@ -346,6 +389,13 @@ static int32_t g_hache_tex[HACHE_TEX_TAILLE];
 static int32_t g_hache_pipe[HACHE_PIPE_TAILLE];
 static int32_t g_hache_tam[HACHE_TAM_TAILLE];
 static int g_hache_cibles_plein, g_hache_tex_plein, g_hache_pipe_plein, g_hache_tam_plein;
+static int g_tex_tombes, g_tam_tombes, g_cib_tombes;   /* V5.1 : pierres tombales (-2) dans g_hache_tex / tam / cibles */
+static int g_cib_libres[MAX_CIBLES], g_ncib_libres;     /* V5.1 : indices de cibles oubliées */
+static uint64_t g_n_cib_oubliees, g_n_cib_gardees;
+/* V5.1 (24/10) : entrées oubliées (d3dv_oublier) — clé morte, indice remis en service par la prochaine création */
+#define CLE_MORTE (~0ull)
+static int g_tex_libres[MAX_TEX], g_ntex_libres, g_tam_libres[MAX_TAMPONS], g_ntam_libres;
+static uint64_t g_n_tex_oubliees, g_n_tam_oublies, g_n_hache_refaites;
 __attribute__((constructor)) static void haches_init(void)   /* BSS à 0 or l'indice 0 est valide → tout à -1 */
 {
     memset(g_hache_cibles, 0xFF, sizeof g_hache_cibles);
@@ -380,8 +430,8 @@ static int cible_trouver(uint64_t cle)
         uint32_t h = hache_cle64(cle, HACHE_CIBLES_BITS);
         for (uint32_t n = 0; n < HACHE_CIBLES_TAILLE; n++) {
             int32_t e = g_hache_cibles[h];
-            if (e < 0) return -1;                    /* case vide : absente */
-            if (V.c[e].cle == cle) return e;
+            if (e == -1) return -1;                  /* case vide : absente (V5.1 : -2 = pierre tombale, on continue) */
+            if (e >= 0 && V.c[e].cle == cle) return e;
             h = (h + 1) & HACHE_CIBLES_MASQUE;
         }
     }
@@ -391,6 +441,7 @@ static void cible_noter(int id)                      /* sous g_mu : V.c[id] vien
 {
     uint32_t h = hache_cle64(V.c[id].cle, HACHE_CIBLES_BITS);
     for (uint32_t n = 0; n < HACHE_CIBLES_TAILLE && g_hache_cibles[h] >= 0; n++) h = (h + 1) & HACHE_CIBLES_MASQUE;
+    if (g_hache_cibles[h] == -2) g_cib_tombes--;      /* V5.1 : pierre tombale reprise */
     if (g_hache_cibles[h] < 0) g_hache_cibles[h] = id; else g_hache_cibles_plein = 1;
 }
 /* textures : la clé d'une entrée existante ne change jamais (réallocation en place
@@ -406,8 +457,8 @@ static int tex_trouver(uint64_t cle)
         uint32_t h = hache_cle64(cle, HACHE_TEX_BITS);
         for (uint32_t n = 0; n < HACHE_TEX_TAILLE; n++) {
             int32_t e = g_hache_tex[h];
-            if (e < 0) return -1;
-            if (R.t[e].cle == cle) return e;
+            if (e == -1) return -1;                  /* V5.1 : -2 = pierre tombale (entrée oubliée), on continue */
+            if (e >= 0 && R.t[e].cle == cle) return e;
             h = (h + 1) & HACHE_TEX_MASQUE;
         }
     }
@@ -417,19 +468,23 @@ static void tex_noter(int id)                        /* sous g_mu : R.t[id] vien
 {
     uint32_t h = hache_cle64(R.t[id].cle, HACHE_TEX_BITS);
     for (uint32_t n = 0; n < HACHE_TEX_TAILLE && g_hache_tex[h] >= 0; n++) h = (h + 1) & HACHE_TEX_MASQUE;
+    if (g_hache_tex[h] == -2) g_tex_tombes--;         /* V5.1 : pierre tombale reprise */
     if (g_hache_tex[h] < 0) g_hache_tex[h] = id; else g_hache_tex_plein = 1;
 }
 /* retire le DERNIER indice inséré (annulation immédiate de tex_noter) : aucune
- * chaîne de sondage ne passe par sa case, la vider est exact */
-static void tex_retirer(int id)
+ * chaîne de sondage ne passe par sa case, la vider est exact — V5.1 : seulement tant qu'aucune pierre
+ * tombale n'existe (l'insertion a pu en reprendre une, que des chaînes traversent) ; sinon pierre tombale.
+ * Sert aussi à l'oubli d'une entrée quelconque (d3dv_oublier). */
+static void tex_retirer_(int id, int tombe)
 {
     uint32_t h = hache_cle64(R.t[id].cle, HACHE_TEX_BITS);
     for (uint32_t n = 0; n < HACHE_TEX_TAILLE; n++) {
-        if (g_hache_tex[h] == id) { g_hache_tex[h] = -1; return; }
-        if (g_hache_tex[h] < 0) return;              /* pas dans la table (insertion débordée) */
+        if (g_hache_tex[h] == id) { if (tombe || g_tex_tombes) { g_hache_tex[h] = -2; g_tex_tombes++; } else g_hache_tex[h] = -1; return; }
+        if (g_hache_tex[h] == -1) return;            /* pas dans la table (insertion débordée) */
         h = (h + 1) & HACHE_TEX_MASQUE;
     }
 }
+static void tex_retirer(int id) { tex_retirer_(id, 0); }
 /* pipelines : ajout en fin uniquement, jamais de retraite ni de réécriture ;
  * collision de hachage → le memcmp sur sizeof cle_pipe octets tranche */
 static int pipe_scan(const cle_pipe *k)
@@ -471,8 +526,8 @@ static int tam_trouver(uint64_t cle)
         uint32_t h = hache_cle64(cle, HACHE_TAM_BITS);
         for (uint32_t n = 0; n < HACHE_TAM_TAILLE; n++) {
             int32_t e = g_hache_tam[h];
-            if (e < 0) return -1;                    /* case vide : absent */
-            if (R.tam[e].cle == cle) return e;
+            if (e == -1) return -1;                  /* case vide : absent (V5.1 : -2 = pierre tombale) */
+            if (e >= 0 && R.tam[e].cle == cle) return e;
             h = (h + 1) & HACHE_TAM_MASQUE;
         }
     }
@@ -482,6 +537,7 @@ static void tam_noter(int id)                        /* sous g_mu : R.tam[id] vi
 {
     uint32_t h = hache_cle64(R.tam[id].cle, HACHE_TAM_BITS);
     for (uint32_t n = 0; n < HACHE_TAM_TAILLE && g_hache_tam[h] >= 0; n++) h = (h + 1) & HACHE_TAM_MASQUE;
+    if (g_hache_tam[h] == -2) g_tam_tombes--;         /* V5.1 : pierre tombale reprise */
     if (g_hache_tam[h] < 0) g_hache_tam[h] = id; else g_hache_tam_plein = 1;
 }
 
@@ -496,6 +552,135 @@ static int32_t type_memoire(uint32_t bits, VkMemoryPropertyFlags voulu)
     for (uint32_t i = 0; i < V.memp.memoryTypeCount; i++)
         if ((bits & (1u << i)) && (V.memp.memoryTypes[i].propertyFlags & voulu) == voulu) return (int32_t)i;
     return -1;
+}
+
+/* ---- 21/10 : dalles ------------------------------------------------------------------------
+ * tam_creer() faisait pour CHAQUE tampon statique un vkCreateBuffer + vkAllocateMemory +
+ * vkMapMemory (≈ 1 000 par mission : sur Android, autant d'ioctls et d'à-coups au chargement).
+ * Les petits tampons (≤ quart de dalle) sont désormais sous-alloués dans de grandes dalles :
+ * un VkBuffer VERTEX|INDEX + une VkDeviceMemory HOST_VISIBLE|HOST_COHERENT (même type_memoire
+ * que le chemin dédié), mappés une fois pour toutes. Dalles créées à la demande, JAMAIS
+ * détruites avant la fin (les VkBuffer des plages meurent avec elles : pas de vkDestroyBuffer
+ * en cours de route). La gestion des étendues libres (trouvée, prise, réinsertion, fusion) est
+ * écrite en fonctions static pures sur la struct de la dalle, sans appel Vulkan — un test
+ * unitaire pourra la viser plus tard. SC2_VK_DALLES=0 : chemin dédié partout, comme avant. */
+#define DALLE_LIBRE_MAX 256                   /* étendues LIBRES suivies par dalle (fusionnées, en pratique ≪) */
+static int g_dalles = -1;                     /* SC2_VK_DALLES, lu une fois ; 0 = chemin dédié partout */
+typedef struct { uint32_t off, taille; } etendue;
+typedef struct { etendue libre[DALLE_LIBRE_MAX]; int nlibre; } dalle_libres;   /* triées par décalage */
+
+/* Trouve la première étendue ≥ t (first-fit) dans une liste triée : rend son indice, -1 si rien. */
+static int libres_trouver(const dalle_libres *l, uint32_t t)
+{
+    for (int i = 0; i < l->nlibre; i++) if (l->libre[i].taille >= t) return i;
+    return -1;
+}
+
+/* Prend t octets à l'étendue i (t ≤ sa taille) : l'étendue rétrécit par la gauche. */
+static void libres_prendre(dalle_libres *l, int i, uint32_t t)
+{
+    l->libre[i].off += t; l->libre[i].taille -= t;
+    if (l->libre[i].taille) return;
+    memmove(&l->libre[i], &l->libre[i + 1], (size_t)(l->nlibre - i - 1) * sizeof *l->libre);
+    l->nlibre--;
+}
+
+/* Réinsère [off, off+taille[ triée par décalage et fusionne avec les voisines immédiates.
+ * Rend 0, -1 si la liste est pleine (l'appelant renonce : la plage est simplement perdue). */
+static int libres_rendre(dalle_libres *l, uint32_t off, uint32_t taille)
+{
+    if (!taille) return 0;
+    int i = 0;
+    while (i < l->nlibre && l->libre[i].off < off) i++;
+    int avant = i > 0 && l->libre[i - 1].off + l->libre[i - 1].taille == off;
+    int apres = i < l->nlibre && off + taille == l->libre[i].off;
+    if (avant) {
+        l->libre[i - 1].taille += taille;                /* agrandit l'étendue précédente */
+        if (apres) {                                     /* comble exactement le trou : avale aussi la suivante */
+            l->libre[i - 1].taille += l->libre[i].taille;
+            memmove(&l->libre[i], &l->libre[i + 1], (size_t)(l->nlibre - i - 1) * sizeof *l->libre);
+            l->nlibre--;
+        }
+        return 0;
+    }
+    if (apres) { l->libre[i].off = off; l->libre[i].taille += taille; return 0; }
+    if (l->nlibre >= DALLE_LIBRE_MAX) return -1;
+    memmove(&l->libre[i + 1], &l->libre[i], (size_t)(l->nlibre - i) * sizeof *l->libre);
+    l->libre[i].off = off; l->libre[i].taille = taille; l->nlibre++;
+    return 0;
+}
+static dalle_libres g_libres[MAX_DALLES];     /* étendues libres de chaque dalle, sous g_mu */
+
+static uint32_t arrondi256(uint32_t t)        /* granularité des plages (limite la fragmentation) */
+{
+    return (t + 0xffu) & ~0xffu;
+}
+static int dalles_actives(void)               /* SC2_VK_DALLES, lu une fois ; 0 = chemin dédié partout */
+{
+    if (g_dalles < 0) { const char *e = getenv("SC2_VK_DALLES"); g_dalles = !(e && *e == '0'); }
+    return g_dalles;
+}
+
+/* Crée la dalle n° i : VkBuffer VERTEX|INDEX de DALLE_TAILLE + VkDeviceMemory HOST_VISIBLE|
+ * HOST_COHERENT (même type_memoire que le chemin dédié de tam_creer), mappée une fois pour
+ * toutes. Rend 0, -1 si un appel Vulkan échoue (alors rien à défaire du côté des plages). */
+static int dalle_creer(int i)                 /* sous g_mu */
+{
+    VkBufferCreateInfo bi = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = DALLE_TAILLE,
+                              .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT };
+    VkBuffer b;
+    if (vkCreateBuffer(V.dev, &bi, NULL, &b)) return -1;
+    VkMemoryRequirements mr; vkGetBufferMemoryRequirements(V.dev, b, &mr);
+    int32_t ty = type_memoire(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                                                       | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkMemoryAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = (uint32_t)ty };
+    VkDeviceMemory m = VK_NULL_HANDLE; uint8_t *map = NULL;
+    if (ty < 0 || vkAllocateMemory(V.dev, &ai, NULL, &m) || vkBindBufferMemory(V.dev, b, m, 0)
+        || vkMapMemory(V.dev, m, 0, VK_WHOLE_SIZE, 0, (void **)&map)) {
+        vkDestroyBuffer(V.dev, b, NULL);
+        if (m) vkFreeMemory(V.dev, m, NULL);
+        return -1;
+    }
+    R.dalle[i].buf = b; R.dalle[i].mem = m; R.dalle[i].map = map;
+    g_libres[i].nlibre = 1; g_libres[i].libre[0].off = 0; g_libres[i].libre[0].taille = DALLE_TAILLE;
+    if (!i) LOG("[VK] 21/10 : petits tampons statiques sous-alloués dans des dalles de %u Mio "
+                "(SC2_VK_DALLES=0 pour couper)", DALLE_TAILLE >> 20);
+    return 0;
+}
+
+/* Sous-alloue taille octets (arrondis à 256) : first-fit dans les dalles existantes, sinon
+ * nouvelle dalle créée à la demande. Rend 0 avec l'indice de dalle et le décalage, -1 si rien
+ * de libre et plus de dalle possible (MAX_DALLES atteint ou création en échec). sous g_mu. */
+static int dalle_prendre(uint32_t taille, int *dalle, uint32_t *off)
+{
+    taille = arrondi256(taille);
+    if (!taille || taille > DALLE_TAILLE) return -1;
+    for (int i = 0; i < R.ndalles; i++) {
+        int j = libres_trouver(&g_libres[i], taille);
+        if (j < 0) continue;
+        *dalle = i; *off = g_libres[i].libre[j].off;
+        libres_prendre(&g_libres[i], j, taille);
+        R.o_dalles += taille;
+        return 0;
+    }
+    int i = R.ndalles;
+    if (i >= MAX_DALLES || dalle_creer(i)) return -1;
+    R.ndalles = i + 1;
+    *dalle = i; *off = 0;
+    libres_prendre(&g_libres[i], 0, taille);
+    R.o_dalles += taille;
+    return 0;
+}
+
+/* Rend une plage prise par dalle_prendre : réinsertion triée + fusion des voisines. taille DOIT
+ * être l'arrondi 256 passé à dalle_prendre (l'appelant l'a conservé). Liste pleine : la plage
+ * est perdue (autant d'octets muets — 256 étendues fusionnées, irréaliste). */
+static void dalle_rendre(int dalle, uint32_t off, uint32_t taille)   /* sous g_mu */
+{
+    if (dalle < 0 || dalle >= R.ndalles) return;
+    R.o_dalles -= taille;
+    libres_rendre(&g_libres[dalle], off, taille);
 }
 
 static int format_ok(VkFormat f, VkFormatFeatureFlags voulu)
@@ -570,7 +755,10 @@ static struct {
  * l'app peut être tuée sans passer par le bilan, jamais de fichier tronqué au chemin final)
  * toutes les 600 frames dans d3dv_present et une dernière fois dans d3dv_bilan — seulement
  * si un pipeline a été créé depuis la dernière sauvegarde : une fois le jeu « chaud », plus
- * aucune écriture. Tout l'état vit sous g_mu comme le reste du backend. */
+ * aucune écriture. Le pilote rendant souvent des données de même taille (pipelines recréés
+ * déjà présents dans le cache), une taille égale à la référence — dernière sauvegarde, sinon
+ * octets chargés au démarrage — suffit aussi à sauter l'écriture (compteur n_inchangees).
+ * Tout l'état vit sous g_mu comme le reste du backend. */
 #define PCACHE_PLAFOND (256ull << 20)        /* octets chargés au plus */
 static struct {
     int desactive;                           /* SC2_VK_CACHE_PIPELINES=0 ou chemin trop long */
@@ -582,6 +770,7 @@ static struct {
     uint64_t depuis_sauvegarde;              /* créés depuis la dernière sauvegarde (garde d'écriture) */
     double ms, ms_max;                       /* temps cumulé / maximum d'un appel dans vkCreateGraphicsPipelines */
     uint32_t n_sauvegardes;                  /* écritures réussies */
+    uint32_t n_inchangees;                   /* sauvegardes sautées : taille rendue égale à la référence */
     size_t derniere_taille;                  /* octets de la dernière sauvegarde */
     uint32_t n_echecs;                       /* écritures ratées : journalisées au plus 3 fois */
 } PC;
@@ -672,8 +861,10 @@ static void pcache_echec(const char *action, const char *cause)
 }
 
 /* réécriture atomique (d3dv_present toutes les 600 frames sous g_mu, puis bilan) :
- * vkGetPipelineCacheData → <chemin>.tmp → rename. N'écrit rien sans cache ni si aucun
- * pipeline n'a été créé depuis la dernière sauvegarde (jeu « chaud » : zéro écriture). */
+ * vkGetPipelineCacheData → <chemin>.tmp → rename. N'écrit rien sans cache, si aucun
+ * pipeline n'a été créé depuis la dernière sauvegarde (jeu « chaud » : zéro écriture)
+ * ni si la taille rendue égale la référence (dernière sauvegarde, sinon octets chargés) :
+ * le pilote ne fait que recréer des pipelines déjà dans le cache, rien n'a changé. */
 static void pcache_sauver(void)
 {
     if (!PC.cache || !PC.depuis_sauvegarde) return;
@@ -683,6 +874,18 @@ static void pcache_sauver(void)
         char cause[40];
         snprintf(cause, sizeof cause, r ? "VkResult %d" : "données nulles", (int)r);
         pcache_echec("lecture du cache", cause);
+        return;
+    }
+    size_t reference = PC.n_sauvegardes > 0 ? PC.derniere_taille : PC.octets_charges;
+    if (n == reference) {                    /* rien de neuf : une écriture de plusieurs Mo évitée */
+        static int dit;                      /* au plus une ligne de journal, la toute première fois */
+        if (!dit) {
+            dit = 1;
+            LOG("[VK] passe 10s (cache de pipelines) : taille inchangée (%llu octets) — écriture sautée, les "
+                "suivantes sont comptées au bilan", (unsigned long long)n);
+        }
+        PC.depuis_sauvegarde = 0;
+        PC.n_inchangees++;
         return;
     }
     void *d = malloc(n);
@@ -800,6 +1003,14 @@ static void chrono_ligne(char *l, int taille, const chrono_fen *f, int top)
  * chemin de recherche. MoltenVK exporte lui-même vkGetInstanceProcAddr : le loader n'est pas requis. */
 static int charger_vk_apple(void)
 {
+    /* 21/10 : ombres — Metal n'offre que 16 états d'échantillonneur par étage en liaison directe, et le layout en déclare
+     * 34 (16 D3D9 + 2 + 16 de comparaison) : les argument buffers de MoltenVK lèvent la limite. À poser AVANT le chargement
+     * de MoltenVK (il lit sa configuration à l'ouverture) ; les descripteurs poussés, eux, restent en liaison directe :
+     * coupés à la création du device. */
+    if (d3dv_ombres() && !getenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS")) {
+        setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "1", 1);
+        LOG("[OMBRES] MoltenVK : argument buffers activés (MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1), descripteurs classiques");
+    }
     const char *e = getenv("SC2_VK_LIB");
     if (e && *e) {
         V.lib = dlopen(e, RTLD_NOW | RTLD_LOCAL);
@@ -882,6 +1093,13 @@ static int init_interne(void)
         if (pp.apiVersion >= VK_API_VERSION_1_3) V.pd = pds[i];
     }
     if (!V.pd) return echec("aucun device Vulkan 1.3", VK_ERROR_INCOMPATIBLE_DRIVER);
+#ifndef __APPLE__
+    if (d3dv_ombres() && pp.limits.maxPerStageDescriptorSamplers < 34) {   /* 21/10 : voir d3dv_ombres */
+        V.ombres_refus = 1;
+        LOG("[OMBRES] désactivées : %u échantillonneurs par étage sur ce GPU (34 requis par le layout des ombres)",
+            pp.limits.maxPerStageDescriptorSamplers);
+    }
+#endif
     snprintf(V.nom, sizeof V.nom, "%s (Vulkan %u.%u.%u, type %d)", pp.deviceName, VK_API_VERSION_MAJOR(pp.apiVersion),
              VK_API_VERSION_MINOR(pp.apiVersion), VK_API_VERSION_PATCH(pp.apiVersion), (int)pp.deviceType);
     vkGetPhysicalDeviceMemoryProperties(V.pd, &V.memp);
@@ -912,6 +1130,9 @@ static int init_interne(void)
      * pas : émulateur Android M4/SwiftShader) ; les draws réels passent par les descripteurs classiques. */
     const char *sp = getenv("SC2_VK_SANS_PUSH_DESCRIPTOR");
     V.sans_push = sp && *sp == '1';
+#ifdef __APPLE__
+    if (d3dv_ombres()) V.sans_push = 1;     /* 21/10 : ombres sous MoltenVK = argument buffers, pas de descripteurs poussés */
+#endif
     for (uint32_t i = 0; i < ndx && !V.sans_push; i++)
         if (!strcmp(dx[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) exts[next++] = dx[i].extensionName;
     VkPhysicalDeviceFeatures fd = { 0 }, fdon = { 0 };
@@ -1080,7 +1301,7 @@ static void rendu_fermer(void)
 {
     if (V.rendu < 0) return;
     vkCmdEndRendering(CB);
-    V.rendu = -1; V.rendu_ds = -1;
+    V.rendu = -1; V.rendu_ds = -1; V.rendu_st = 0;
     chrono_segment(CH_HORS_PASSE, -1);   /* passe 10s : ce qui suit la fin d'une passe (barrière comprise) */
     barriere();
 }
@@ -1091,26 +1312,36 @@ static int ds_attachable(int id, int ds)
 {
     return ds >= 0 && ds < V.nc && V.c[ds].prof && V.c[ds].w >= V.c[id].w && V.c[ds].h >= V.c[id].h;
 }
-static void rendu_ouvrir(int id, int ds)
+static void rendu_ouvrir_st(int id, int ds, int st);
+static void rendu_ouvrir(int id, int ds) { rendu_ouvrir_st(id, ds, 0); }
+/* 21/10 : st = attacher aussi le stencil (seulement pour un dessin qui le teste : sur un GPU à tuiles, l'attacher à
+ * TOUTES les passes de profondeur coûtait ≈ 25 % d'images au banc). Un rendu déjà ouvert AVEC stencil sert aussi les
+ * dessins sans stencil (leurs pipelines déclarent alors le format stencil : clé k.sa). */
+static void rendu_ouvrir_st(int id, int ds, int st)
 {
     if (!ds_attachable(id, ds)) ds = -1;
-    if (V.rendu == id && V.rendu_ds == ds) return;
+    st = st && ds >= 0 && (V.c[ds].aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
+    if (V.rendu == id && V.rendu_ds == ds && (V.rendu_st == st || V.rendu_st)) return;
     cb_ouvrir();
     rendu_fermer();
     cible *t = &V.c[id];
     VkRenderingAttachmentInfo att = { .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = t->vue,
                                       .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                       .storeOp = VK_ATTACHMENT_STORE_OP_STORE };
+    /* 21/10 : stencil D3D9 — avec stencil, Vulkan exige la MÊME vue (deux aspects) pour les attachements de
+     * profondeur et de stencil d'un format combiné ; sans, la vue profondeur seule, comme avant.
+     * Attachement stencil ⇔ V.rendu_st ⇔ k.sa ⇔ stencilAttachmentFormat (pipeline5). */
     VkRenderingAttachmentInfo prof = { .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-                                       .imageView = ds >= 0 ? V.c[ds].vue_prof : VK_NULL_HANDLE,
+                                       .imageView = ds >= 0 ? (st ? V.c[ds].vue : V.c[ds].vue_prof) : VK_NULL_HANDLE,
                                        .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE };
+    VkRenderingAttachmentInfo ste = prof;   /* même vue, mêmes opérations : LOAD/STORE des deux aspects */
     VkRenderingInfo ri = { .sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = { { 0, 0 }, { t->w, t->h } },
                            .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att,
-                           .pDepthAttachment = ds >= 0 ? &prof : NULL };
+                           .pDepthAttachment = ds >= 0 ? &prof : NULL, .pStencilAttachment = st ? &ste : NULL };
     chrono_segment(CH_PASSE, id);        /* passe 10s : ouvre le segment de la passe qui commence */
     vkCmdBeginRendering(CB, &ri);
-    V.rendu = id; V.rendu_ds = ds;
+    V.rendu = id; V.rendu_ds = ds; V.rendu_st = st;
 }
 
 /* ---- passe 10r (v13) : deux frames en vol — soumission, fences, libérations ----------
@@ -1135,7 +1366,9 @@ static uint32_t g_sem_attendre_etape;        /* VkPipelineStageFlags de cette at
 static void empl_attendre(int i)   /* attends la fence d'un emplacement en vol (cumul pour le bilan) */
 {
     double t0 = maintenant_ms();
+    uint64_t ta = &sc2_att_debut ? sc2_att_debut() : 0;   /* SC2_ATTENTES : temps bloqué, cause fence */
     vkWaitForFences(V.dev, 1, &V.empl[i].fence, VK_TRUE, UINT64_MAX);
+    if (ta) sc2_att_fin(ATT_VK_FENCE, 0, ta, 0);
     V.ms_attentes += maintenant_ms() - t0;
     V.n_attentes_fence++;
     V.empl[i].en_cours = 0;
@@ -1144,8 +1377,14 @@ static void empl_attendre(int i)   /* attends la fence d'un emplacement en vol (
 static void empl_liberer(int i)    /* détruit ses objets différés — SA fence vient d'être attendue */
 {
     for (uint32_t k = 0; k < V.empl[i].n_lib; k++) {
-        vkDestroyBuffer(V.dev, V.empl[i].lib[k].b, NULL);
-        vkFreeMemory(V.dev, V.empl[i].lib[k].m, NULL);
+        if (V.empl[i].lib[k].img) {        /* V5.1 : image d'une texture oubliée */
+            if (V.empl[i].lib[k].vue) vkDestroyImageView(V.dev, V.empl[i].lib[k].vue, NULL);
+            if (V.empl[i].lib[k].vue2) vkDestroyImageView(V.dev, V.empl[i].lib[k].vue2, NULL);
+            vkDestroyImage(V.dev, V.empl[i].lib[k].img, NULL);
+            if (V.empl[i].lib[k].m) vkFreeMemory(V.dev, V.empl[i].lib[k].m, NULL);
+        } else if (V.empl[i].lib[k].dalle >= 0)   /* 21/10 : une PLAGE rend sa place, le VkBuffer reste à sa dalle */
+            dalle_rendre(V.empl[i].lib[k].dalle, V.empl[i].lib[k].off, V.empl[i].lib[k].taille);
+        else { vkDestroyBuffer(V.dev, V.empl[i].lib[k].b, NULL); vkFreeMemory(V.dev, V.empl[i].lib[k].m, NULL); }
     }
     V.empl[i].n_lib = 0;
 }
@@ -1240,7 +1479,9 @@ static int attendre_tout(int motif)
     for (int i = 0; i < V.n_empl; i++) if (V.empl[i].en_cours) fs[n++] = V.empl[i].fence;
     if (n) {
         double t0 = maintenant_ms();
+        uint64_t ta = &sc2_att_debut ? sc2_att_debut() : 0;   /* SC2_ATTENTES : temps bloqué, cause fence */
         VkResult w = vkWaitForFences(V.dev, n, fs, VK_TRUE, UINT64_MAX);
+        if (ta) sc2_att_fin(ATT_VK_FENCE, 0, ta, 0);
         V.ms_attentes += maintenant_ms() - t0; V.n_attentes_fence++;
         for (int i = 0; i < V.n_empl; i++) V.empl[i].en_cours = 0;
         if (w) { LOG("[VK] attente de fence en échec (VkResult %d)", (int)w); return -1; }
@@ -1258,7 +1499,143 @@ static void liberer_differer(VkBuffer b, VkDeviceMemory m)   /* sous g_mu */
     if (V.empl[V.cur].n_lib >= A_LIBERER) attendre_tout(AT_LISTE);
     V.empl[V.cur].lib[V.empl[V.cur].n_lib].b = b;
     V.empl[V.cur].lib[V.empl[V.cur].n_lib].m = m;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].dalle = -1;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].img = VK_NULL_HANDLE;   /* V5.1 */
     V.empl[V.cur].n_lib++;
+}
+
+/* 21/10 : libération différée d'une PLAGE de dalle (le tampon sous-alloué disparaît, sa place
+ * redevient libre une fois la fence passée — même garde et même emplacement que ci-dessus). */
+static void liberer_plage_differer(int dalle, uint32_t off, uint32_t taille)   /* sous g_mu */
+{
+    if (V.empl[V.cur].n_lib >= A_LIBERER) attendre_tout(AT_LISTE);
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].b = VK_NULL_HANDLE;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].m = VK_NULL_HANDLE;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].dalle = dalle;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].off = off;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].taille = taille;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].img = VK_NULL_HANDLE;   /* V5.1 */
+    V.empl[V.cur].n_lib++;
+}
+/* V5.1 : libération différée d'une IMAGE de texture oubliée (vue, image, mémoire) — même garde, même emplacement */
+static void liberer_image_differer(VkImage img, VkImageView vue, VkImageView vue2, VkDeviceMemory m)   /* sous g_mu */
+{
+    if (V.empl[V.cur].n_lib >= A_LIBERER) attendre_tout(AT_LISTE);
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].b = VK_NULL_HANDLE;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].m = m;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].dalle = -1;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].img = img;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].vue = vue;
+    V.empl[V.cur].lib[V.empl[V.cur].n_lib].vue2 = vue2 != vue ? vue2 : VK_NULL_HANDLE;
+    V.empl[V.cur].n_lib++;
+}
+
+/* ---- V5.1 (24/10) : oubli des objets invités rendus à l'arène ----------------------------------------------------
+ * sc2_d3d9.c rend à l'arène une texture (2D, cube, volume) ou un tampon de sommets/index à son dernier Release (hors du
+ * device : plus aucune liaison) — son adresse invitée, CLÉ de R.t et de R.tam, sera resservie à un autre objet. Avant,
+ * ses entrées sont oubliées ici : image + vue + mémoire, ou VkBuffer / plage de dalle, partent en libération DIFFÉRÉE
+ * dans l'emplacement en cours d'enregistrement (détruites quand il revient, après sa fence : une soumission en vol, ou
+ * un draw plus tôt dans la frame, peut encore les lire) ; l'entrée prend la clé morte, sa case de hachage une pierre
+ * tombale (-2), son indice repart en service. Sans cet oubli, un objet neuf à la même adresse et de même génération
+ * (0, puis +2 par Lock/Unlock) recevait l'IMAGE de l'ancien. Les cibles de rendu (V.c) ne sont pas oubliées :
+ * d3dv_cible recrée l'image d'une clé reprise dès que taille, format ou profondeur diffèrent (contenu indéfini, comme
+ * une cible D3D9 neuve). L'époque avance : aucune plage volatile de l'anneau n'est reprise pour un objet neuf. */
+static void hache_refaire(int32_t *ht, uint32_t taille, int tex)   /* sous g_mu : pierres tombales trop nombreuses */
+{
+    memset(ht, 0xFF, taille * sizeof *ht);
+    if (tex == 1) { g_tex_tombes = 0; for (int i = 0; i < R.nt; i++) if (R.t[i].cle != CLE_MORTE) tex_noter(i); }
+    else if (tex == 2) { g_cib_tombes = 0; for (int i = 0; i < V.nc; i++) if (V.c[i].cle != CLE_MORTE) cible_noter(i); }
+    else { g_tam_tombes = 0; for (int i = 0; i < R.ntam; i++) if (R.tam[i].cle != (uint32_t)CLE_MORTE) tam_noter(i); }
+    g_n_hache_refaites++;
+}
+static void cible_retirer(int id)                    /* sous g_mu : pierre tombale à la case de V.c[id] */
+{
+    uint32_t h = hache_cle64(V.c[id].cle, HACHE_CIBLES_BITS);
+    for (uint32_t n = 0; n < HACHE_CIBLES_TAILLE; n++) {
+        if (g_hache_cibles[h] == id) { g_hache_cibles[h] = -2; g_cib_tombes++; return; }
+        if (g_hache_cibles[h] == -1) return;
+        h = (h + 1) & HACHE_CIBLES_MASQUE;
+    }
+}
+/* V5.1 (revue adverse, MAJEUR 1) : cibles de rendu d'un objet rendu à l'arène — clé = son adresse (surface autonome)
+ * ou adresse << 32 | taille (niveaux d'une texture RENDERTARGET / DEPTHSTENCIL, cf. cible_de et dessin_reel). Sans
+ * cela, ≈ 73 cibles mortes de plus par mission (446 en fin d'acte 1, ≈ 1 Go d'images) et, à MAX_CIBLES, d3dv_cible
+ * rendait −1 : dessins refusés. Une cible en usage (rendu ouvert, RT ou profondeur courantes) est gardée, comptée. */
+static int cible_de_lot(uint64_t cle, const uint32_t *objs, int n)
+{
+    if (cle == CLE_MORTE) return 0;
+    for (int i = 0; i < n; i++) if (cle == objs[i] || (cle >> 32) == objs[i]) return 1;
+    return 0;
+}
+static void cibles_oublier(const uint32_t *objs, int n)   /* sous g_mu */
+{
+    for (int c = 0; c < V.nc; c++) {
+        if (!cible_de_lot(V.c[c].cle, objs, n)) continue;
+        if (c == V.rt || c == V.ds || c == V.rendu || c == V.rendu_ds) { g_n_cib_gardees++; continue; }
+        cible *t = &V.c[c];
+        if (t->img) liberer_image_differer(t->img, t->vue, t->vue_prof, t->mem);
+        cible_retirer(c);
+        memset(t, 0, sizeof *t); t->cle = CLE_MORTE;
+        g_cib_libres[g_ncib_libres++] = c;
+        g_n_cib_oubliees++;
+    }
+}
+static void tam_retirer(int id)                      /* sous g_mu : pierre tombale à la case de R.tam[id] */
+{
+    uint32_t h = hache_cle64(R.tam[id].cle, HACHE_TAM_BITS);
+    for (uint32_t n = 0; n < HACHE_TAM_TAILLE; n++) {
+        if (g_hache_tam[h] == id) { g_hache_tam[h] = -2; g_tam_tombes++; return; }
+        if (g_hache_tam[h] == -1) return;
+        h = (h + 1) & HACHE_TAM_MASQUE;
+    }
+}
+void d3dv_oublier(const uint32_t *objs, int n)
+{
+    if (!V.actif || n <= 0) return;
+    pthread_mutex_lock(&g_mu);
+    int vu = 0;
+    for (int i = 0; i < n; i++) {
+        int id = tex_trouver(objs[i]);
+        if (id >= 0) {
+            tex5 *t = &R.t[id];
+            if (t->img) liberer_image_differer(t->img, t->vue, VK_NULL_HANDLE, t->mem);
+            tex_retirer_(id, 1);                           /* pierre tombale : des chaînes peuvent la traverser */
+            memset(t, 0, sizeof *t); t->cle = CLE_MORTE; t->gen = ~0u;
+            g_tex_libres[g_ntex_libres++] = id;            /* R.nt ne recule pas : indice repris à la création */
+            g_n_tex_oubliees++; vu = 1;
+        }
+        id = tam_trouver(objs[i]);
+        if (id >= 0) {
+            tam10 *t = &R.tam[id];
+            if (t->buf) {                                  /* volatil : déjà rendu (buf nul, octets décomptés) */
+                if (t->dalle >= 0) liberer_plage_differer(t->dalle, t->off, arrondi256(t->taille));
+                else liberer_differer(t->buf, t->mem);
+                R.o_tam -= t->taille;
+            }
+            tam_retirer(id);
+            memset(t, 0, sizeof *t); t->cle = (uint32_t)CLE_MORTE; t->dalle = -1;
+            g_tam_libres[g_ntam_libres++] = id;
+            g_n_tam_oublies++; vu = 1;
+        }
+    }
+    cibles_oublier(objs, n);                             /* V5.1 (revue) : cibles de rendu aussi */
+    if (g_tex_tombes > (int)(HACHE_TEX_TAILLE / 4)) hache_refaire(g_hache_tex, HACHE_TEX_TAILLE, 1);
+    if (g_cib_tombes > (int)(HACHE_CIBLES_TAILLE / 4)) hache_refaire(g_hache_cibles, HACHE_CIBLES_TAILLE, 2);
+    if (g_tam_tombes > (int)(HACHE_TAM_TAILLE / 4)) hache_refaire(g_hache_tam, HACHE_TAM_TAILLE, 0);
+    if (vu) R.epoque++;
+    pthread_mutex_unlock(&g_mu);
+}
+void d3dv_oublis(uint64_t *tex, uint64_t *tam, int *tex_vivantes, int *tam_vivants, uint64_t *cibles, int *cibles_vivantes)
+{   /* verrou ESSAYÉ : appelée par les lignes [MEM] de sc2_stop, peut-être sur une faute sous g_mu */
+    int v = 0;
+    for (int k = 0; k < 100 && !(v = !pthread_mutex_trylock(&g_mu)); k++) usleep(1000);
+    if (tex) *tex = g_n_tex_oubliees;
+    if (tam) *tam = g_n_tam_oublies;
+    if (tex_vivantes) *tex_vivantes = R.nt - g_ntex_libres;
+    if (tam_vivants) *tam_vivants = R.ntam - g_ntam_libres;
+    if (cibles) *cibles = g_n_cib_oubliees;
+    if (cibles_vivantes) *cibles_vivantes = V.nc - g_ncib_libres;
+    if (v) pthread_mutex_unlock(&g_mu);
 }
 
 /* ---- cibles -------------------------------------------------------------------- */
@@ -1360,7 +1737,15 @@ static int cible_creer(cible *t)
     return 0;
 }
 
-int d3dv_ombres(void) { static int v = -1; if (v < 0) { const char *e = getenv("SC2_OMBRES"); v = e && *e == '1'; } return v; }
+/* 21/10 : ombres ACTIVES par défaut (SC2_OMBRES=0 pour les couper) — c'est alors le réglage « Ombres » du jeu qui
+ * décide, comme sur PC ; refusées d'office sur un GPU qui n'a pas les 34 échantillonneurs par étage du layout
+ * (V.ombres_refus, posé à l'initialisation). Passe 7v2/7v3 : variantes Dref des PS, binding 18 + k. */
+int d3dv_ombres(void)
+{
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("SC2_OMBRES"); v = !(e && *e == '0'); }
+    return v && !V.ombres_refus;
+}
 
 int d3dv_cible(uint64_t cle, uint32_t w, uint32_t h, uint32_t fmt, int profondeur)
 {
@@ -1376,12 +1761,16 @@ int d3dv_cible(uint64_t cle, uint32_t w, uint32_t h, uint32_t fmt, int profondeu
             t->w = w; t->h = h; t->fmt = fmt; t->prof = prof;
             if (cible_creer(t)) id = -1;
         }
-    } else if (V.nc < MAX_CIBLES) {
-        cible *t = &V.c[V.nc];
+    } else if (g_ncib_libres || V.nc < MAX_CIBLES) {
+        int k = g_ncib_libres ? g_cib_libres[--g_ncib_libres] : V.nc;   /* V5.1 : indice d'une cible oubliée */
+        cible *t = &V.c[k];
         memset(t, 0, sizeof *t);
         t->cle = cle; t->w = w; t->h = h; t->fmt = fmt; t->prof = prof;
-        if (!cible_creer(t)) {
-            id = V.nc++; cible_noter(id);
+        if (cible_creer(t)) {                        /* échec : l'indice repris retourne à la liste */
+            if (k < V.nc) { memset(t, 0, sizeof *t); t->cle = CLE_MORTE; g_cib_libres[g_ncib_libres++] = k; }
+        } else {
+            id = k; if (k == V.nc) V.nc++;
+            cible_noter(id);
             if (V.nc <= 12)
                 LOG("[VK] cible n°%d : %u×%u D3DFMT %u → VkFormat %d%s", id, w, h, fmt, (int)t->vf, prof ? " (profondeur)" : "");
         }
@@ -1620,7 +2009,7 @@ void d3dv_vider_cibles(const char *dir, uint32_t frame)
     pthread_mutex_lock(&g_mu);
     for (int i = 0; i < V.nc; i++) {
         cible *t = &V.c[i];
-        if (t->prof || (t->vf != VK_FORMAT_B8G8R8A8_UNORM && t->vf != VK_FORMAT_R8G8B8A8_UNORM)) continue;
+        if (!t->img || t->prof || (t->vf != VK_FORMAT_B8G8R8A8_UNORM && t->vf != VK_FORMAT_R8G8B8A8_UNORM)) continue;   /* V5.1 : oubliée */
         uint8_t *px = malloc((size_t)t->w * t->h * 4);
         if (px && !relire(i, px)) {
             char c[600]; snprintf(c, sizeof c, "%s/cible_%05u_%02d_%ux%u.ppm", dir, frame, i, t->w, t->h);
@@ -1647,6 +2036,7 @@ int d3dv_lire(int id, uint8_t *rgba)
 int d3dv_present(int id, const char *chemin, double moy[3])
 {
     if (!V.actif) return -1;
+    if (&sc2_att_present) sc2_att_present();   /* SC2_ATTENTES : marque CE fil « jeu » (faible : absent de test_d3d9v) */
     pthread_mutex_lock(&g_mu);
     g_dans_present = 1;   /* passe 10r (v13) : les soumissions de CETTE présentation (relire comprise) peuvent signaler le sémaphore « rendu » */
     V.n_present++;
@@ -1733,15 +2123,18 @@ void d3dv_bilan(void)
     if (PC.depuis_sauvegarde) pcache_sauver();   /* passe 10s (cache de pipelines) : dernière écriture, sauf si rien de neuf */
     printf("[BILAN] [PIPECACHE] passe 10s (cache de pipelines) : %s, %s ; %llu octets chargés au démarrage ; "
            "%llu pipelines créés en %.1f ms de vkCreateGraphicsPipelines (max %.1f ms par appel) ; "
-           "%u sauvegarde%s, dernière %llu octets\n",
+           "%u sauvegarde%s, dernière %llu octets, %u sauvegarde%s sautée%s : taille inchangée\n",
            PC.cache ? "actif" : "désactivé", PC.desactive ? PC.raison : PC.chemin,
            (unsigned long long)PC.octets_charges, (unsigned long long)PC.n_pipelines, PC.ms, PC.ms_max,
-           PC.n_sauvegardes, PC.n_sauvegardes > 1 ? "s" : "", (unsigned long long)PC.derniere_taille);
-    printf("[BILAN] Vulkan : %s — %d cibles, %llu Clear couleur (%llu rectangles), %llu Clear profondeur, "
-           "%llu draws « lumière » (%llu ignorés), %d pipelines, %llu Present, %llu soumissions, %llu relectures\n",
-           V.nom, V.nc, (unsigned long long)V.n_clear_c, (unsigned long long)V.n_rects, (unsigned long long)V.n_clear_p,
+           PC.n_sauvegardes, PC.n_sauvegardes > 1 ? "s" : "", (unsigned long long)PC.derniere_taille,
+           PC.n_inchangees, PC.n_inchangees > 1 ? "s" : "", PC.n_inchangees > 1 ? "s" : "");
+    printf("[BILAN] Vulkan : %s — %d cibles (V5.1 : %d vivantes, %llu oubliées, %llu gardées en usage), %llu Clear couleur (%llu rectangles), %llu Clear profondeur, "
+           "%llu draws « lumière » (%llu ignorés), %d pipelines, %llu Present, %llu soumissions, %llu relectures, "
+           "%llu draws stencil\n",
+           V.nom, V.nc, V.nc - g_ncib_libres, (unsigned long long)g_n_cib_oubliees, (unsigned long long)g_n_cib_gardees,
+           (unsigned long long)V.n_clear_c, (unsigned long long)V.n_rects, (unsigned long long)V.n_clear_p,
            (unsigned long long)V.n_draw, (unsigned long long)V.n_draw_ignores, V.npipe, (unsigned long long)V.n_present,
-           (unsigned long long)V.n_soumis, (unsigned long long)V.n_lectures);
+           (unsigned long long)V.n_soumis, (unsigned long long)V.n_lectures, (unsigned long long)R.n_stencil);
     printf("[BILAN] [VOL] passe 10r (v13) : %s ; %llu soumissions (%llu vides, pour le sémaphore de présentation), "
            "%llu attentes de fence, %.1f ms cumulées à les attendre ; attendre_tout : %llu relectures, %llu destructions/réallocations, %llu listes pleines\n",
            d3dv_en_vol() ? "DEUX FRAMES EN VOL" : "SYNCHRONE (SC2_VK_SYNCHRONE=1)",
@@ -1753,7 +2146,7 @@ void d3dv_bilan(void)
            "%llu en dessin, %llu en téléversement ; pool de descripteurs plein : %llu\n",
            V.n_present ? (double)V.n_soumis / (double)V.n_present : 0.0, (unsigned)(ANNEAU_TAILLE >> 20),
            (unsigned long long)V.n_soum_anneau_dessin, (unsigned long long)V.n_soum_anneau_tex, (unsigned long long)R.n_pool_plein);
-    for (int i = 0; i < V.nc; i++)
+    for (int i = 0; i < V.nc; i++) if (V.c[i].cle != CLE_MORTE)   /* V5.1 : oubliée sautée */
         printf("[BILAN]   cible n°%d %u×%u D3DFMT %u%s : %llu Clear couleur, %llu draws, %llu Present, %llu fois échantillonnée, "
                "StretchRect %llu src / %llu dst\n", i, V.c[i].w, V.c[i].h,
                V.c[i].fmt, V.c[i].prof ? " (profondeur)" : "", (unsigned long long)V.c[i].n_clear,
@@ -1863,6 +2256,10 @@ int d3dv_module(const uint32_t *spv, uint32_t nmots, int ps)
     if (!V.actif) return -1;
     pthread_mutex_lock(&g_mu);
     int id = -1;
+    if (R.nmod >= MAX_MODULES) {
+        static int dit;
+        if (!dit++) LOG("[VK] plafond de %d modules SPIR-V atteint : shaders suivants non traduits", MAX_MODULES);
+    }
     if (R.nmod < MAX_MODULES) {
         VkShaderModuleCreateInfo smi = { .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = 4u * nmots, .pCode = spv };
         if (!vkCreateShaderModule(V.dev, &smi, NULL, &R.mod[R.nmod])) { R.ps[R.nmod] = ps; id = R.nmod++; }
@@ -1879,6 +2276,13 @@ static VkDeviceSize anneau(const void *src, VkDeviceSize n, VkDeviceSize align) 
     if (p + n > fin) return ~(VkDeviceSize)0;
     if (src) memcpy(R.anneau_ptr + p, src, n);
     R.pos = p + n;
+    return p;
+}
+/* Passe 10t : réserve `reserve` octets mais n'en recopie que les `copie` premiers (bloc de constantes : cf. consts_a_copier). */
+static VkDeviceSize anneau_partiel(const void *src, VkDeviceSize copie, VkDeviceSize reserve, VkDeviceSize align)
+{
+    VkDeviceSize p = anneau(NULL, reserve, align);
+    if (p != ~(VkDeviceSize)0 && src) memcpy(R.anneau_ptr + p, src, copie < reserve ? copie : reserve);
     return p;
 }
 
@@ -1905,6 +2309,16 @@ static int sans_cache_consts(void)   /* passe 10r : SC2_VK_SANS_CACHE_CONSTS=1 �
     static int v = -1;
     if (v < 0) { const char *e = getenv("SC2_VK_SANS_CACHE_CONSTS"); v = e && *e == '1'; }
     return v;
+}
+static int consts_completes(void)   /* passe 10t : SC2_VK_CONSTS_COMPLETES=1 → blocs de constantes entiers (A/B) */
+{
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("SC2_VK_CONSTS_COMPLETES"); v = e && *e == '1'; }
+    return v;
+}
+static int cblk_reutilisable(int k, uint32_t gen, VkDeviceSize besoin)   /* passe 10t : cf. bloc_consts_reutilisable */
+{
+    return bloc_consts_reutilisable(R.cblk[k].epoque, R.cblk[k].gen, R.cblk[k].etendue, R.epoque, gen, besoin);
 }
 static int sans_cache_volatils(void)   /* passe 10t : SC2_VK_CACHE_VOLATILS=0 → recopie à chaque dessin (actif par défaut) */
 {
@@ -1936,6 +2350,17 @@ static VkDeviceSize volatils_puiser(uint32_t obj, uint32_t gen, uint32_t decalag
 static int tam_creer(tam10 *t, uint32_t cle, uint32_t gen, uint32_t taille, const void *donnees)   /* sous g_mu */
 {
     memset(t, 0, sizeof *t);
+    t->dalle = -1; t->off = 0;                 /* dédié, sauf plage trouvée ci-dessous */
+    /* 21/10 : petit tampon → plage dans une grande dalle : le VkBuffer et la mémoire sont ceux
+     * de la dalle (mem nulle ici, map = map de la dalle + off), un vkCreateBuffer, un
+     * vkAllocateMemory et un vkMapMemory de moins par tampon. Pas de place : chemin dédié. */
+    if (dalles_actives() && taille <= DALLE_TAILLE / 4 && !dalle_prendre(taille, &t->dalle, &t->off)) {
+        t->buf = R.dalle[t->dalle].buf; t->mem = VK_NULL_HANDLE; t->map = R.dalle[t->dalle].map + t->off;
+        memcpy(t->map, donnees, taille);
+        t->cle = cle; t->gen = gen; t->taille = taille;
+        return 0;
+    }
+    t->dalle = -1;
     VkBufferCreateInfo bi = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = taille,
                               .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT };
     if (!taille || vkCreateBuffer(V.dev, &bi, NULL, &t->buf)) return -1;
@@ -1948,6 +2373,7 @@ static int tam_creer(tam10 *t, uint32_t cle, uint32_t gen, uint32_t taille, cons
         if (t->buf) vkDestroyBuffer(V.dev, t->buf, NULL);
         if (t->mem) vkFreeMemory(V.dev, t->mem, NULL);
         memset(t, 0, sizeof *t);
+        t->dalle = -1;
         return -1;
     }
     memcpy(t->map, donnees, taille);
@@ -1967,32 +2393,40 @@ static int tampon_puiser(uint32_t obj, uint32_t gen, uint32_t usage, uint32_t ta
     int id = tam_trouver(obj);
     tam10 *t = id >= 0 ? &R.tam[id] : NULL;
     if (t && t->volatil) { R.n_tam_volatils_servis++; return 0; }
-    if (t && t->gen == gen && t->taille == taille_tot) { *buf = t->buf; *off = decalage; return 1; }
+    if (t && t->gen == gen && t->taille == taille_tot) {
+        *buf = t->buf;
+        *off = t->dalle >= 0 ? (VkDeviceSize)(t->off + decalage) : decalage;   /* 21/10 : plage de dalle */
+        return 1;
+    }
     /* Garde de volatilité (mesure Fold v12 : backend +20 ms/frame) : un tampon « statique » verrouillé à répétition
      * coûtait à chaque nouvelle génération un vkAllocateMemory, une copie complète et un vkFreeMemory (ce dernier dans
      * soumettre(), donc dans la tranche backend). Au-delà de TAMPON_REMPL_MAX remplacements, il sort du cache. */
     if (t && t->remplacements + 1 > TAMPON_REMPL_MAX) {
-        liberer_differer(t->buf, t->mem);
+        if (t->dalle >= 0) liberer_plage_differer(t->dalle, t->off, arrondi256(t->taille));
+        else liberer_differer(t->buf, t->mem);
         R.o_tam -= t->taille;
-        t->buf = VK_NULL_HANDLE; t->mem = VK_NULL_HANDLE; t->map = NULL; t->volatil = 1;
+        t->buf = VK_NULL_HANDLE; t->mem = VK_NULL_HANDLE; t->map = NULL; t->dalle = -1; t->volatil = 1;
         R.n_tam_volatils++;
         return 0;
     }
     if (R.o_tam + taille_tot > TAMPONS_PLAFOND) { R.n_tam_plafond++; return 0; }
-    if (!t && R.ntam >= MAX_TAMPONS) return 0;
+    if (!t && R.ntam >= MAX_TAMPONS && !g_ntam_libres) return 0;   /* V5.1 : indices oubliés remis en service */
     tam10 n;
     if (tam_creer(&n, obj, gen, taille_tot, donnees)) return 0;
     if (t) {                                   /* remplacée (génération ou taille) : l'ancienne part ensuite */
-        liberer_differer(t->buf, t->mem);
+        if (t->dalle >= 0) liberer_plage_differer(t->dalle, t->off, arrondi256(t->taille));
+        else liberer_differer(t->buf, t->mem);
         R.o_tam -= t->taille;
         R.n_tam_remplaces++;
         n.remplacements = t->remplacements + 1;
         *t = n;
     } else {
-        R.tam[R.ntam] = n; tam_noter(R.ntam); R.ntam++;
+        int idn = g_ntam_libres ? g_tam_libres[--g_ntam_libres] : R.ntam++;   /* V5.1 */
+        R.tam[idn] = n; tam_noter(idn);
     }
     R.o_tam += taille_tot;
-    *buf = n.buf; *off = decalage;
+    *buf = n.buf;
+    *off = n.dalle >= 0 ? (VkDeviceSize)(n.off + decalage) : decalage;   /* 21/10 : plages de dalles */
     return 2;
 }
 
@@ -2232,15 +2666,19 @@ int d3dv_texture_niveaux(uint64_t cle, int genre, uint32_t w, uint32_t h, uint32
     }
     int nouvelle = 0;
     if (!t) {
-        if (R.nt >= MAX_TEX) goto fin;
-        id = R.nt++; t = &R.t[id]; memset(t, 0, sizeof *t); t->cle = cle; t->gen = ~0u;
+        if (g_ntex_libres) id = g_tex_libres[--g_ntex_libres];   /* V5.1 : indice d'une texture oubliée */
+        else if (R.nt >= MAX_TEX) goto fin;
+        else id = R.nt++;
+        t = &R.t[id]; memset(t, 0, sizeof *t); t->cle = cle; t->gen = ~0u;
         tex_noter(id);
     }
     if (!t->img) {
         t->genre = genre; t->w = w; t->h = h; t->d = d; t->fmt = fmt; t->vf = ft.vf; t->niv = niveaux; t->conv = ft.conv;
         if (image_creer(genre == 4 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D, ft.vf, w, h, d, niveaux, faces,
                         genre == 3 ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0, &t->img, &t->mem)) {
-            tex_retirer(R.nt - 1); R.nt--; id = -1; goto fin;
+            tex_retirer(id);
+            if (id == R.nt - 1) R.nt--; else { t->cle = CLE_MORTE; g_tex_libres[g_ntex_libres++] = id; }   /* V5.1 */
+            id = -1; goto fin;
         }
         VkImageViewCreateInfo vi = { .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = t->img,
                                      .viewType = genre == 4 ? VK_IMAGE_VIEW_TYPE_3D : genre == 3 ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D,
@@ -2412,7 +2850,11 @@ static VkPipeline pipeline5(const cle_pipe *k)
 {
     int trouve = pipe_trouver(k);   /* passe 10r */
     if (trouve >= 0) return R.pipe[trouve].p;
-    if (R.npipe >= MAX_PIPES) return VK_NULL_HANDLE;
+    if (R.npipe >= MAX_PIPES) {
+        static int dit;
+        if (!dit++) LOG("[VK] plafond de %d pipelines atteint : dessins refusés au-delà", MAX_PIPES);
+        return VK_NULL_HANDLE;
+    }
     /* passe 7v2 : constantes de spécialisation profondeur_k (ID 100 + k, entier 0/1) du PS — sans effet sur un SPIR-V qui
      * ne les déclare pas (règle Vulkan) ; posées seulement sous SC2_OMBRES=1 */
     static VkSpecializationMapEntry me[16]; uint32_t sv[16];
@@ -2423,7 +2865,9 @@ static VkPipeline pipeline5(const cle_pipe *k)
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
           .module = k->diag ? V.fs : R.mod[k->ps], .pName = "main", .pSpecializationInfo = d3dv_ombres() ? &spi : NULL } };
     VkVertexInputBindingDescription vb[16]; VkVertexInputAttributeDescription va[16];
-    for (uint32_t i = 0; i < k->nflux; i++) vb[i] = (VkVertexInputBindingDescription){ i, k->stride[i], VK_VERTEX_INPUT_RATE_VERTEX };
+    for (uint32_t i = 0; i < k->nflux; i++)   /* V2.2 : taux par instance de diviseur 1 = cœur de Vulkan 1.0 (aucune extension) */
+        vb[i] = (VkVertexInputBindingDescription){ i, k->stride[i],
+                    (k->inst >> i) & 1u ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX };
     for (uint32_t i = 0; i < k->nattr; i++) va[i] = (VkVertexInputAttributeDescription){ k->attr[i].loc, k->attr[i].flux, (VkFormat)k->attr[i].vkfmt, k->attr[i].offset };
     VkPipelineVertexInputStateCreateInfo vin = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
         .vertexBindingDescriptionCount = k->nflux, .pVertexBindingDescriptions = vb,
@@ -2455,16 +2899,45 @@ static VkPipeline pipeline5(const cle_pipe *k)
     VkPipelineDepthStencilStateCreateInfo dss = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         .depthTestEnable = k->df && k->zt, .depthWriteEnable = k->df && k->zt && k->zw,
         .depthCompareOp = (VkCompareOp)(k->zf >= 1 && k->zf <= 8 ? k->zf - 1 : VK_COMPARE_OP_LESS_OR_EQUAL) };
+    /* 21/10 : stencil D3D9. Le code choisit ff pour que VK_CULL_MODE_BACK élimine ce que D3D9 élimine :
+     * cull == 2 (CULL_CW) → les faces AVANT Vulkan sont les CCW de D3D9 → front = ops CCW_*, back = ops
+     * normales ; sinon l'inverse. Sans TWOSIDEDSTENCILMODE, front = back = ops normales. D3DSTENCILOP
+     * 1..8 → VkStencilOp = valeur − 1 ; compareMask/writeMask D3D9 sont sur 8 bits. */
+    if (k->st_func) {                        /* clé non nulle = stencil actif (d3dv_dessiner ne la remplit que là) */
+        VkStencilOpState ops = { .failOp = (VkStencilOp)(k->st_fail ? k->st_fail - 1 : VK_STENCIL_OP_KEEP),
+                                 .passOp = (VkStencilOp)(k->st_pass ? k->st_pass - 1 : VK_STENCIL_OP_KEEP),
+                                 .depthFailOp = (VkStencilOp)(k->st_zfail ? k->st_zfail - 1 : VK_STENCIL_OP_KEEP),
+                                 .compareOp = (VkCompareOp)(k->st_func >= 1 && k->st_func <= 8 ? k->st_func - 1
+                                                                                               : VK_COMPARE_OP_ALWAYS),
+                                 .compareMask = k->st_masque & 0xFF, .writeMask = k->st_ecriture & 0xFF };
+        VkStencilOpState ccw = { .failOp = (VkStencilOp)(k->st_ccw_fail ? k->st_ccw_fail - 1 : VK_STENCIL_OP_KEEP),
+                                 .passOp = (VkStencilOp)(k->st_ccw_pass ? k->st_ccw_pass - 1 : VK_STENCIL_OP_KEEP),
+                                 .depthFailOp = (VkStencilOp)(k->st_ccw_zfail ? k->st_ccw_zfail - 1
+                                                                            : VK_STENCIL_OP_KEEP),
+                                 .compareOp = (VkCompareOp)(k->st_ccw_func >= 1 && k->st_ccw_func <= 8
+                                                            ? k->st_ccw_func - 1 : VK_COMPARE_OP_ALWAYS),
+                                 .compareMask = ops.compareMask, .writeMask = ops.writeMask };
+        dss.stencilTestEnable = VK_TRUE;
+        if (k->st_ccw_func) {                /* deux faces : TWOSIDEDSTENCILMODE (la clé recopie ops normales sinon) */
+            dss.front = k->cull == 2 ? ccw : ops;
+            dss.back  = k->cull == 2 ? ops : ccw;
+        } else dss.front = dss.back = ops;
+    }
     VkPipelineMultisampleStateCreateInfo ms = { .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO, .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
     VkPipelineColorBlendAttachmentState cba = { .blendEnable = k->blend ? VK_TRUE : VK_FALSE,
         .srcColorBlendFactor = facteur(k->src), .dstColorBlendFactor = facteur(k->dst), .colorBlendOp = operation(k->op),
         .srcAlphaBlendFactor = facteur(k->src_a), .dstAlphaBlendFactor = facteur(k->dst_a), .alphaBlendOp = operation(k->op_a),
         .colorWriteMask = k->masque & 0xF };
     VkPipelineColorBlendStateCreateInfo cb = { .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &cba };
-    VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    VkPipelineDynamicStateCreateInfo ds = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO, .dynamicStateCount = 2, .pDynamicStates = dyn };
+    VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_STENCIL_REFERENCE };
+    VkPipelineDynamicStateCreateInfo ds = { .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+                                            .dynamicStateCount = 3, .pDynamicStates = dyn };
+    /* 21/10 : stencil D3D9 — l'attachement stencil existe ⇔ rendu_ouvrir en pose un (D32S8, même vue) ;
+     * la cohérence stencilAttachmentFormat ⇔ pStencilAttachment est portée par k->sa (= V.rendu_st). */
+    VkFormat sf = k->sa ? k->df : VK_FORMAT_UNDEFINED;
     VkPipelineRenderingCreateInfo rci = { .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, .colorAttachmentCount = 1,
-                                          .pColorAttachmentFormats = &k->cf, .depthAttachmentFormat = k->df };
+                                          .pColorAttachmentFormats = &k->cf, .depthAttachmentFormat = k->df,
+                                          .stencilAttachmentFormat = sf };
     VkGraphicsPipelineCreateInfo gpi = { .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &rci, .stageCount = 2, .pStages = st,
         .pVertexInputState = &vin, .pInputAssemblyState = &ia, .pViewportState = &vps, .pRasterizationState = &rs,
         .pMultisampleState = &ms, .pDepthStencilState = &dss, .pColorBlendState = &cb, .pDynamicState = &ds, .layout = R.layout };
@@ -2475,8 +2948,11 @@ static VkPipeline pipeline5(const cle_pipe *k)
     if (r) { LOG("[VK] pipeline réel refusé (VkResult %d)", (int)r); return VK_NULL_HANDLE; }
     R.pipe[R.npipe].k = *k; R.pipe[R.npipe++].p = p;
     pipe_noter(R.npipe - 1);
-    if (R.npipe <= 8) LOG("[VK] pipeline réel n°%d : VS %d PS %d, %u attributs, %u flux, topologie %u, blend %u", R.npipe - 1,
-                          k->vs, k->ps, k->nattr, k->nflux, k->topo, k->blend);
+    if (R.npipe <= 8) LOG("[VK] pipeline réel n°%d : VS %d PS %d, %u attributs, %u flux, topologie %u, blend %u, inst 0x%X", R.npipe - 1,
+                          k->vs, k->ps, k->nattr, k->nflux, k->topo, k->blend, k->inst);
+    if (k->inst && ++R.n_pipes_inst <= 4)
+        LOG("[VK] V2.2 : pipeline n°%d à flux d'instance 0x%X (VS %d, %u flux, %u attributs)", R.npipe - 1, k->inst,
+            k->vs, k->nflux, k->nattr);
     return p;
 }
 
@@ -2488,6 +2964,9 @@ int d3dv_dessiner(const d3dv_dessin *d)
     if (!prets5()) goto fin;
     if (V.rt < 0 || d->vs < 0 || d->ps < 0 || d->vs >= R.nmod || d->ps >= R.nmod) { R.n_refus_cible++; goto fin; }
     cible *t = &V.c[V.rt];
+    /* V2.2 : d->instances 0/1 et d->flux_inst 0 → clé, liaisons et appel d'avant, à l'octet */
+    const uint32_t ninst = d->instances > 1 ? d->instances : 1;
+    const uint32_t finst = d->nflux ? d->flux_inst & (0xFFFFFFFFu >> (32 - d->nflux)) : 0;
     /* passe 10r : tampons statiques d'abord — liaisons résolues AVANT tout soumettre()
      * éventuel (anneau ou pool de sets plein) : un VkBuffer en cache survit à une remise à
      * zéro de l'anneau, son contenu est immuable jusqu'à la prochaine régénération. */
@@ -2530,17 +3009,22 @@ int d3dv_dessiner(const d3dv_dessin *d)
      * anneau intact (même époque) → emplacement réutilisé sans recopie ; la génération et
      * l'époque sont relues ici, APRÈS les soumettre() ci-dessus qui changent l'époque. */
     VkDeviceSize ovs, ops;
-    if (!sans_cache_consts() && R.cblk[0].epoque == R.epoque && R.cblk[0].gen == d->gen_vs) {
-        ovs = R.cblk[0].off; R.n_cache_cvs++; R.o_evites += D3DV_CONST_TAILLE;
+    /* passe 10t : seuls les registres lus par le shader sont recopiés (nconst) ; un bloc déjà dans l'anneau ne sert
+     * que s'il en couvre assez (un dessin suivant de même génération peut lire plus loin : il recopie alors). */
+    VkDeviceSize nvs = consts_a_copier(d->nconst_vs, consts_completes()), nps = consts_a_copier(d->nconst_ps, consts_completes());
+    if (!sans_cache_consts() && cblk_reutilisable(0, d->gen_vs, nvs)) {
+        ovs = R.cblk[0].off; R.n_cache_cvs++; R.o_evites += nvs;
     } else {
-        ovs = anneau(d->cvs, D3DV_CONST_TAILLE, 256);
-        R.cblk[0].gen = d->gen_vs; R.cblk[0].off = ovs; R.cblk[0].epoque = R.epoque;
+        ovs = anneau_partiel(d->cvs, nvs, D3DV_CONST_TAILLE, 256);
+        R.cblk[0].gen = d->gen_vs; R.cblk[0].off = ovs; R.cblk[0].epoque = R.epoque; R.cblk[0].etendue = nvs;
+        R.n_blocs++; R.n_blocs_entiers += nvs == D3DV_CONST_TAILLE; R.o_consts += nvs; R.o_plage += D3DV_CONST_TAILLE - nvs;
     }
-    if (!sans_cache_consts() && R.cblk[1].epoque == R.epoque && R.cblk[1].gen == d->gen_ps) {
-        ops = R.cblk[1].off; R.n_cache_cps++; R.o_evites += D3DV_CONST_TAILLE;
+    if (!sans_cache_consts() && cblk_reutilisable(1, d->gen_ps, nps)) {
+        ops = R.cblk[1].off; R.n_cache_cps++; R.o_evites += nps;
     } else {
-        ops = anneau(d->cps, D3DV_CONST_TAILLE, 256);
-        R.cblk[1].gen = d->gen_ps; R.cblk[1].off = ops; R.cblk[1].epoque = R.epoque;
+        ops = anneau_partiel(d->cps, nps, D3DV_CONST_TAILLE, 256);
+        R.cblk[1].gen = d->gen_ps; R.cblk[1].off = ops; R.cblk[1].epoque = R.epoque; R.cblk[1].etendue = nps;
+        R.n_blocs++; R.n_blocs_entiers += nps == D3DV_CONST_TAILLE; R.o_consts += nps; R.o_plage += D3DV_CONST_TAILLE - nps;
     }
     /* passe 10r : replis vers l'anneau — flux UP/constant (obj = 0), dynamiques, hors bornes,
      * plafond atteint (le marqueur bflux[i]/bindex est resté sur l'anneau). Passe 10t : les
@@ -2607,6 +3091,7 @@ int d3dv_dessiner(const d3dv_dessin *d)
     for (uint32_t i = 0; i < d->nattr; i++) { k.attr[i].loc = d->attr[i].loc; k.attr[i].flux = d->attr[i].flux;
                                               k.attr[i].vkfmt = d->attr[i].vkfmt; k.attr[i].offset = d->attr[i].offset; }
     for (uint32_t i = 0; i < d->nflux; i++) k.stride[i] = d->flux[i].stride;
+    k.inst = finst;                          /* V2.2 */
     k.blend = d->blend; k.src = d->src; k.dst = d->dst; k.op = d->op; k.src_a = d->src_a; k.dst_a = d->dst_a; k.op_a = d->op_a;
     k.masque = d->masque_couleur;
     /* passe 7n (diagnostic) : SC2_VK_PS_DIAG=<n° de cible> (ou « tout ») → PS magenta sur les draws de cette
@@ -2615,9 +3100,18 @@ int d3dv_dessiner(const d3dv_dessin *d)
     if (!diag_lu) { const char *e = getenv("SC2_VK_PS_DIAG"); diag_lu = 1;
         if (e && *e) { diag_cible = !strcmp(e, "tout") ? -1 : atoi(e); LOG("[VK] DIAGNOSTIC SC2_VK_PS_DIAG=%s : PS magenta", e); } }
     k.diag = diag_cible == -1 || diag_cible == V.rt;
+    /* V2.2 (diagnostic) : SC2_INSTANCES_DIAG=1 → PS magenta OPAQUE (sans mélange) sur les seuls dessins instanciés : la
+     * zone qu'ils couvrent, pour chiffrer la CAPTURE A/B SC2_INSTANCES=0/1 */
+    static int diag_inst = -1;
+    if (diag_inst < 0) { const char *e = getenv("SC2_INSTANCES_DIAG"); diag_inst = e && *e == '1';
+                         if (diag_inst) LOG("[VK] DIAGNOSTIC SC2_INSTANCES_DIAG=1 : PS magenta opaque sur les dessins instanciés"); }
+    if (diag_inst && (finst || ninst > 1)) { k.diag = 1; k.blend = 0; }
     if (k.diag) k.masque = 0xF;
-    /* passe 7n : profondeur — attachée si une surface de profondeur couvre la cible et que le draw s'en sert */
-    int ds = (d->zt || d->zw) && !profondeur_coupee() && ds_attachable(V.rt, V.ds) ? V.ds : -1;
+    /* passe 7n : profondeur — attachée si une surface de profondeur couvre la cible et que le draw s'en sert ;
+     * 21/10 : stencil — attachée aussi si le test stencil est actif ET que la cible porte un aspect stencil. */
+    int st_actif = d->st_en && V.ds >= 0 && ds_attachable(V.rt, V.ds)
+                   && (V.c[V.ds].aspect & VK_IMAGE_ASPECT_STENCIL_BIT);
+    int ds = (((d->zt || d->zw) && !profondeur_coupee()) || st_actif) && ds_attachable(V.rt, V.ds) ? V.ds : -1;
     k.df = ds >= 0 ? V.c[ds].vf : VK_FORMAT_UNDEFINED;
     k.zt = d->zt; k.zw = d->zw; k.zf = d->zf; k.cull = profondeur_coupee() ? 1 : d->cull;
     if (d3dv_ombres() && ds >= 0 && (d->zbiais || d->zpente)) {      /* passe 7v3 : biais de profondeur (passe d'ombre) */
@@ -2630,10 +3124,32 @@ int d3dv_dessiner(const d3dv_dessin *d)
                     cb, pe, V.rt, ds); }
         }
     }
+    /* 21/10 : stencil D3D9 — la clé ne vit que si le test est actif ET l'attachement stencil existe
+     * (D32S8) ; la référence reste hors clé (dynamique). Sans deux faces, ccw_* recopient les ops
+     * normales : front = back quel que soit le culling. */
+    if (st_actif && ds >= 0) {
+        k.st_func = d->st_func; k.st_fail = d->st_fail; k.st_zfail = d->st_zfail; k.st_pass = d->st_pass;
+        k.st_masque = d->st_masque & 0xFF; k.st_ecriture = d->st_ecriture & 0xFF;
+        if (d->st_2faces) { k.st_ccw_func = d->st_ccw_func; k.st_ccw_fail = d->st_ccw_fail;
+                            k.st_ccw_zfail = d->st_ccw_zfail; k.st_ccw_pass = d->st_ccw_pass; }
+        else { k.st_ccw_func = k.st_func; k.st_ccw_fail = k.st_fail;
+               k.st_ccw_zfail = k.st_zfail; k.st_ccw_pass = k.st_pass; }
+        R.n_stencil++;
+        if (profondeur_coupee()) k.zt = k.zw = 0;   /* SC2_VK_PROFONDEUR=0 : le diagnostic ne réactive pas le test Z */
+        static int dit = 0;
+        if (!dit++) LOG("[VK] stencil : test actif — func %u, fail %u, zfail %u, pass %u, ref %u, masque 0x%X, "
+                        "écriture 0x%X, deux faces %u (cible %d, profondeur n°%d)", d->st_func, d->st_fail,
+                        d->st_zfail, d->st_pass, d->st_ref & 0xFF, d->st_masque & 0xFF, d->st_ecriture & 0xFF,
+                        d->st_2faces, V.rt, ds);
+    }
+    /* 21/10 : stencil attaché si CE dessin le teste, ou si le rendu ouvert pour la même cible l'attache déjà */
+    k.sa = ds >= 0 && (st_actif || (V.rendu == V.rt && V.rendu_ds == ds && V.rendu_st));
     VkPipeline p = pipeline5(&k);
     if (!p) { R.n_refus_pipe++; goto fin; }
-    rendu_ouvrir(V.rt, ds);
+    rendu_ouvrir_st(V.rt, ds, (int)k.sa);
     vkCmdBindPipeline(CB, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    if (st_actif && ds >= 0)                 /* 21/10 : référence stencil = état dynamique (hors clé) */
+        vkCmdSetStencilReference(CB, VK_STENCIL_FACE_FRONT_AND_BACK, d->st_ref & 0xFF);
     if (V.push_desc) V.push_desc(CB, VK_PIPELINE_BIND_POINT_GRAPHICS, R.layout, 0, nw, w);
     else {
         /* Set classique : TOUS ses bindings doivent être valides (le pilote peut les lire au bind :
@@ -2670,32 +3186,53 @@ int d3dv_dessiner(const d3dv_dessin *d)
     vkCmdSetScissor(CB, 0, 1, &sc);
     if (d->index) {
         vkCmdBindIndexBuffer(CB, bindex, oindex, d->index32 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);   /* passe 10r */
-        vkCmdDrawIndexed(CB, d->nombre, 1, 0, d->decalage_sommet, 0);
+        vkCmdDrawIndexed(CB, d->nombre, ninst, 0, d->decalage_sommet, 0);   /* V2.2 : instanceCount = N, firstInstance 0 */
     } else
-        vkCmdDraw(CB, d->nombre, 1, 0, 0);
+        vkCmdDraw(CB, d->nombre, ninst, 0, 0);       /* ninst = 1 ici : dessin_reel n'instancie que les dessins indexés */
     R.n_reels++; t->n_draw++;
+    if (finst || ninst > 1) { R.n_inst_dessins++; R.n_inst += ninst; if (ninst > R.inst_max) R.inst_max = ninst; }
     r = 0;
 fin:
     pthread_mutex_unlock(&g_mu);
     return r;
 }
 
+void d3dv_compteurs_inst(uint64_t *dessins, uint64_t *instances, uint32_t *max, int *pipes, int *pipes_inst)
+{
+    pthread_mutex_lock(&g_mu);
+    if (dessins) *dessins = R.n_inst_dessins;
+    if (instances) *instances = R.n_inst;
+    if (max) *max = R.inst_max;
+    if (pipes) *pipes = R.npipe;
+    if (pipes_inst) *pipes_inst = R.n_pipes_inst;
+    pthread_mutex_unlock(&g_mu);
+}
 static void bilan5(void)
 {
     /* passe 10r : caches du chemin de dessin (constantes inchangées, tampons statiques) ;
-     * passe 10t : plages volatiles réutilisées dans l'anneau (une recopie par époque) */
+     * passe 10t : plages volatiles réutilisées dans l'anneau (une recopie par époque) ;
+     * 21/10 : dédiés vivants = entrées en cache sans dalle (buf nul = tampon volatil sorti) */
+    int n_dedies = 0;
+    for (int i = 0; i < R.ntam; i++) if (R.tam[i].buf && R.tam[i].dalle < 0) n_dedies++;
     printf("[BILAN] [CACHE] passe 10r : blocs de constantes réutilisés sans recopie par %llu dessins VS + %llu PS ; "
            "tampons statiques : %llu flux + %llu index liés depuis le cache, %llu remplacements, %llu volatils (%llu dessins renvoyés à l'anneau), %u refus plafond, "
            "%llu octets de copie évités au total ; %d entrées en cache (%.1f Mio / %u Mio) ; "
-           "volatils réutilisés : %llu flux + %llu index (%.1f Mio évités)%s%s%s\n",
+           "volatils réutilisés : %llu flux + %llu index (%.1f Mio évités) ; "
+           "21/10 : %d dalle(s) de %u Mio, %.1f Mio occupés, %d tampons dédiés%s%s%s%s\n",
            (unsigned long long)R.n_cache_cvs, (unsigned long long)R.n_cache_cps, (unsigned long long)R.n_tam_flux,
            (unsigned long long)R.n_tam_index, (unsigned long long)R.n_tam_remplaces, (unsigned long long)R.n_tam_volatils,
            (unsigned long long)R.n_tam_volatils_servis, R.n_tam_plafond,
            (unsigned long long)R.o_evites, R.ntam, R.o_tam / 1048576.0, TAMPONS_PLAFOND >> 20,
            (unsigned long long)R.n_volatils_flux, (unsigned long long)R.n_volatils_index, R.o_volatils / 1048576.0,
+           R.ndalles, DALLE_TAILLE >> 20, R.o_dalles / 1048576.0, n_dedies,
+           !dalles_actives() ? " ; dalles DÉSACTIVÉES (SC2_VK_DALLES=0)" : "",
            sans_cache_consts() ? " ; cache constantes DÉSACTIVÉ (SC2_VK_SANS_CACHE_CONSTS=1)" : "",
            sans_cache_tampons() ? " ; cache tampons désactivé (SC2_VK_CACHE_TAMPONS=0)" : "",
            sans_cache_volatils() ? " ; cache volatils désactivé (SC2_VK_CACHE_VOLATILS=0)" : "");
+    printf("[BILAN] [VK] constantes (passe 10t) : %llu blocs recopiés dont %llu entiers, %.1f Mo recopiés, "
+           "%.1f Mo épargnés par la plage lue (nconst)%s\n",
+           (unsigned long long)R.n_blocs, (unsigned long long)R.n_blocs_entiers, R.o_consts / 1e6, R.o_plage / 1e6,
+           consts_completes() ? " ; blocs entiers forcés (SC2_VK_CONSTS_COMPLETES=1)" : "");
     if (d3dv_ombres()) {
         int nm = 0; for (int i = 0; i < MAX_MODULES; i++) if (R.prof_module[i]) nm++;
         uint64_t ech_d32 = 0; for (int i = 0; i < V.nc; i++) if (V.c[i].prof) ech_d32 += V.c[i].n_echant;
@@ -2708,10 +3245,14 @@ static void bilan5(void)
                    V.c[i].w, V.c[i].h, V.c[i].fmt, (int)V.c[i].vf, (unsigned long long)V.c[i].n_echant);
     }
     printf("[BILAN] draws RÉELS (shaders du jeu en SPIR-V) : %llu ; refusés : %llu sans cible/module, %llu pipeline, %llu place ; "
-           "%d modules, %d pipelines, %d samplers ; textures : %d, %llu téléversements (%llu Mo), %llu formats/tailles non gérés\n",
+           "%d modules, %d pipelines, %d samplers ; textures : %d, %llu téléversements (%llu Mo), %llu formats/tailles non gérés ; "
+           "V5.1 : %llu textures et %llu tampons oubliés (objets rendus à l'arène), %d + %d indices libres, %llu tables refaites\n",
            (unsigned long long)R.n_reels, (unsigned long long)R.n_refus_cible, (unsigned long long)R.n_refus_pipe,
            (unsigned long long)R.n_refus_place, R.nmod, R.npipe, R.nsmp, R.nt, (unsigned long long)R.n_tex_tel,
-           (unsigned long long)(R.o_tel >> 20), (unsigned long long)R.n_tex_ko);
+           (unsigned long long)(R.o_tel >> 20), (unsigned long long)R.n_tex_ko, (unsigned long long)g_n_tex_oubliees,
+           (unsigned long long)g_n_tam_oublies, g_ntex_libres, g_ntam_libres, (unsigned long long)g_n_hache_refaites);
+    printf("[BILAN] [INST] backend V2.2 : %llu dessins à flux d'instance, Σ %llu instances (max %u) ; %d pipelines à flux d'instance\n",
+           (unsigned long long)R.n_inst_dessins, (unsigned long long)R.n_inst, R.inst_max, R.n_pipes_inst);
     printf("[BILAN] [TEX] backend : BC %s ; %llu niveaux téléversés (%llu cubes) ; %llu téléversements DÉCODÉS PAR LE CPU (%llu Mo)\n",
            V.bc ? "natif" : V.sans_bc ? "logiciel (SC2_VK_SANS_BC=1)" : "logiciel (absent du device)",
            (unsigned long long)R.n_niv_tel, (unsigned long long)R.n_cubes_tel, (unsigned long long)R.n_tel_logiciel, (unsigned long long)(R.o_logiciel >> 20));

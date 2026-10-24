@@ -51,7 +51,7 @@ extern "C" {
 #define SC2_IPC_MEM_SIZE     0x10000u                  /* CreateFileMappingA(…, 0, 0x10000, …) */
 #define SC2_IPC_MEM_PROTECT  (PAGE_READWRITE | SEC_COMMIT)   /* 0x08000004 */
 
-#define SC2_IPC_OFF_INSTANCES   0x00u  /* InterlockedIncrement → DAT_0169AAA4 */
+#define SC2_IPC_OFF_INSTANCES   0x00u  /* InterlockedIncrement → [0x0169AAA4] */
 #define SC2_IPC_OFF_GAME_PID    0x0Cu  /* InterlockedCompareExchange(+0xC, pid, 0) */
 #define SC2_IPC_OFF_STATE       0x20u  /* poignée de main : 4 = launcher prêt, 1/5/0 ensuite */
 #define SC2_IPC_OFF_WAIT        0x24u  /* jeu met 1, launcher remet 0 */

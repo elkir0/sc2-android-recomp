@@ -35,7 +35,7 @@ const char *d3dv_nom_device(void);
  * taille). Créée au premier usage, recréée si sa taille change. fmt = D3DFORMAT.
  * Rend un identifiant ≥ 0, ou -1. */
 int  d3dv_cible(uint64_t cle, uint32_t w, uint32_t h, uint32_t fmt, int profondeur);
-int  d3dv_ombres(void);   /* passe 7s : SC2_OMBRES=1 → textures de profondeur échantillonnées (profondeur brute) */
+int  d3dv_ombres(void);   /* passe 7s/7v3 ; 21/10 : ACTIVES par défaut (SC2_OMBRES=0 coupe ; refusées sans 34 échantillonneurs) */
 void d3dv_rt(int id);                      /* RT0 courante (-1 : aucune) */
 void d3dv_ds(int id);                      /* surface de profondeur courante */
 void d3dv_viewport(uint32_t x, uint32_t y, uint32_t w, uint32_t h, float zmin, float zmax);
@@ -91,19 +91,33 @@ typedef struct {
     const void *index_donnees_tot;
     uint32_t nombre;                              /* sommets (sans index) ou index */
     int32_t decalage_sommet;                      /* vertexOffset de vkCmdDrawIndexed */
+    /* V2.2 (22/10) : instanciation D3D9 (SetStreamSourceFreq). Zéro par défaut (memset de dessin_reel, dessins de test
+     * qui ne les nomment pas) : clé de pipeline, liaisons et appel d'avant, à l'octet. */
+    uint32_t instances;                           /* instanceCount ; 0 ou 1 = une instance (comme avant) */
+    uint32_t flux_inst;                           /* bit i = flux[i] lu PAR INSTANCE (VK_VERTEX_INPUT_RATE_INSTANCE, diviseur 1) */
     const void *cvs, *cps;                        /* blocs de constantes (D3DV_CONST_TAILLE octets) */
     uint32_t gen_vs, gen_ps;                      /* passe 10r : génération du contenu AU MOMENT de l'assemblage
                                                    * de cvs/cps — même génération ⇒ mêmes octets, le backend réutilise
                                                    * l'emplacement de l'anneau sans recopier (épargne memmove) */
+    uint16_t nconst_vs, nconst_ps;                /* passe 10t : registres c lus par le VS / le PS (scripts/d3d9-vers-spirv.py) :
+                                                   * seuls les 16 × nconst premiers octets du bloc sont recopiés dans l'anneau ;
+                                                   * 0 = bloc entier (registres i/b, adressage relatif, table sans le champ) */
     struct { int genre_shader; int source; int id; uint32_t adresse[3], mag, min, mip;
              uint32_t biais, maxmip, aniso, bordure; } tex[16];   /* D3DSAMP_* (passe 7l : biais = bits d'un float) */
     uint32_t blend, src, dst, op, src_a, dst_a, op_a, masque_couleur;
     float hp[4], at[4];
     uint32_t zt, zw, zf, cull;                    /* passe 7n : D3DRS ZENABLE, ZWRITEENABLE, ZFUNC, CULLMODE */
     uint32_t zbiais, zpente;                      /* passe 7v3 : D3DRS DEPTHBIAS (195), SLOPESCALEDEPTHBIAS (175), bits de float */
+    /* 21/10 : stencil D3D9 — les 13 D3DRS (valeurs D3D9 brutes : D3DSTENCILOP/D3DCMP, REF hors clé
+     * de pipeline car état dynamique). Surlignage de sélection du jeu : REPLACE 128 puis EQUAL 0. */
+    uint32_t st_en, st_fail, st_zfail, st_pass, st_func, st_ref, st_masque, st_ecriture,
+             st_2faces, st_ccw_fail, st_ccw_zfail, st_ccw_pass, st_ccw_func;
 } d3dv_dessin;
 #define D3DV_CONST_TAILLE (256 * 16 + 16 * 16 + 16 * 16)
 int  d3dv_dessiner(const d3dv_dessin *d);
+/* V2.2 : compteurs du backend (tests, bilan) — dessins à flux d'instance ou instanceCount > 1, Σ instances, maximum,
+ * pipelines créés au total et pipelines à flux d'instance. Pointeurs NULL ignorés. */
+void d3dv_compteurs_inst(uint64_t *dessins, uint64_t *instances, uint32_t *max, int *pipes, int *pipes_inst);
 /* Passe 7w : StretchRect entre cibles (blit Vulkan ; rects RECT D3D9 ou NULL) ; 0 si copié. */
 int  d3dv_copier(int src, const int32_t *rs, int dst, const int32_t *rd, int lineaire);
 int  d3dv_rt_courante(void);
@@ -121,5 +135,10 @@ void d3dv_semaphore_rendu_demander(void);   /* la prochaine soumission de d3dv_p
 uint64_t d3dv_semaphore_rendu(void);        /* sémaphore signalé par la dernière présentation demandée, puis oublié ; 0 si aucun */
 void d3dv_attendre_semaphore(uint64_t s, uint32_t etape);   /* la prochaine soumission du backend, quelle qu'elle soit, attendra s à l'étape etape (VkPipelineStageFlags) */
 int d3dv_en_vol(void);                      /* 1 : deux frames en vol ; 0 : synchrone (ou backend inactif) */
+/* V5.1 (24/10) : objets invités (textures, tampons de sommets/index, surfaces) rendus à l'arène — leurs entrées de cache
+ * (clé = adresse invitée ; cibles : adresse, ou adresse << 32 | taille) sont oubliées, images et tampons détruits après
+ * les frames en vol (une cible en usage est gardée) ; compteurs pour [MEM]. */
+void d3dv_oublier(const uint32_t *objs, int n);
+void d3dv_oublis(uint64_t *tex, uint64_t *tam, int *tex_vivantes, int *tam_vivants, uint64_t *cibles, int *cibles_vivantes);
 
 #endif

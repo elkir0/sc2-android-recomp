@@ -115,6 +115,17 @@ static int maitre(uint32_t sys, int choisir)
     return !X.maitre || X.maitre == sys;
 }
 
+/* SC2_AUDIO_JOURNAL=<n> (diagnostic, 24/10) : journalise les n premiers événements de son (createSound avec nom, mode
+ * et résultat ; playSound ; stop ; release ; fin de lecture) en « [AUDIO-J] », sans rien changer au comportement. */
+static int journal_ok(void)
+{
+    static long reste = -2;
+    if (reste == -2) { const char *e = getenv("SC2_AUDIO_JOURNAL"); reste = e && *e ? atol(e) : 0; if (reste < 0) reste = 0; }
+    if (reste <= 0) return 0;
+    reste--; return 1;
+}
+#define JOURNAL(...) do { if (journal_ok()) sc2_log("[AUDIO-J] " __VA_ARGS__); } while (0)
+
 /* ---- sorties ------------------------------------------------------------------- */
 static void wav_entete(FILE *f, uint64_t frames, int freq)
 {
@@ -155,6 +166,15 @@ static void sorties_ouvrir(void)
     }
     const char *e = getenv("SC2_AUDIO_SORTIE");
     if (e && *e == '0') return;
+#ifdef __APPLE__
+    /* M6 : macOS → CoreAudio côté hôte (android/jni/sc2_audio_android.c, AUHAL) ; le mixeur ne dlopen jamais
+     * libasound ici. La sortie temps réel est posée par sc2aa_demarrer quand SC2_MAC_SON l'exige. */
+    {
+        const char *m = getenv("SC2_MAC_SON");
+        if (m && (!strcmp(m, "1") || !strcmp(m, "muet"))) sc2_log("[AUDIO] sortie : CoreAudio (hôte Mac)");
+    }
+    return;
+#endif
     X.alsa = dlopen("libasound.so.2", RTLD_NOW | RTLD_LOCAL);
     if (!X.alsa) { sc2_log("[AUDIO] sortie temps réel : libasound absente → WAV seul"); return; }
     int (*ouvrir)(void **, const char *, int, int) = (int (*)(void **, const char *, int, int))dlsym(X.alsa, "snd_pcm_open");
@@ -297,7 +317,7 @@ static int frame_flux(canal_t *ch, son_t *s, uint32_t f, float *l, float *r)
 }
 static void canal_fin(CPU *c, canal_t *ch)
 {
-    ch->joue = 0; X.fins++;
+    ch->joue = 0; X.fins++; JOURNAL("fin de lecture « %s »", ch->dsp ? "(DSP)" : X.s[ch->son].nom);
     if (ch->rappel && c) {                                       /* FMOD_CHANNEL_CALLBACKTYPE_END = 0 */
         uint32_t args[4] = { ch->objet, 0, 0, 0 };
         X.rappels++;
@@ -496,6 +516,8 @@ static uint32_t m_createSound(CPU *c, const uint32_t *a)        /* (nom|données
     const char *nom = (A(2) & (M_OPENMEMORY | M_OPENMEMORY_P)) ? "" : (const char *)GPTR(A(1));
     int r = A(1) ? son_creer(c, nom, A(1), A(2), A(3), &o) : ERR_INVALID_PARAM;
     if (A(4)) wr32(A(4), r ? 0 : o);
+    JOURNAL("createSound « %s » mode 0x%X → %d (Sound 0x%08X, System 0x%08X)", (A(2) & (M_OPENMEMORY | M_OPENMEMORY_P)) ? "<mémoire>" : nom,
+            A(2), r, r ? 0 : o, A(0));
     pthread_mutex_unlock(&X.mu);
     return (uint32_t)r;
 }
@@ -526,6 +548,7 @@ static uint32_t m_playSound(CPU *c, const uint32_t *a)          /* (index, Sound
     pthread_mutex_lock(&X.mu);
     uint32_t o = 0, r = jouer(c, A(0), A(1), A(2), A(3) & 0xFF, &o);
     if (A(4)) wr32(A(4), r ? 0 : o);
+    { son_t *sj = son_de(A(2)); JOURNAL("playSound « %s » %s → %u (canal 0x%08X)", sj ? sj->nom : "?", (A(3) & 0xFF) ? "en pause" : "lecture", r, r ? 0 : o); }
     pthread_mutex_unlock(&X.mu);
     return r;
 }
@@ -610,6 +633,7 @@ static uint32_t s_release(CPU *c, const uint32_t *a)
     son_t *s = son_de(A(0));
     if (s) {
         int id = (int)(s - X.s);
+        JOURNAL("Sound::release « %s »", s->nom);
         for (int k = 0; k < MAX_CANAUX; k++) if (X.c[k].vivant && X.c[k].son == id) X.c[k].joue = 0;
         free(s->pcm); if (s->v) stb_vorbis_close(s->v); free(s->brut);
         memset(s, 0, sizeof *s);
@@ -691,6 +715,7 @@ static uint32_t c_stop(CPU *c, const uint32_t *a)
     (void)c; pthread_mutex_lock(&X.mu); canal_t *ch = canal_de(A(0));
     if (ch && X.piste && ch->joue)                               /* passe 7z : X <canal> <horloge> <son> */
         fprintf(X.piste, "X %d %llu %s\n", (int)(ch - X.c), (unsigned long long)X.horloge, ch->dsp ? "(DSP)" : X.s[ch->son].nom);
+    if (ch) JOURNAL("Channel::stop « %s »%s", ch->dsp ? "(DSP)" : X.s[ch->son].nom, ch->joue ? "" : " (déjà arrêté)");
     if (ch) ch->joue = 0;
     pthread_mutex_unlock(&X.mu); return ch ? 0 : ERR_INVALID_HANDLE;
 }

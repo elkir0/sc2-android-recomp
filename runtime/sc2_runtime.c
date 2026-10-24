@@ -198,14 +198,20 @@ SC2_FROID static void nouvelle_fn(CPU *c, uint32_t va)
  *   en +0x3C4 et +0x3B4 (00A2C895, 00A2C8B8). On retient l'objet à l'entrée.
  *   L_00B7DC50 et L_00B80810 (thiscall, 1 argument) : méthodes de cadre qu'emploient les affichages du dialogue
  *   (L_00A29590, L_00A28EA0) et sa construction (0xB80810(0) à l'init). Journalisées quand ecx est l'un des deux
- *   cadres GameMenuDialog : l'ouverture ou la fermeture du menu devient visible au journal, avec la frame Present. */
+ *   cadres GameMenuDialog : l'ouverture ou la fermeture du menu devient visible au journal, avec la frame Present.
+ *   L6 (24/10) — fin de partie : à l'écran Victory!/Defeat! (banc du 23/10, sow-longue), L_00A28EA0 appelle
+ *   L_00B7DC50(1) sur le cadre +0x3B4 puis L_00B80810(1) sur le cadre +0x3C4. Le menu F10 ne montre ni l'un ni
+ *   l'autre : sa L_00B80810(1) ne touche que +0x3B4 (depuis L_00B7DB50) et L_00B7DC50 y est appelé d'ailleurs
+ *   qu'en L_00A28EA0. Chaque ouverture du dialogue appelle donc sc2_banc_fin_partie (faible, banc d'entrées)
+ *   une seule fois et journalise « [MENU] fin de partie », hors plafond des 20 lignes. */
 uint32_t sc2_frames_presentees(void) __attribute__((weak));
+void sc2_banc_fin_partie(const char *quoi) __attribute__((weak));
 SC2_FROID static void menu_jeu(CPU *c, uint32_t va)
 {
-    static uint32_t ui; static unsigned n;
+    static uint32_t ui, fin; static unsigned n;
     uint32_t fr = sc2_frames_presentees ? sc2_frames_presentees() : 0xFFFFFFFFu, ret = rd32(c->esp), fn = sc2_lifted_precedente(ret);
     if (va == 0x00A2BD70u) {
-        ui = c->ecx;
+        ui = c->ecx; fin = 0;
         if (n++ < 20) sc2_log("[MENU] UI de jeu construite : L_00A2BD70, objet 0x%08X, depuis 0x%08X (L_%08X+0x%X), Present n°%u",
                               ui, ret, fn, ret - fn, fr);
         return;
@@ -213,6 +219,15 @@ SC2_FROID static void menu_jeu(CPU *c, uint32_t va)
     if (!ui) return;
     uint32_t f1 = rd32(ui + 0x3C4), f2 = rd32(ui + 0x3B4);
     if (!c->ecx || (c->ecx != f1 && c->ecx != f2)) return;
+    uint32_t arg = rd32(c->esp + 4);
+    if (!fin && arg == 1 && ((va == 0x00B80810u && c->ecx == f1) || (va == 0x00B7DC50u && fn == 0x00A28EA0u))) {
+        char quoi[48];
+        snprintf(quoi, sizeof quoi, va == 0x00B80810u ? "L_00B80810(1) cadre +0x3C4" : "L_00B7DC50(1) depuis L_00A28EA0");
+        fin = 1;
+        sc2_log("[MENU] fin de partie : %s, Present n°%u", quoi, fr);
+        if (sc2_banc_fin_partie) sc2_banc_fin_partie(quoi);
+    } else if (fin && arg == 0)
+        fin = 0;   /* fermeture du dialogue : la prochaine ouverture sera signalée à nouveau */
     if (n++ < 20) sc2_log("[MENU] GameMenuDialog (%s, cadre 0x%08X) : L_%08X(%u) depuis 0x%08X (L_%08X+0x%X), Present n°%u",
                           c->ecx == f1 ? "+0x3C4" : "+0x3B4", c->ecx, va, rd32(c->esp + 4), ret, fn, ret - fn, fr);
 }
@@ -247,6 +262,20 @@ void sc2_glue_pompe(CPU *c)
                                  m & 8 ? "Credits " : "", m & 16 ? "Loading " : "", m & 32 ? "Movie " : "", g, etat, fr);
         masque = m;
     }
+    /* L2 (24/10) : « Quit Campaign » (menu F10) mène au menu principal natif, inerte sans le client Battle.net (seul le fond
+     * 3D, écran 0, s'affiche). En mode lanceur (SC2_RUN_SANS_BNET=1), ce fond affiché APRÈS un premier chargement (bit
+     * Loading vu), front-end établi, ni chargement ni vidéo, termine le jeu proprement : sc2_stop(0), et Android revient au
+     * lanceur (écran titre). SC2_MENU_PRINCIPAL=garder : le menu reste affiché (comportement d'avant). */
+    static int menu_lu, menu_quitter, deja_charge;
+    if (!menu_lu) {
+        menu_lu = 1;
+        const char *b = getenv("SC2_RUN_SANS_BNET"), *mp = getenv("SC2_MENU_PRINCIPAL");
+        menu_quitter = b && *b == '1' && !(mp && !strcmp(mp, "garder"));
+    }
+    if (m & 0x10) deja_charge = 1;
+    if (menu_quitter && deja_charge && (etat & 2) && (m & 1) && !(m & 0x30))
+        sc2_stop(0, "[GLUE] menu principal atteint (Quit Campaign) en mode lanceur : fin du jeu, retour au lanceur "
+                    "(SC2_MENU_PRINCIPAL=garder pour rester au menu) — Present n°%u", fr);
     if (idx < 0 || fait) return;
     if (!(etat & 2) || !(m & 1) || (m & 0x30)) { tours = 0; return; }
     if (++tours < attente) return;
@@ -258,6 +287,13 @@ void sc2_glue_pompe(CPU *c)
     sc2_call_guest(c, 0x00B08FB0u, 1, &arg, 0);
     c->ecx = ecx;
     sc2_log("[GLUE] écrans affichés 0x%02X → 0x%02X ; cadre de l'écran %d : 0x%08X", avant, rd32(g + 0x1DC), idx, rd32(g + 0x1F0 + 4u * arg));
+}
+/* V1.1 (22/10) : masque des écrans affichés [GlueUI+0x1DC] (0 sans GlueUI), lu à la demande sur le fil du jeu — QUAND:PRET,
+ * QUAND:CHARGEMENT et QUAND:GLUE du banc d'entrées (sc2_entrees_banc.c, référence faible). */
+uint32_t sc2_glue_masque(void)
+{
+    uint32_t g = rd32(GVA(0x019322A0u));
+    return g ? rd32(g + 0x1DC) : 0;
 }
 
 /* Passe 9y — erreur fatale du JEU : sc2_init_ErreurFatale 0x009A8630 (fastcall, ecx = code, edx = message ANSI) affiche
@@ -621,6 +657,21 @@ SC2_FROID void sc2_x87_ecart(const char *fn, uint32_t ecarts, uint32_t masque)
         sc2_log("[X87-ÉCART] n=%llu %s : hors masque 0x%03X et différents de *c :%s", (unsigned long long)m, fn, masque, l);
 }
 
+/* Passe 10u : build de contrôle des registres SSE locaux (sc2_lifted.h, -DSC2_RL_CONTROLE, --sse). Un registre
+ * xmm hors masque qui diffère entre sse et *c à une frontière = écriture oubliée par le flot de données SSE de
+ * scripts/registres-locaux.py. Mêmes règles de limitation que sc2_rl_ecart. */
+static uint64_t g_sse_ecarts;
+SC2_FROID void sc2_sse_ecart(const char *fn, uint32_t ecarts, uint32_t masque)
+{
+    static const char *n[] = { "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7" };
+    char l[96]; size_t k = 0; l[0] = 0;
+    for (int i = 0; i < 8 && k < sizeof l - 4; i++)
+        if (ecarts >> i & 1) k += (size_t)snprintf(l + k, sizeof l - k, " %s", n[i]);
+    uint64_t m = __atomic_add_fetch(&g_sse_ecarts, 1, __ATOMIC_RELAXED);
+    if (m <= 50 || (m & (m - 1)) == 0)
+        sc2_log("[SSE-ÉCART] n=%llu %s : hors masque 0x%02X et différents de *c :%s", (unsigned long long)m, fn, masque, l);
+}
+
 void sc2_todo_c(void *vc, uint32_t va, const char *text)
 {
     CPU *c = (CPU *)vc;
@@ -854,6 +905,7 @@ void sc2_stop(int code, const char *fmt, ...)
     }
     if (n > 40) printf("    … (%d cadres au total)\n", n);
     sc2_arene_bilan();                                  /* passe 7j : rien sans recyclage */
+    sc2_mem_ligne("arrêt");                             /* V5.1 : occupation finale par origine */
     sc2_arene_journal_fin();                            /* passe 10j : rien sans SC2_ARENE_JOURNAL */
     pile_bilan();                                       /* passe 7w8 */
     manque_bilan();                                     /* passe 7v : rien sans SC2_MANQUE_CONTINUE */
@@ -864,8 +916,10 @@ void sc2_stop(int code, const char *fmt, ...)
            (unsigned long long)g_sc2_dispatches, g_n_executed, N_LIFTED);
     sc2_iat_report();
     fflush(stdout);
+    if (sc2_sortie_crochet) sc2_sortie_crochet(code);  /* M10 : hôte Mac en mode fenêtre ; ne revient pas */
     exit(code);
 }
+void (*sc2_sortie_crochet)(int code) = NULL;            /* M10 : NULL (banc, Android) = exit(code) comme avant */
 
 /* ========================================================================== */
 /* Arène invitée                                                              */
@@ -946,6 +1000,7 @@ static int arena2_init(void)                       /* sous g_arena_mu */
     return 1;
 }
 static uint64_t g_freed;
+static struct timespec g_mem_t0;                     /* V5.1 : t=0 des lignes [MEM] (arena_init) */
 
 static void arena_init(void)
 {
@@ -957,6 +1012,7 @@ static void arena_init(void)
         exit(2);
     }
     g_arena_ok = 1;
+    clock_gettime(CLOCK_MONOTONIC, &g_mem_t0);          /* V5.1 : origine des temps des lignes [MEM] */
 }
 
 /* Passe 7h — recyclage de l'arène (SC2_ARENE_RECYCLE=1, ou automatiquement avec SC2_RUN_SANS_BNET=1) : le
@@ -1121,31 +1177,113 @@ static void jrn_rapport(double t)                     /* sous g_arena_mu */
                 (unsigned long long)g_japp[best].n_tot, (unsigned long long)(g_japp[best].o_tot >> 20));
     }
 }
+#define MO_DECALE 24u                                 /* V5.1 : origine du bloc, bits 24..30 de [12] (journal : 31 et 0..11) */
+#define MO_MASQUE 0x7F000000u
 static void jrn_alloc(uint32_t hdr, uint32_t octets)  /* sous g_arena_mu */
 {
     uint32_t k = jrn_idx(sc2_appel_ret);
     g_japp[k].o_viv += octets; g_japp[k].n_viv++; g_japp[k].n_tot++; g_japp[k].o_tot += octets;
     g_j_viv += octets; g_j_nviv++;
-    *(uint32_t *)GPTR(hdr + 12u) = JTAG | k;
+    *(uint32_t *)GPTR(hdr + 12u) = (*(uint32_t *)GPTR(hdr + 12u) & MO_MASQUE) | JTAG | k;   /* V5.1 : origine gardée */
     double t = jrn_t();
     if (t >= g_jrn_suivant) { g_jrn_suivant = t + g_jrn_pas; jrn_rapport(t); }
 }
 static void jrn_libere(uint32_t hdr)                  /* sous g_arena_mu ; bloc encore marqué */
 {
-    uint32_t tag = *(uint32_t *)GPTR(hdr + 12u), k = tag & ~JTAG;
-    if (!(tag & JTAG) || k >= JNAPP) return;
+    uint32_t tag = *(uint32_t *)GPTR(hdr + 12u), k = tag & (JNAPP - 1u);   /* V5.1 : bits de l'origine écartés */
+    if (!(tag & JTAG)) return;
     uint64_t o = ((*(uint32_t *)GPTR(hdr) + 15u) & ~15u) + 16u;
     if (g_japp[k].o_viv >= o) g_japp[k].o_viv -= o; else g_japp[k].o_viv = 0;
     if (g_japp[k].n_viv) g_japp[k].n_viv--;
     if (g_j_viv >= o) g_j_viv -= o; else g_j_viv = 0;
     if (g_j_nviv) g_j_nviv--;
-    *(uint32_t *)GPTR(hdr + 12u) = 0;
+    *(uint32_t *)GPTR(hdr + 12u) = tag & MO_MASQUE;    /* V5.1 : l'origine reste, sc2_free la lit ensuite */
 }
 void sc2_arene_journal_fin(void) { if (g_jrn == 1) { pthread_mutex_lock(&g_arena_mu); jrn_rapport(jrn_t()); pthread_mutex_unlock(&g_arena_mu); } }
 
-uint32_t sc2_alloc(uint32_t size)
+/* V5.1 (24/10) — mesure par ORIGINE (sc2_alloc_de) : octets vivants (capacité, en-tête compris), blocs vivants, octets
+ * servis au total. Sans recyclage, rien n'est rendu : vivants = servis. Sous g_arena_mu. */
+static uint64_t g_mo_viv[SC2_MO_N], g_mo_nviv[SC2_MO_N], g_mo_tot[SC2_MO_N];
+static void mo_servi(unsigned o, uint32_t cap) { g_mo_viv[o] += cap; g_mo_nviv[o]++; g_mo_tot[o] += cap; }
+static void mo_rendu(uint32_t tag, uint32_t cap)
+{
+    unsigned o = (tag & MO_MASQUE) >> MO_DECALE; if (o >= SC2_MO_N) o = SC2_MO_AUTRE;
+    g_mo_viv[o] = g_mo_viv[o] >= cap ? g_mo_viv[o] - cap : 0; if (g_mo_nviv[o]) g_mo_nviv[o]--;
+}
+static unsigned origine_de(uint32_t va)              /* origine d'un bloc servi (recyclage actif), sinon AUTRE */
+{
+    if (g_recycle != 1 || !dans_arene(va)) return SC2_MO_AUTRE;
+    const uint32_t *e = (const uint32_t *)GPTR(va - 16u);
+    unsigned o = (e[3] & MO_MASQUE) >> MO_DECALE;
+    return e[2] == RECYCLE_ALLOUE && o < SC2_MO_N ? o : SC2_MO_AUTRE;
+}
+static const char *const MO_NOMS[SC2_MO_N] = { "autre", "malloc", "tas", "virt", "section", "d3d-obj", "d3d-tex", "d3d-cube",
+                                               "d3d-vol", "d3d-surf", "d3d-vb", "d3d-ib", "d3d-shader" };
+/* Lignes [MEM] (V1.2) : occupation de l'arène (principale : fronts bas et haut ; débordement), vivants, mémoire libre
+ * réutilisable (étendues, listes par taille, quarantaine), puis vivants et servis par origine, puis objets D3D9
+ * (sc2_d3d9_mem). Verrou ESSAYÉ : appelée depuis sc2_stop (faute possible sous g_arena_mu), elle n'attend pas — sans
+ * verrou, les compteurs sont lus tels quels et les listes libres ne sont pas parcourues. */
+void sc2_mem_ligne(const char *motif)
+{
+    int verrou = 0;
+    for (int k = 0; k < 200 && !(verrou = !pthread_mutex_trylock(&g_arena_mu)); k++) usleep(1000);
+    uint64_t o_ext = 0, o_lis = 0, n_lis = 0;
+    for (int i = 0; i < g_next && i < EXT_MAX; i++) o_ext += g_ext[i].n;
+    if (verrou)                                         /* listes par taille : chaînes bornées, maillons vérifiés */
+        for (int l = 0; l < 258 + 33; l++)
+            for (uint32_t h = l < 258 ? g_libres_petits[l] : g_libres_grands[l - 258], n = 0; h && n < 4000000u; n++) {
+                if (!dans_arene(h + 16u)) break;
+                const uint32_t *e = (const uint32_t *)GPTR(h);
+                o_lis += e[1]; n_lis++; h = e[3];
+            }
+    uint64_t viv[SC2_MO_N], nviv[SC2_MO_N], tot[SC2_MO_N], v = 0, nv = 0;
+    memcpy(viv, g_mo_viv, sizeof viv); memcpy(nviv, g_mo_nviv, sizeof nviv); memcpy(tot, g_mo_tot, sizeof tot);
+    uint32_t bas = g_arena_top - ARENA_BASE, haut = ARENA_BASE + ARENA_SIZE - g_arena_haut;
+    uint32_t a2 = g_arena2_top ? g_arena2_top - ARENA2_BASE : 0u, quar = g_quar_o;
+    int next = g_next;
+    if (verrou) pthread_mutex_unlock(&g_arena_mu);
+    for (int o = 0; o < SC2_MO_N; o++) { v += viv[o]; nv += nviv[o]; }
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+    double s = (double)(t.tv_sec - g_mem_t0.tv_sec) + (double)(t.tv_nsec - g_mem_t0.tv_nsec) / 1e9;
+    sc2_log("[MEM] %s t=%.1f s : arène principale %u Mo / 768 (bas %u, haut %u), débordement %u Mo ; vivants %.1f Mo en %llu blocs ; "
+            "libres réutilisables : étendues %.1f Mo (%d), listes %.1f Mo (%llu blocs%s), quarantaine %.1f Mo%s", motif, s,
+            (bas + haut) >> 20, bas >> 20, haut >> 20, a2 >> 20, (double)v / 1048576.0, (unsigned long long)nv,
+            (double)o_ext / 1048576.0, next, (double)o_lis / 1048576.0, (unsigned long long)n_lis, verrou ? "" : ", non parcourues",
+            (double)quar / 1048576.0, g_recycle == 1 ? "" : " ; recyclage INACTIF (rien n'est rendu)");
+    char l1[1024], l2[1024]; size_t p1 = 0, p2 = 0;
+    for (int o = 0; o < SC2_MO_N; o++) {
+        if (!tot[o]) continue;
+        p1 += (size_t)snprintf(l1 + p1, p1 < sizeof l1 ? sizeof l1 - p1 : 0, "%s%s %.1f (%llu)", p1 ? ", " : "", MO_NOMS[o],
+                               (double)viv[o] / 1048576.0, (unsigned long long)nviv[o]);
+        p2 += (size_t)snprintf(l2 + p2, p2 < sizeof l2 ? sizeof l2 - p2 : 0, "%s%s %.1f", p2 ? ", " : "", MO_NOMS[o],
+                               (double)tot[o] / 1048576.0);
+        if (p1 >= sizeof l1) p1 = sizeof l1 - 1;
+        if (p2 >= sizeof l2) p2 = sizeof l2 - 1;
+    }
+    sc2_log("[MEM]   vivants par origine, Mo (blocs) : %s", p1 ? l1 : "—");
+    sc2_log("[MEM]   servis au total par origine, Mo : %s", p2 ? l2 : "—");
+    if (sc2_d3d9_mem) { char l3[1024]; l3[0] = 0; sc2_d3d9_mem(l3, sizeof l3); if (l3[0]) sc2_log("[MEM]   D3D9 : %s", l3); }
+    if (sc2_virt_mem && sc2_mem_liberer()) { char l4[400]; l4[0] = 0; sc2_virt_mem(l4, sizeof l4); if (l4[0]) sc2_log("[MEM]   %s", l4); }
+}
+
+int sc2_mem_liberer(void)
+{
+    static int v = -1;
+    if (v < 0) {
+        const char *e = getenv("SC2_MEM_LIBERER");
+        int r = !(e && *e == '0') && recycle_actif();
+        sc2_log("[MEM] V5.1 : mémoire rendue par le jeu %s", r ? "RETOURNÉE à l'arène (ressources D3D9 au dernier Release, "
+                "tableaux remplacés des UnicodeString ; SC2_MEM_LIBERER=0 pour couper)"
+                : e && *e == '0' ? "gardée (SC2_MEM_LIBERER=0, comportement d'avant)" : "gardée (recyclage d'arène inactif)");
+        __atomic_store_n(&v, r, __ATOMIC_RELEASE);
+    }
+    return v;
+}
+uint32_t sc2_alloc(uint32_t size) { return sc2_alloc_de(size, SC2_MO_AUTRE); }
+uint32_t sc2_alloc_de(uint32_t size, unsigned origine)
 {
     arena_init();
+    if (origine >= SC2_MO_N) origine = SC2_MO_AUTRE;
     uint32_t need = ((size + 15u) & ~15u) + 16u;
     if (recycle_actif() && size <= ARENA_SIZE) {
         pthread_mutex_lock(&g_arena_mu);
@@ -1154,9 +1292,10 @@ uint32_t sc2_alloc(uint32_t size)
         if (h) {
             uint32_t cap = *(uint32_t *)GPTR(h + 4u);
             g_n_recycles++; g_o_recycles += cap;
+            mo_servi(origine, cap);                     /* V5.1 */
             pthread_mutex_unlock(&g_arena_mu);
             memset(GPTR(h + 16u), 0, cap - 16u);
-            uint32_t *e = (uint32_t *)GPTR(h); e[0] = size; e[2] = RECYCLE_ALLOUE; e[3] = 0;
+            uint32_t *e = (uint32_t *)GPTR(h); e[0] = size; e[2] = RECYCLE_ALLOUE; e[3] = origine << MO_DECALE;
             if (jrn_actif()) { pthread_mutex_lock(&g_arena_mu); jrn_alloc(h, need); pthread_mutex_unlock(&g_arena_mu); }   /* passe 10j */
             return h + 16u;
         }
@@ -1187,11 +1326,13 @@ uint32_t sc2_alloc(uint32_t size)
                  (g_arena_top - ARENA_BASE) + (ARENA_BASE + ARENA_SIZE - g_arena_haut), g_arena2_top ? g_arena2_top - ARENA2_BASE : 0u,
                  sc2_appel_ret, __builtin_return_address(0));
     }
+    mo_servi(origine, need);                            /* V5.1 */
     pthread_mutex_unlock(&g_arena_mu);
     if (z1 > z0) { memset(GPTR(z0), 0, z1 - z0); g_n_rezero++; }   /* passe 10l : voir g_top_max */
     *(uint32_t *)GPTR(hdr) = size;                      /* en-tête : taille demandée */
     if (g_recycle == 1) {                               /* passe 7h : capacité + marqueur (recyclage seulement) */
         *(uint32_t *)GPTR(hdr + 4u) = need; *(uint32_t *)GPTR(hdr + 8u) = RECYCLE_ALLOUE;
+        *(uint32_t *)GPTR(hdr + 12u) = origine << MO_DECALE;   /* V5.1 : neuf ou remis à zéro (10l) — origine seule */
     }
     if (jrn_actif()) { pthread_mutex_lock(&g_arena_mu); jrn_alloc(hdr, need); pthread_mutex_unlock(&g_arena_mu); }   /* passe 10j */
     return hdr + 16u;                                   /* zéro : mémoire anonyme neuve */
@@ -1204,7 +1345,7 @@ uint32_t sc2_realloc(uint32_t va, uint32_t size)
     if (!va) return sc2_alloc(size);
     uint32_t old = sc2_alloc_size(va);
     if (size <= old) { *(uint32_t *)GPTR(va - 16u) = size; return va; }
-    uint32_t n = sc2_alloc(size);
+    uint32_t n = sc2_alloc_de(size, origine_de(va));    /* V5.1 : même origine */
     memcpy(GPTR(n), GPTR(va), old);
     sc2_free(va);
     return n;
@@ -1223,6 +1364,7 @@ void sc2_free(uint32_t va)
     if (e[2] != RECYCLE_ALLOUE || e[1] < 32u || (e[1] & 15u)) return;   /* double libération / pas un début de bloc */
     pthread_mutex_lock(&g_arena_mu);
     e[2] = RECYCLE_LIBRE;
+    mo_rendu(e[3], e[1]);                               /* V5.1 : avant que [12] ne serve de chaînage */
     if (e[1] < GRAND_SEUIL) {
         /* passe 10j — QUARANTAINE : un petit bloc libéré n'est réutilisé (donc remis à zéro) qu'après QUAR_N autres
          * libérations, ou QUAR_OCTETS octets. Un lecteur en retard sur un objet libéré (fil de chargement : saut null

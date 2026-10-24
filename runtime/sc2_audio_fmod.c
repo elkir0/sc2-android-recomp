@@ -87,8 +87,23 @@ static uint32_t generique(int k, CPU *c, const uint32_t *a)
     return 0;                                   /* FMOD_OK */
 }
 
+/* 24/10 : SC2_AUDIO=0 — FMOD « absent » : FMOD_System_Create échoue (FMOD_ERR_OUTPUT_INIT, sc2_iat_p4.c) mais le jeu
+ * appelle quand même des méthodes (System::createDSP depuis 0x009E9420 : arrêt « NON IMPLÉMENTÉ » à 3 s). Toute méthode
+ * rend alors FMOD_ERR_INVALID_HANDLE (36), sorties à 0 : ni objet, ni son. */
+static uint32_t refus(int k, const uint32_t *a)
+{
+    int ai = 1;                                 /* a[0] = this */
+    for (const char *p = SC2_FMOD[k].nature; *p; p++) {
+        if (*p == 'd') { ai += 2; continue; }
+        if ((*p == 'o' || *p == 'O') && A(ai)) wr32(A(ai), 0);
+        ai++;
+    }
+    return 36;                                  /* FMOD_ERR_INVALID_HANDLE */
+}
+
 static uint32_t appel(int k, CPU *c, const uint32_t *a)
 {
+    if (!g_actif) { __atomic_add_fetch(&g_n[k], 1, __ATOMIC_RELAXED); return refus(k, a); }
     uint64_t n = __atomic_add_fetch(&g_n[k], 1, __ATOMIC_RELAXED);
     if (n <= 2) {
         char args[160] = ""; size_t o = 0;
@@ -399,6 +414,7 @@ const imp_def *sc2_audio_find(const char *nom)
     if (g_actif < 0) {
         const char *e = getenv("SC2_AUDIO");
         g_actif = !(e && *e == '0');
+        if (!g_actif) atexit(sc2_audio_bilan);   /* 24/10 : bilan des refus (sinon posé par le 1er System du runtime) */
         for (int k = 0; k < SC2_FMOD_NB; k++) {
             g_defs[k] = (imp_def){ SC2_FMOD[k].nom, SC2_FMOD[k].mots, STD, g_tramp[k] };
             for (unsigned j = 0; j < sizeof g_table_impl / sizeof g_table_impl[0]; j++)
@@ -407,14 +423,20 @@ const imp_def *sc2_audio_find(const char *nom)
                 if (!strcmp(sc2_audio_impl[j].court, SC2_FMOD[k].court)) g_impl[k] = sc2_audio_impl[j].fn;
         }
     }
-    if (!g_actif) return NULL;
-    for (int k = 0; k < SC2_FMOD_NB; k++) if (!strcmp(SC2_FMOD[k].nom, nom)) return &g_defs[k];
+    for (int k = 0; k < SC2_FMOD_NB; k++) if (!strcmp(SC2_FMOD[k].nom, nom))
+        return g_actif || strstr(SC2_FMOD[k].court, "::") ? &g_defs[k] : NULL;   /* SC2_AUDIO=0 : fonctions libres → p4 */
     return NULL;
 }
 
 void sc2_audio_bilan(void)
 {
-    if (g_actif <= 0) return;
+    if (!g_actif) {
+        uint64_t r = 0; for (int k = 0; k < SC2_FMOD_NB; k++) r += g_n[k];
+        printf("[BILAN] [AUDIO] SC2_AUDIO=0 : FMOD absent, %llu appel(s) de méthode refusé(s) (FMOD_ERR_INVALID_HANDLE)\n",
+               (unsigned long long)r);
+        return;
+    }
+    if (g_actif < 0) return;
     int ord[SC2_FMOD_NB], n = 0;
     for (int k = 0; k < SC2_FMOD_NB; k++) if (g_n[k]) ord[n++] = k;
     for (int i = 1; i < n; i++) for (int j = i; j > 0 && g_n[ord[j]] > g_n[ord[j - 1]]; j--) { int t = ord[j]; ord[j] = ord[j - 1]; ord[j - 1] = t; }

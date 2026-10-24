@@ -228,18 +228,20 @@ int main(void)
         };
         unsigned k;
         for (k = 0; k < sizeof(x87) / sizeof(x87[0]); k++) {
-            /* static, not automatic: rdf80/wrf80 take a 32-bit guest VA, and
-             * on an x86-64 host the stack sits above 4 GB, so its address
-             * truncates to garbage. .bss is low under -no-pie (as tib below). */
+            /* rdf80/wrf80 take a 32-bit guest VA: on a 64-bit host the stack,
+             * and on macOS arm64 the whole image (__PAGEZERO = 4 GB), sit above
+             * 4 GB, so a host address truncates to garbage. V0.2 (22/10) : VA
+             * invitée 0x1000 posée sur buf par g_hote_delta (GPTR = va + delta). */
             static unsigned char buf[16];
             uint64_t m; uint16_t se;
+            g_hote_delta = (uintptr_t)buf - 0x1000u;
 
             memcpy(buf,     &x87[k].m,  8);
             memcpy(buf + 8, &x87[k].se, 2);
-            eqd("fld tbyte", rdf80((uint32_t)(uintptr_t)buf), x87[k].v);
+            eqd("fld tbyte", rdf80(0x1000u), x87[k].v);
 
             memset(buf, 0xCC, sizeof buf);
-            wrf80((uint32_t)(uintptr_t)buf, x87[k].v);
+            wrf80(0x1000u, x87[k].v);
             memcpy(&m,  buf,     8);
             memcpy(&se, buf + 8, 2);
             eq("fstp tbyte mantissa hi", (uint32_t)(m >> 32), (uint32_t)(x87[k].m >> 32));
@@ -256,7 +258,8 @@ int main(void)
     {
         static uint8_t tib[256];
         CPU fc; memset(&fc, 0, sizeof fc);
-        fc.fs_base = (uint32_t)(uintptr_t)tib;
+        g_hote_delta = (uintptr_t)tib - 0x1000u;          /* V0.2 : tib en VA invitée 0x1000 (cf. buf) */
+        fc.fs_base = 0x1000u;
         *(uint32_t *)(tib + 0) = 0xDEADBEEFu;            /* prior SEH list head */
         eq("fs:[0] read",      FS_RD32(&fc, 0x00000000u), 0xDEADBEEFu);
         FS_WR32(&fc, 0x00000000u, 0x00123450u);          /* push a record */

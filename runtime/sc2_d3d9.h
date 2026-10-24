@@ -18,6 +18,11 @@
 int      sc2_com_call(CPU *c, uint32_t va);     /* 1 si va est une méthode COM factice */
 uint32_t sc2_d3d9_create(uint32_t sdk);        /* Direct3DCreate9 → IDirect3D9* factice */
 void     sc2_com_report(void);
+/* 22/10 (V1.1) : interface du banc d'entrées et du device. sc2_d3d9_taille : taille du client (back buffer courant) ;
+ * sc2_banc_capture_prendre (sc2_entrees_banc.c) : nom de la capture CAPTURE:<nom> demandée, rendu UNE fois au Present
+ * suivant puis oublié, NULL sinon — appelé par present_vk sur le fil du jeu. */
+void        sc2_d3d9_taille(uint32_t *w, uint32_t *h);
+const char *sc2_banc_capture_prendre(void);
 uint32_t sc2_com_tsf_create(void);
 uint32_t sc2_bnet_client_create(void);
 uint32_t sc2_icu_breakiterator(uint32_t genre);  /* 0 caractère, 1 mot, 2 ligne, 3 phrase */         /* objet client Battle.net factice (thiscall) */
@@ -31,7 +36,9 @@ uint32_t sc2_d3dx_load_surface_memory(CPU *c, const uint32_t *a);       /* passe
 
 
 /* Passe 5d : shaders D3D9 réels créés par le jeu (bytecode SM2/3 copié dans l'arène). */
-#define SC2_MAX_SHADERS 4096   /* passe 7q : la mission TRaynor01 en crée > 1 024 (1 179 en 1 500 f) ; au-delà, non suivis → draws « lumière » */
+#define SC2_MAX_SHADERS 32768  /* passe 7q : la mission TRaynor01 en crée > 1 024 (1 179 en 1 500 f) ; au-delà, non suivis → draws « lumière ».
+                               * Passe 10t : 4 096 atteints en UNE mission (TTychus01 : 57 524 à 549 647 dessins « lumière ») ; la
+                               * progression persistante enchaîne les missions dans un même lancement → 32 768 (≈ 62 Mo d'arène au pire) */
 typedef struct {
     uint64_t hash;          /* FNV-1a 64 du bytecode (clé de sc2_shaders_spv.h) */
     int      ps;            /* 1 pixel, 0 vertex */

@@ -39,6 +39,9 @@ static unsigned int mach_thread_id(void);
 
 #include "sc2_iat.h"
 #include "sc2_d3d9.h"
+#include "sc2_escarmouche.h"            /* V4.10 : carte d'escarmouche du lanceur simulé (SC2_ESCARMOUCHE) */
+#include "sc2_attentes.c"              /* SC2_ATTENTES=1 : temps bloqué par fil/cause (même motif que
+                                        * sc2_entrees_banc.c dans sc2_input_sim.c — aucune liste de build) */
 
 /* ========================================================================== */
 /* Chaînes larges invitées (UTF-16)                                           */
@@ -413,14 +416,14 @@ static uint32_t h_fatal(CPU *c, const uint32_t *a)
 /* CRT : mémoire, chaînes, maths                                              */
 /* ========================================================================== */
 
-static uint32_t h_malloc(CPU *c, const uint32_t *a)  { (void)c; return sc2_alloc(A(0)); }
+static uint32_t h_malloc(CPU *c, const uint32_t *a)  { (void)c; return sc2_alloc_de(A(0), SC2_MO_MALLOC); }
 static uint32_t h_free(CPU *c, const uint32_t *a)    { (void)c; sc2_free(A(0)); return 0; }
 static uint32_t h_realloc(CPU *c, const uint32_t *a) { (void)c; return sc2_realloc(A(0), A(1)); }
 static uint32_t h__aligned_malloc(CPU *c, const uint32_t *a)
 {
     (void)c;
     uint32_t al = A(1) < 16 ? 16 : A(1);
-    uint32_t p = sc2_alloc(A(0) + al);
+    uint32_t p = sc2_alloc_de(A(0) + al, SC2_MO_MALLOC);
     return (p + al - 1) & ~(al - 1);
 }
 static uint32_t h_memset(CPU *c, const uint32_t *a)  { (void)c; memset(GPTR(A(0)), (int)A(1), A(2)); return A(0); }
@@ -654,8 +657,7 @@ static uint32_t h_GetCurrentThread(CPU *c, const uint32_t *a)    { (void)c; (voi
 static uint32_t h_GetTickCount(CPU *c, const uint32_t *a) { (void)c; (void)a; return sc2_tick_ms(); }
 static uint32_t h_QueryPerformanceCounter(CPU *c, const uint32_t *a)
 {
-    (void)c; struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
-    uint64_t v = (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+    (void)c; uint64_t v = (uint64_t)sc2_monotone_ns();    /* 21/10 : horloge sans le temps de pause */
     wr32(A(0), (uint32_t)v); wr32(A(0) + 4, (uint32_t)(v >> 32)); return 1;
 }
 static uint32_t h_QueryPerformanceFrequency(CPU *c, const uint32_t *a)
@@ -674,7 +676,8 @@ static uint32_t h_InterlockedExchange(CPU *c, const uint32_t *a)    { (void)c; r
 static uint32_t h_InterlockedIncrement(CPU *c, const uint32_t *a)   { (void)c; return __sync_add_and_fetch((uint32_t *)GPTR(A(0)), 1u); }
 static uint32_t h_InterlockedDecrement(CPU *c, const uint32_t *a)   { (void)c; return __sync_sub_and_fetch((uint32_t *)GPTR(A(0)), 1u); }
 static uint32_t h_InterlockedExchangeAdd(CPU *c, const uint32_t *a) { (void)c; return __sync_fetch_and_add((uint32_t *)GPTR(A(0)), A(1)); }
-static uint32_t h_Sleep(CPU *c, const uint32_t *a) { (void)c; if (A(0) && A(0) < 1000) usleep(A(0) * 1000); return 0; }
+static uint32_t h_Sleep(CPU *c, const uint32_t *a) { (void)c; uint64_t t0 = &sc2_att_debut ? sc2_att_debut() : 0;
+    if (A(0) && A(0) < 1000) usleep(A(0) * 1000); if (t0) sc2_att_fin(ATT_SLEEP, A(0), t0, rd32(c->esp)); return 0; }
 /* Passe 4 : un module SYSTÈME importé par SC2.exe (kernel32, user32…) existe :
  * handle fictif 0x7FE00000 + 0x1000*k. Passe 3 rendait NULL, et le jeu concluait
  * « Win9x » (TryEnterCriticalSection introuvable → abort, 0x00F013ED). */
@@ -754,7 +757,7 @@ static __thread uint32_t g_tls[64]; static uint32_t g_tls_n;   /* valeurs par th
 static uint32_t h_TlsAlloc(CPU *c, const uint32_t *a)    { (void)c; (void)a; uint32_t i = __sync_fetch_and_add(&g_tls_n, 1u); return i < 64 ? i : 0xFFFFFFFFu; }
 static uint32_t h_TlsGetValue(CPU *c, const uint32_t *a) { (void)c; SetLastError(0); return A(0) < 64 ? g_tls[A(0)] : 0; }
 static uint32_t h_TlsSetValue(CPU *c, const uint32_t *a) { (void)c; if (A(0) < 64) g_tls[A(0)] = A(1); return A(0) < 64; }
-static uint32_t h_HeapAlloc(CPU *c, const uint32_t *a)   { (void)c; return sc2_alloc(A(2)); }
+static uint32_t h_HeapAlloc(CPU *c, const uint32_t *a)   { (void)c; return sc2_alloc_de(A(2), SC2_MO_TAS); }
 static uint32_t h_HeapReAlloc(CPU *c, const uint32_t *a) { (void)c; return sc2_realloc(A(2), A(3)); }
 static uint32_t h_HeapFree(CPU *c, const uint32_t *a)    { (void)c; sc2_free(A(2)); return 1; }
 static uint32_t h_HeapSize(CPU *c, const uint32_t *a)    { (void)c; return sc2_alloc_size(A(2)); }
@@ -765,12 +768,98 @@ static uint32_t h_HeapCreate(CPU *c, const uint32_t *a)  { (void)c; (void)a; ret
 static struct { uint32_t va, bloc, n; } g_virt[NVIRT];   /* n : taille (passe 7j, pour VirtualQuery) */
 static pthread_mutex_t g_virt_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t g_virt_lib;
+/* V5.1 (24/10) — GRANULES de 64 Ko pour VirtualAlloc. Avant, chaque appel demandait taille + 0xFFFF à l'arène et
+ * alignait dans le bloc : 64 Ko d'arène perdus par région (marathon acte1, retour au hub après la 4e mission : 6 137
+ * régions vivantes, ≈ 390 Mo de marge sur 1 271 Mo « virt » ; le dlmalloc du jeu demande surtout des multiples de 64 Ko,
+ * sans perte d'espace sous Windows). Désormais une région de ≤ 4 Mo est prise dans un TRONÇON : bloc d'arène de 16 Mo
+ * (+ 64 Ko d'alignement) découpé en 256 granules de 64 Ko alignés, sans en-tête dans la région (table de bits ; premier
+ * ajustement contigu, tronçons dans l'ordre). VirtualFree(MEM_RELEASE) rend ses granules (taille dans g_virt) ; au-delà
+ * de deux tronçons entièrement libres, le tronçon vidé retourne à l'arène. Région remise à zéro à chaque service (contrat
+ * de VirtualAlloc). Plus de 4 Mo, ou SC2_MEM_LIBERER=0 : bloc d'arène d'avant. g_virt[].bloc = 1 : région en granules. */
+#define GR_TAILLE 0x10000u
+#define GR_PAR_TR 256u
+#define GR_MAX_TR 192                             /* 192 × 16 Mo = 3 Go : au-delà de l'arène */
+#define GR_MAX_N 64u                              /* 4 Mo */
+static struct { uint32_t bloc, base, libres; uint64_t bits[GR_PAR_TR / 64]; } g_gr[GR_MAX_TR];
+static int g_ngr;
+static pthread_mutex_t g_gr_mu = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t g_gr_servis, g_gr_rendus, g_gr_tr_rendus, g_gr_tr_pris;
+static void gr_marquer(int t, uint32_t i, uint32_t n, int pris)   /* sous g_gr_mu */
+{
+    for (uint32_t k = i; k < i + n; k++) {
+        if (pris) g_gr[t].bits[k >> 6] |= 1ull << (k & 63); else g_gr[t].bits[k >> 6] &= ~(1ull << (k & 63));
+    }
+    g_gr[t].libres = pris ? g_gr[t].libres - n : g_gr[t].libres + n;
+}
+static uint32_t gr_chercher(int t, uint32_t n)    /* sous g_gr_mu : premier départ de n granules libres contigus, ou ~0 */
+{
+    if (!g_gr[t].bloc || g_gr[t].libres < n) return ~0u;
+    for (uint32_t i = 0, suite = 0; i < GR_PAR_TR; i++) {
+        if (g_gr[t].bits[i >> 6] >> (i & 63) & 1) suite = 0;
+        else if (++suite == n) return i + 1 - n;
+    }
+    return ~0u;
+}
+static uint32_t gr_prendre(uint32_t taille)       /* va alignée sur 64 Ko, remise à zéro ; 0 : chemin d'avant */
+{
+    uint32_t n = (taille + GR_TAILLE - 1u) / GR_TAILLE;
+    if (!n || n > GR_MAX_N || !sc2_mem_liberer()) return 0;
+    pthread_mutex_lock(&g_gr_mu);
+    int t = -1; uint32_t i = ~0u;
+    for (int k = 0; k < g_ngr && t < 0; k++) if ((i = gr_chercher(k, n)) != ~0u) t = k;
+    if (t < 0) {                                  /* tronçon neuf (une case vide, sinon au bout) */
+        int k = 0; while (k < g_ngr && g_gr[k].bloc) k++;
+        if (k == GR_MAX_TR) { pthread_mutex_unlock(&g_gr_mu); return 0; }
+        uint32_t p = sc2_alloc_de(GR_PAR_TR * GR_TAILLE + GR_TAILLE, SC2_MO_VIRT);
+        memset(&g_gr[k], 0, sizeof g_gr[k]);
+        g_gr[k].bloc = p; g_gr[k].base = (p + GR_TAILLE - 1u) & ~(GR_TAILLE - 1u); g_gr[k].libres = GR_PAR_TR;
+        if (k == g_ngr) g_ngr++;
+        g_gr_tr_pris++;
+        t = k; i = 0;
+    }
+    gr_marquer(t, i, n, 1);
+    g_gr_servis++;
+    uint32_t va = g_gr[t].base + i * GR_TAILLE;
+    pthread_mutex_unlock(&g_gr_mu);
+    memset(GPTR(va), 0, (size_t)n * GR_TAILLE);
+    return va;
+}
+static void gr_rendre(uint32_t va, uint32_t taille)
+{
+    uint32_t n = (taille + GR_TAILLE - 1u) / GR_TAILLE, rendre = 0;
+    pthread_mutex_lock(&g_gr_mu);
+    for (int t = 0; t < g_ngr; t++) {
+        if (!g_gr[t].bloc || va < g_gr[t].base || va >= g_gr[t].base + GR_PAR_TR * GR_TAILLE) continue;
+        uint32_t i = (va - g_gr[t].base) / GR_TAILLE;
+        if (i + n <= GR_PAR_TR) { gr_marquer(t, i, n, 0); g_gr_rendus++; }
+        if (g_gr[t].libres == GR_PAR_TR) {        /* vide : rendu à l'arène s'il en reste deux autres vides */
+            int vides = 0;
+            for (int k = 0; k < g_ngr; k++) vides += k != t && g_gr[k].bloc && g_gr[k].libres == GR_PAR_TR;
+            if (vides >= 2) { rendre = g_gr[t].bloc; g_gr[t].bloc = 0; g_gr_tr_rendus++; }
+        }
+        break;
+    }
+    pthread_mutex_unlock(&g_gr_mu);
+    if (rendre) sc2_free(rendre);
+}
+void sc2_virt_mem(char *o, size_t n)              /* lignes [MEM] (sc2_runtime.c) */
+{
+    uint32_t tr = 0, libres = 0;
+    int v = 0;                                    /* verrou ESSAYÉ : sc2_stop peut venir de gr_prendre (arène épuisée) */
+    for (int k = 0; k < 100 && !(v = !pthread_mutex_trylock(&g_gr_mu)); k++) usleep(1000);
+    for (int t = 0; t < g_ngr; t++) if (g_gr[t].bloc) { tr++; libres += g_gr[t].libres; }
+    snprintf(o, n, "VirtualAlloc en granules de 64 Ko : %u tronçon(s) de 16 Mo, %u granules pris, %u libres ; %llu régions "
+             "servies, %llu rendues ; tronçons pris %llu, rendus %llu", tr, tr * GR_PAR_TR - libres, libres,
+             (unsigned long long)g_gr_servis, (unsigned long long)g_gr_rendus, (unsigned long long)g_gr_tr_pris,
+             (unsigned long long)g_gr_tr_rendus);
+    if (v) pthread_mutex_unlock(&g_gr_mu);
+}
 static uint32_t h_VirtualAlloc(CPU *c, const uint32_t *a)
 {
     (void)c;
     if (A(0)) return A(0);                        /* commit dans une réserve déjà servie */
-    uint32_t p = sc2_alloc(A(1) + 0xFFFFu);
-    uint32_t r = (p + 0xFFFFu) & ~0xFFFFu;
+    uint32_t r = gr_prendre(A(1)), p = r ? 1u : 0u;   /* V5.1 : granules (bloc = 1) */
+    if (!r) { p = sc2_alloc_de(A(1) + 0xFFFFu, SC2_MO_VIRT); r = (p + 0xFFFFu) & ~0xFFFFu; }
     if (sc2_arene_recycle()) {
         pthread_mutex_lock(&g_virt_mu);
         for (uint32_t k = (r >> 16) % NVIRT, n = 0; n < NVIRT; k = (k + 1) % NVIRT, n++)
@@ -783,11 +872,11 @@ static uint32_t h_VirtualFree(CPU *c, const uint32_t *a)   /* (adresse, taille, 
 {
     (void)c;
     if (!sc2_arene_recycle() || !(A(2) & 0x8000u) || !A(0)) return 1;
-    uint32_t bloc = 0;
+    uint32_t bloc = 0, taille = 0;
     pthread_mutex_lock(&g_virt_mu);
     for (uint32_t k = (A(0) >> 16) % NVIRT, n = 0; n < NVIRT && g_virt[k].va; k = (k + 1) % NVIRT, n++)
         if (g_virt[k].va == A(0)) {
-            bloc = g_virt[k].bloc;
+            bloc = g_virt[k].bloc; taille = g_virt[k].n;
             /* retrait avec recompactage de la grappe (adressage ouvert linéaire) */
             uint32_t i = k;
             g_virt[i].va = 0;
@@ -799,7 +888,8 @@ static uint32_t h_VirtualFree(CPU *c, const uint32_t *a)   /* (adresse, taille, 
         }
     if (bloc) g_virt_lib++;
     pthread_mutex_unlock(&g_virt_mu);
-    if (bloc) sc2_free(bloc);
+    if (bloc == 1u) gr_rendre(A(0), taille);     /* V5.1 : région en granules */
+    else if (bloc) sc2_free(bloc);
     return 1;
 }
 static uint32_t h_VirtualQuery(CPU *c, const uint32_t *a)  /* (addr, MEMORY_BASIC_INFORMATION*, len) */
@@ -897,7 +987,9 @@ static uint32_t h_OpenEventW(CPU *c, const uint32_t *a)   { (void)c; return H(Op
 static uint32_t h_OpenEventA(CPU *c, const uint32_t *a)   { (void)c; return H(OpenEventA(A(0), (BOOL)A(1), STR(A(2)))); }
 static uint32_t h_SetEvent(CPU *c, const uint32_t *a)     { (void)c; return (uint32_t)SetEvent(HH(A(0))); }
 static uint32_t h_ResetEvent(CPU *c, const uint32_t *a)   { (void)c; return (uint32_t)ResetEvent(HH(A(0))); }
-static uint32_t h_WaitForSingleObject(CPU *c, const uint32_t *a) { (void)c; return WaitForSingleObject(HH(A(0)), A(1)); }
+static uint32_t h_WaitForSingleObject(CPU *c, const uint32_t *a)
+{ (void)c; uint64_t t0 = &sc2_att_debut ? sc2_att_debut() : 0; uint32_t r = WaitForSingleObject(HH(A(0)), A(1));
+  if (t0) sc2_att_fin(ATT_WAIT, A(1), t0, rd32(c->esp)); return r; }
 static uint32_t h_CloseHandle(CPU *c, const uint32_t *a);
 /* ---- Passe 7h : le LANCEUR simulé (chemin « Tester le document » de l'éditeur), SC2_RUN_SANS_BNET=1 ----
  * SC2.exe ne lit pas l'option « run » : c'est le lanceur (StarCraft II.exe, ou l'éditeur) qui dit au jeu
@@ -909,7 +1001,8 @@ static uint32_t h_CloseHandle(CPU *c, const uint32_t *a);
  *   un descripteur de lancement (types 1/2/3) depuis le chemin struct+0x2C ; struct+0x130 = nombre de fichiers
  *   supplémentaires (struct+0x134, 0x104 octets chacun).
  * Le lanceur simulé écrit l'état 4 et la structure (valeurs par défaut du handshake + mode SC2_RUN_MODE, défaut 2
- * + chemin du « -run » de SC2_ARGS + « -testmod » en fichiers supplémentaires). Aucun processus, aucun réseau. */
+ * + carte (« -run » de SC2_ARGS, sinon SC2_RUN_CARTE, sinon la carte d'histoire par défaut TStory01, le bar ;
+ * SC2_RUN_CARTE=0 = lanceur inactif) + « -testmod » en fichiers supplémentaires). Aucun processus, aucun réseau. */
 static int run_lanceur_actif(void)
 {
     const char *e = getenv("SC2_RUN_SANS_BNET");
@@ -924,9 +1017,44 @@ static void run_lanceur_preparer(HANDLE h)
         if (!strcasecmp(args[i], "-run")) carte = args[++i];
         else if (!strcasecmp(args[i], "-testmod") && nm < 8) mods[nm++] = args[++i];
     }
-    if (!carte) { sc2_log("[RUN] SC2_RUN_SANS_BNET=1 mais pas de « -run <carte> » dans SC2_ARGS : lanceur inactif"); return; }
+    /* V4.10 : escarmouche (SC2_ESCARMOUCHE, sc2_escarmouche.c) — la carte préparée au démarrage prend la place de la
+     * carte par défaut (TStory01 ou SC2_RUN_CARTE), en mode 2 ; un « -run » explicite l'emporte. Sans elle : NULL. */
+    const char *esc = sc2_escarmouche_carte();
+    if (esc && carte) sc2_log("[ESCARMOUCHE] « -run %s » de SC2_ARGS l'emporte : carte d'escarmouche ignorée", carte);
+    else if (esc) carte = esc;
+    if (!carte) {                                          /* pas de « -run » : défaut TStory01 ou SC2_RUN_CARTE */
+        const char *ec = getenv("SC2_RUN_CARTE");
+        if (ec && !strcmp(ec, "0")) {
+            sc2_log("[RUN] SC2_RUN_SANS_BNET=1 mais pas de « -run <carte> » dans SC2_ARGS : lanceur inactif");
+            return;                                               /* SC2_RUN_CARTE=0 : ancien comportement exact */
+        }
+        carte = (ec && *ec) ? ec : "Maps/Campaign/TStory01.SC2Map";
+        if (ec && *ec) sc2_log("[RUN] pas de « -run » dans SC2_ARGS : carte « %s » (SC2_RUN_CARTE)", carte);
+        else sc2_log("[RUN] pas de « -run » dans SC2_ARGS : carte d'histoire par défaut « %s »", carte);
+    }
     const char *em = getenv("SC2_RUN_MODE");
     uint32_t mode = em ? (uint32_t)strtoul(em, NULL, 0) : 2;
+    if (esc && carte == esc && mode != 2) { sc2_log("[ESCARMOUCHE] SC2_RUN_MODE=%u ignoré : mode 2 (carte)", mode); mode = 2; }
+    /* L3 (24/10) : SC2_SAUVEGARDE=<chemin> — démarrer DIRECTEMENT sur une sauvegarde (bouton « Charger une partie »).
+     * Mode 4 de la structure de lancement : sc2_init_LauncherCheckEtJeu (0x008080F0, cas 4 en 0x00808267) en fait un
+     * descripteur de type 3 (sauvegarde), chemin converti par L_008027F0 puis passé à L_00804D70 ; le Load de la partie
+     * suit le chemin de L_00B18DC0 (ouverture de l'archive par L_0133F7C0). Chemin relatif au dossier
+     * « Documents\StarCraft II » du jeu (« Saves\Campaign\The Outlaws.SC2Save », « / » accepté), ou chemin Windows
+     * complet (« C:\… ») ; le runtime écrit toujours le chemin Windows complet. L'emporte sur « -run », SC2_RUN_CARTE,
+     * SC2_RUN_MODE et l'escarmouche. Absente ou vide : rien ne change. */
+    static char sauve[0x104];
+    const char *es = getenv("SC2_SAUVEGARDE");
+    if (es && *es) {
+        size_t k = 0;
+        if (!(((es[0] | 32) >= 'a' && (es[0] | 32) <= 'z') && es[1] == ':'))
+            k = (size_t)snprintf(sauve, sizeof sauve, "C:\\Users\\sc2\\Documents\\StarCraft II\\");
+        for (const char *q = es + (es[0] == '/' || es[0] == '\\'); *q && k + 1 < sizeof sauve; q++)
+            sauve[k++] = *q == '/' ? '\\' : *q;
+        sauve[k] = 0;
+        sc2_log("[RUN] SC2_SAUVEGARDE : démarrage sur la sauvegarde « %s » (mode 4, descripteur de type 3) au lieu de "
+                "« %s » (mode %u)", sauve, carte, mode);
+        carte = sauve; mode = 4;
+    }
     uint8_t *v = (uint8_t *)MapViewOfFile(h, 2 /* FILE_MAP_WRITE */, 0, 0, 0x10000);
     if (!v) { sc2_log("[RUN] vue hôte de « StarCraft II IPC Mem » impossible"); return; }
     uint8_t *st = v + 0x30;                                       /* structure de lancement */
@@ -1029,7 +1157,7 @@ static uint32_t h_MapViewOfFile(CPU *c, const uint32_t *a)
         s = libre;
         g_sec_arene[s].hote = base;
         g_sec_arene[s].taille = (uint32_t)taille;
-        g_sec_arene[s].va = sc2_alloc((uint32_t)taille);     /* arène : zéro-initialisée */
+        g_sec_arene[s].va = sc2_alloc_de((uint32_t)taille, SC2_MO_SECTION);   /* arène : zéro-initialisée */
         memcpy(GPTR(g_sec_arene[s].va), base, taille);       /* + contenu de la section */
     }
     g_sec_arene[s].vues++;
@@ -1131,6 +1259,27 @@ static const char *install(void)
     return g_install;
 }
 static uint64_t g_fs_ok, g_fs_absent, g_fs_enum;   /* bilan [FS] */
+/* L3 (24/10) : carte de campagne demandée sur disque par la couche fichiers de Storm (appelant 0x00EE0000-0x00F10000 :
+ * GetFileAttributesW ← 0x00EFC456, CreateFileW ← 0x00EFD653…) sous « C:\StarCraft II\Maps\…\X.SC2Map » alors
+ * qu'elle n'existe que comme dossier d'une archive Campaigns\*.SC2Campaign\*.SC2Maps : servie depuis une archive
+ * synthétique (sc2_mpq_carte_campagne, rapport L3 § 4-5). Le contrôle « fichier présent ? » du jeu lui-même
+ * (L_00995470, ← 0x009954E9) n'est PAS détourné : le lancement normal, qui ouvre la carte avec son archive parente,
+ * ne voit aucun changement. SC2_CARTES_CAMPAGNE=0 : contournement coupé. */
+static void carte_campagne(char *o, size_t cap, size_t r_install)
+{
+    static int actif = -1;
+    if (actif < 0) { const char *e = getenv("SC2_CARTES_CAMPAGNE"); actif = !(e && *e == '0'); }
+    if (!actif || !r_install || sc2_appel_ret < 0x00EE0000u || sc2_appel_ret >= 0x00F10000u) return;
+    const char *rel = o + r_install;
+    size_t l = strlen(rel);
+    if (strncasecmp(rel, "/Maps/", 6) || l < 8 || strcasecmp(rel + l - 7, ".SC2Map")) return;
+    struct stat st;
+    if (!stat(o, &st)) return;                                   /* la carte existe sur disque : rien ne change */
+    char cache[1024], rc[512], s[1024];
+    snprintf(cache, sizeof cache, "%s/cartes-campagne", root());
+    snprintf(rc, sizeof rc, "%s", rel);
+    if (sc2_mpq_carte_campagne(install(), rc, cache, s, sizeof s, sc2_appel_ret)) snprintf(o, cap, "%s", s);
+}
 /* Chemin Windows (UTF-8) → chemin hôte sous la racine (relatif : sous le cwd invité). */
 static void hpath(const char *w, char *o, size_t cap)
 {
@@ -1141,16 +1290,17 @@ static void hpath(const char *w, char *o, size_t cap)
         chemin_absolu(p, abs_, sizeof abs_); p = abs_;
     }
     if (((p[0] | 32) >= 'a' && (p[0] | 32) <= 'z') && p[1] == ':') p += 2;
-    size_t n, r;
+    size_t n, r, r_inst = 0;
     if (!strncasecmp(p + 1, "StarCraft II", 12) && (p[0] == '\\' || p[0] == '/')
         && (!p[13] || p[13] == '\\' || p[13] == '/')) {
-        n = r = (size_t)snprintf(o, cap, "%s", install());
+        n = r = r_inst = (size_t)snprintf(o, cap, "%s", install());
         p += 13;
     } else
         n = r = (size_t)snprintf(o, cap, "%s/", root());
     for (; *p && n + 1 < cap; p++) o[n++] = (*p == '\\') ? '/' : *p;
     o[n] = 0;
     resoudre_casse(o, r);
+    carte_campagne(o, cap, r_inst);
 }
 static void hpathw(uint32_t w, char *o, size_t cap) { char u[1024]; w2u(w, u, sizeof u); hpath(u, o, cap); }
 static void mkdirs(const char *path)
@@ -1158,15 +1308,29 @@ static void mkdirs(const char *path)
     char t[1024]; snprintf(t, sizeof t, "%s", path);
     for (char *q = t + 1; *q; q++) if (*q == '/') { *q = 0; mkdir(t, 0755); *q = '/'; }
 }
+/* 24/10 (chantier du SIGBUS de TRaynor01) : la case était prise par « if (!g_fd[i]) g_fd[i] = fd + 1 », sans verrou, alors
+ * que FindFirstFile et fopen ont le leur : deux CreateFile simultanés (fils différents) pouvaient lire la même case libre
+ * et rendre le MÊME handle invité pour deux fichiers (le second fd écrase le premier, qui fuit ; le premier CloseHandle
+ * ferme le fichier de l'autre fil). Prise par compare-and-swap ; une course évitée est comptée (ligne [FS], bilan).
+ * Défensif : pas la cause du SIGBUS (aucune collision avec la fenêtre de l'ancien code élargie à 4 ms). */
+static uint64_t g_fh_courses;
 static uint32_t fh_new(int fd)
 {
-    for (int i = 0; i < 256; i++) if (!g_fd[i]) { g_fd[i] = fd + 1; return FH_BASE + 4u * (uint32_t)i; }
+    for (int i = 0; i < 256; i++) {
+        int libre = 0;
+        if (__atomic_load_n(&g_fd[i], __ATOMIC_ACQUIRE)) continue;
+        if (__atomic_compare_exchange_n(&g_fd[i], &libre, fd + 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+            return FH_BASE + 4u * (uint32_t)i;
+        uint64_t k = __atomic_add_fetch(&g_fh_courses, 1, __ATOMIC_RELAXED);   /* prise entre la lecture et le CAS */
+        if (k <= 8) sc2_log("[FS] CreateFile : case de handle n°%d prise par un autre fil au même instant — course évitée (n°%llu)",
+                            i, (unsigned long long)k);
+    }
     close(fd); return 0xFFFFFFFFu;
 }
 static int fd_of(uint32_t h)
 {
     if (h < FH_BASE || h >= FH_BASE + 4 * 256) return -1;
-    return g_fd[(h - FH_BASE) / 4] - 1;
+    return __atomic_load_n(&g_fd[(h - FH_BASE) / 4], __ATOMIC_ACQUIRE) - 1;
 }
 static uint32_t file_attr(const char *hp)
 {
@@ -1220,11 +1384,20 @@ static uint32_t h_GetFileAttributesExW(CPU *c, const uint32_t *a)
     wr32(A(2) + 28, (uint32_t)((uint64_t)st.st_size >> 32)); wr32(A(2) + 32, (uint32_t)st.st_size);
     return 1;
 }
+/* L3 (24/10) : le séparateur final est retiré AVANT mkdirs. mkdirs crée chaque composant suivi d'un « / » : avec
+ * « …\Liberation Day.SC2Save\ » (chemin du dossier de préparation de la sauvegarde, L_00995F10), il créait le dossier
+ * visé lui-même, puis mkdir échouait en EEXIST → ERROR_ALREADY_EXISTS (183) ; L_00995F10 rend ce code, l'ouverture
+ * de l'archive (L_0133F7C0) échoue et la sauvegarde aussi (« Save Failed », archive vide de 1 181 o). Windows accepte
+ * le séparateur final. Les parents absents restent créés (tolérance du runtime, au lieu d'ERROR_PATH_NOT_FOUND). */
 static uint32_t h_CreateDirectoryW(CPU *c, const uint32_t *a)
 {
-    (void)c; char p[1024]; hpathw(A(0), p, sizeof p); mkdirs(p);
-    if (mkdir(p, 0755) == 0) return 1;
-    SetLastError(errno == EEXIST ? 183 : 3); return 0;
+    (void)c; char u[1024], p[1024]; w2u(A(0), u, sizeof u); hpath(u, p, sizeof p);
+    for (size_t l = strlen(p); l > 1 && p[l - 1] == '/'; l--) p[l - 1] = 0;
+    mkdirs(p);
+    int ok = mkdir(p, 0755) == 0, e = errno;
+    sc2_trace("[FS] CreateDirectoryW(\"%s\") → %s", u, ok ? "créé" : e == EEXIST ? "existe déjà (183)" : "échec (3)");
+    if (ok) return 1;
+    SetLastError(e == EEXIST ? 183 : 3); return 0;
 }
 static uint32_t h_RemoveDirectoryW(CPU *c, const uint32_t *a) { (void)c; char p[1024]; hpathw(A(0), p, sizeof p); return rmdir(p) == 0; }
 static uint32_t h_DeleteFileW(CPU *c, const uint32_t *a) { (void)c; char p[1024]; hpathw(A(0), p, sizeof p); if (unlink(p)) { SetLastError(2); return 0; } return 1; }
@@ -1233,6 +1406,39 @@ static uint32_t h_MoveFileW(CPU *c, const uint32_t *a)
     (void)c; char p[1024], q[1024]; hpathw(A(0), p, sizeof p); hpathw(A(1), q, sizeof q);
     return rename(p, q) == 0;
 }
+/* L3 (24/10) : CopyFileW(source, destination, bFailIfExists). Appelé après chaque sauvegarde réussie par
+ * L_00995710 ← L_00B23F00 ← L_00B25130 (copie de l'archive de sauvegarde, écrasement permis) : absent, le runtime
+ * s'arrêtait (code 6, « NON IMPLÉMENTÉ »). Copie hôte octet à octet ; source absente → ERROR_FILE_NOT_FOUND (2),
+ * destination présente avec bFailIfExists → ERROR_FILE_EXISTS (80), même fichier → ERROR_SHARING_VIOLATION (32) comme
+ * Windows (la source est ouverte), autre échec → ERROR_ACCESS_DENIED (5). Parents de la destination créés, comme
+ * CreateFileW du runtime. */
+static uint32_t h_CopyFileW(CPU *c, const uint32_t *a)
+{
+    (void)c; char us[1024], ud[1024], p[1024], q[1024];
+    w2u(A(0), us, sizeof us); w2u(A(1), ud, sizeof ud); hpath(us, p, sizeof p); hpath(ud, q, sizeof q);
+    struct stat ss, sd; uint32_t err = 0; int in = -1, out = -1;
+    if (stat(p, &ss) || !S_ISREG(ss.st_mode)) err = 2;
+    else if (!stat(q, &sd) && sd.st_dev == ss.st_dev && sd.st_ino == ss.st_ino) err = 32;
+    else if ((in = open(p, O_RDONLY)) < 0) err = 5;
+    else {
+        mkdirs(q);
+        out = open(q, O_WRONLY | O_CREAT | (A(2) ? O_EXCL : O_TRUNC), 0644);
+        if (out < 0) err = errno == EEXIST ? 80 : 5;
+        else {
+            char b[65536]; ssize_t n;
+            while ((n = read(in, b, sizeof b)) > 0)
+                if (write(out, b, (size_t)n) != n) { err = 5; break; }
+            if (n < 0) err = 5;
+        }
+    }
+    if (in >= 0) close(in);
+    if (out >= 0) close(out);
+    sc2_trace("[FS] CopyFileW(\"%s\" → \"%s\", échec si présent %u) → %s (%u)", us, ud, A(2), err ? "échec" : "copié", err);
+    if (err) { SetLastError(err); return 0; }
+    return 1;
+}
+/* V1.1 (22/10) : ouverture réussie signalée au banc d'entrées (sc2_entrees_banc.c, QUAND:FICHIER) — référence faible */
+void sc2_banc_fichier(const char *win, int ecriture) __attribute__((weak));
 static uint32_t h_CreateFileW(CPU *c, const uint32_t *a)   /* (nom, accès, partage, sa, disposition, attrs, modèle) */
 {
     (void)c; char u[1024], p[1024]; w2u(A(0), u, sizeof u);
@@ -1249,6 +1455,7 @@ static uint32_t h_CreateFileW(CPU *c, const uint32_t *a)   /* (nom, accès, part
     SetLastError(0);
     uint32_t h = fh_new(fd);
     if (h != 0xFFFFFFFFu && !(fl & (O_WRONLY | O_RDWR))) sc2_mpq_ouvert(h, p, u);   /* [MPQ] si archive */
+    if (sc2_banc_fichier) sc2_banc_fichier(u, (fl & (O_WRONLY | O_RDWR)) != 0);       /* V1.1 : QUAND:FICHIER du banc */
     return h;
 }
 /* OVERLAPPED (passe 4) : le Storm de SC2 lit ses archives MPQ par ReadFile
@@ -1263,18 +1470,25 @@ static void ov_fini(uint32_t ov, ssize_t n)
 }
 static uint32_t h_ReadFile(CPU *c, const uint32_t *a)
 {
-    (void)c; int fd = fd_of(A(0)); if (fd < 0) { SetLastError(6); return 0; }
+    int fd = fd_of(A(0));
+    if (fd < 0) {                                      /* 24/10 : handle de fichier fermé ou inconnu, journalisé */
+        static uint64_t n_inv;
+        uint64_t k = __atomic_add_fetch(&n_inv, 1, __ATOMIC_RELAXED);
+        if (k <= 8) sc2_log("[FS] ReadFile(handle 0x%X, %u o) depuis 0x%08X : handle invalide (fermé ?) → ERROR_INVALID_HANDLE (n°%llu)",
+                            A(0), A(2), rd32(c->esp), (unsigned long long)k);
+        SetLastError(6); return 0;
+    }
     ssize_t n;
     if (A(4)) {
         uint32_t ov = A(4);
         off_t off = (off_t)(rd32(ov + 8) | ((uint64_t)rd32(ov + 12) << 32));
         n = pread(fd, GPTR(A(1)), A(2), off);
+        if (n > 0) sc2_mpq_lu(A(0), (uint64_t)off, GPTR(A(1)), (uint32_t)n);   /* 24/10 : alias .wav servis AVANT le signal */
         ov_fini(ov, n);
-        if (n > 0) sc2_mpq_lu(A(0), (uint64_t)off, (uint32_t)n);
     } else {
         off_t off = lseek(fd, 0, SEEK_CUR);
         n = read(fd, GPTR(A(1)), A(2));
-        if (n > 0 && off >= 0) sc2_mpq_lu(A(0), (uint64_t)off, (uint32_t)n);
+        if (n > 0 && off >= 0) sc2_mpq_lu(A(0), (uint64_t)off, GPTR(A(1)), (uint32_t)n);
     }
     if (A(3)) wr32(A(3), n > 0 ? (uint32_t)n : 0);
     return n >= 0;
@@ -1303,6 +1517,37 @@ static uint32_t h_GetFileSizeEx(CPU *c, const uint32_t *a)
     (void)c; struct stat st; int fd = fd_of(A(0));
     if (fd < 0 || fstat(fd, &st)) return 0;
     wr32(A(1), (uint32_t)st.st_size); wr32(A(1) + 4, (uint32_t)((uint64_t)st.st_size >> 32));
+    return 1;
+}
+/* L3 (24/10) : GetFileInformationByHandle(h, BY_HANDLE_FILE_INFORMATION *) — 52 o : attributs, 3 FILETIME (création
+ * +4, accès +12, écriture +20), n° de volume +28, taille haute +32 / basse +36, liens +40, index haut +44 / bas +48.
+ * Appelé par L_00995540 (← L_00B2A3F0) quand le dialogue Load liste les sauvegardes : il y lit taille et date
+ * d'écriture. Absent, le runtime s'arrêtait (code 6) au clic sur Load. */
+static void ecrire_filetime(uint32_t dst, struct timespec t)
+{
+    uint64_t ft = ((uint64_t)t.tv_sec + 11644473600ull) * 10000000ull + (uint64_t)t.tv_nsec / 100u;
+    wr32(dst, (uint32_t)ft); wr32(dst + 4, (uint32_t)(ft >> 32));
+}
+static uint32_t h_GetFileInformationByHandle(CPU *c, const uint32_t *a)
+{
+    (void)c; struct stat st; int fd = fd_of(A(0));
+    if (fd < 0 || fstat(fd, &st)) { SetLastError(6); return 0; }
+    uint32_t d = A(1);
+    memset(GPTR(d), 0, 52);
+    wr32(d, S_ISDIR(st.st_mode) ? 0x10u : 0x80u);
+#ifdef __APPLE__                                     /* macOS : st_*timespec ; POSIX 2008 (Android) : st_*tim */
+    ecrire_filetime(d + 4, st.st_birthtimespec);
+    ecrire_filetime(d + 12, st.st_atimespec);
+    ecrire_filetime(d + 20, st.st_mtimespec);
+#else
+    ecrire_filetime(d + 4, st.st_ctim);                  /* pas de date de création : changement d'état */
+    ecrire_filetime(d + 12, st.st_atim);
+    ecrire_filetime(d + 20, st.st_mtim);
+#endif
+    wr32(d + 28, (uint32_t)st.st_dev);
+    wr32(d + 32, (uint32_t)((uint64_t)st.st_size >> 32)); wr32(d + 36, (uint32_t)st.st_size);
+    wr32(d + 40, (uint32_t)st.st_nlink);
+    wr32(d + 44, (uint32_t)((uint64_t)st.st_ino >> 32)); wr32(d + 48, (uint32_t)st.st_ino);
     return 1;
 }
 static uint32_t h_SetFilePointer(CPU *c, const uint32_t *a)
@@ -1619,7 +1864,7 @@ static uint32_t h_SHGetFolderPathW(CPU *c, const uint32_t *a)   /* (hwnd, csidl,
     sc2_trace("[IAT]   SHGetFolderPathW(CSIDL 0x%X) → %s", A(1), p);
     return 0;
 }
-static uint32_t h_GetComputerNameW(CPU *c, const uint32_t *a) { (void)c; uint32_t n = put_w(A(0), rd32(A(1)), "DEVBOX"); wr32(A(1), n); return 1; }
+static uint32_t h_GetComputerNameW(CPU *c, const uint32_t *a) { (void)c; uint32_t n = put_w(A(0), rd32(A(1)), "SC2HOST"); wr32(A(1), n); return 1; }
 static uint32_t h_GetUserNameW(CPU *c, const uint32_t *a)     { (void)c; uint32_t n = put_w(A(0), rd32(A(1)), "sc2"); wr32(A(1), n + 1); return 1; }
 static uint32_t h_GetDiskFreeSpaceExW(CPU *c, const uint32_t *a)
 {
@@ -1787,7 +2032,14 @@ static pthread_mutex_t *cs_of(uint32_t va)
     return &n->mu;
 }
 static uint32_t h_InitCS(CPU *c, const uint32_t *a)   { (void)c; memset(GPTR(A(0)), 0, 24); cs_of(A(0)); return 1; }
-static uint32_t h_EnterCS(CPU *c, const uint32_t *a)  { (void)c; pthread_mutex_lock(cs_of(A(0))); return 0; }
+static uint32_t h_EnterCS(CPU *c, const uint32_t *a)  /* SC2_ATTENTES : seules les prises CONTESTÉES sont comptées */
+{
+    (void)c; pthread_mutex_t *mu = cs_of(A(0));
+    if (pthread_mutex_trylock(mu) == 0) return 0;
+    { uint64_t t0 = &sc2_att_debut ? sc2_att_debut() : 0;
+      pthread_mutex_lock(mu); if (t0) sc2_att_fin(ATT_CS, 0, t0, rd32(c->esp)); }
+    return 0;
+}
 static uint32_t h_LeaveCS(CPU *c, const uint32_t *a)  { (void)c; pthread_mutex_unlock(cs_of(A(0))); return 0; }
 static uint32_t h_TryEnterCS(CPU *c, const uint32_t *a) { (void)c; return pthread_mutex_trylock(cs_of(A(0))) == 0; }
 
@@ -1806,10 +2058,12 @@ static uint32_t h_CloseHandle(CPU *c, const uint32_t *a)
 {
     (void)c;
     int fd = fd_of(A(0));
-    if (fd >= 0) { sc2_mpq_ferme(A(0)); close(fd); g_fd[(A(0) - FH_BASE) / 4] = 0; return 1; }
+    if (fd >= 0) { sc2_mpq_ferme(A(0)); close(fd); __atomic_store_n(&g_fd[(A(0) - FH_BASE) / 4], 0, __ATOMIC_RELEASE); return 1; }
     return A(0) >= 0xFFFFFFFEu ? 1 : (uint32_t)CloseHandle(HH(A(0)));
 }
-static uint32_t h_WaitForSingleObjectEx(CPU *c, const uint32_t *a) { (void)c; return WaitForSingleObject(HH(A(0)), A(1)); }
+static uint32_t h_WaitForSingleObjectEx(CPU *c, const uint32_t *a)
+{ (void)c; uint64_t t0 = &sc2_att_debut ? sc2_att_debut() : 0; uint32_t r = WaitForSingleObject(HH(A(0)), A(1));
+  if (t0) sc2_att_fin(ATT_WAIT, A(1), t0, rd32(c->esp)); return r; }
 
 
 /* ========================================================================== */
@@ -1890,7 +2144,7 @@ static uint32_t h_WSAIoctl(CPU *c, const uint32_t *a)
 }
 static uint32_t h_htonl(CPU *c, const uint32_t *a) { (void)c; return __builtin_bswap32(A(0)); }
 static uint32_t h_htons(CPU *c, const uint32_t *a) { (void)c; return __builtin_bswap16((uint16_t)A(0)); }
-static uint32_t h_gethostname(CPU *c, const uint32_t *a) { (void)c; snprintf((char *)GPTR(A(0)), A(1), "devbox"); return 0; }
+static uint32_t h_gethostname(CPU *c, const uint32_t *a) { (void)c; snprintf((char *)GPTR(A(0)), A(1), "sc2host"); return 0; }
 static uint32_t h_inet_addr(CPU *c, const uint32_t *a)
 {
     (void)c; unsigned b[4];
@@ -2000,9 +2254,10 @@ static const imp_def g_defs[] = {
     { "GetFileAttributesW", 1, STD, h_GetFileAttributesW }, { "GetFileAttributesA", 1, STD, h_GetFileAttributesA },
     { "GetFileAttributesExW", 3, STD, h_GetFileAttributesExW }, { "CreateDirectoryW", 2, STD, h_CreateDirectoryW },
     { "RemoveDirectoryW", 1, STD, h_RemoveDirectoryW }, { "DeleteFileW", 1, STD, h_DeleteFileW },
-    { "MoveFileW", 2, STD, h_MoveFileW }, { "MoveFileExW", 3, STD, h_MoveFileW },
+    { "MoveFileW", 2, STD, h_MoveFileW }, { "MoveFileExW", 3, STD, h_MoveFileW }, { "CopyFileW", 3, STD, h_CopyFileW },
     { "CreateFileW", 7, STD, h_CreateFileW }, { "ReadFile", 5, STD, h_ReadFile }, { "WriteFile", 5, STD, h_WriteFile },
     { "GetFileSize", 2, STD, h_GetFileSize }, { "GetFileSizeEx", 2, STD, h_GetFileSizeEx },
+    { "GetFileInformationByHandle", 2, STD, h_GetFileInformationByHandle },
     { "SetFilePointer", 4, STD, h_SetFilePointer }, { "SetFilePointerEx", 5, STD, h_SetFilePointerEx },
     { "SetEndOfFile", 1, STD, h_SetEndOfFile }, { "FlushFileBuffers", 1, STD, h_ret1 },
     { "FindFirstFileW", 2, STD, h_FindFirstFileW }, { "FindFirstFileA", 2, STD, h_FindFirstFileA },
@@ -2115,6 +2370,18 @@ static imp_ent g_extra[] = {
     { 0, "icuuc44.dll", "icu:Locale::`scalar deleting destructor'", NULL, 0 },
     { 0, "icuuc44.dll", "icu:Locale::getDynamicClassID", NULL, 0 },
     { 0, "icuuc44.dll", "icu:Locale::clone", NULL, 0 },
+    /* L5 (24/10) : vtable du NumberFormat factice (sc2_iat_p4.c) ; la dernière n'a pas d'implémentation : son appel
+     * arrête le run en nommant l'appelant */
+    { 0, "icuin44.dll", "icu:NumberFormat::`scalar deleting destructor'", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::getDynamicClassID", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::operator==", NULL, 0 }, { 0, "icuin44.dll", "icu:NumberFormat::clone", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::setParseIntegerOnly", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::setGroupingUsed", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::setMaximumIntegerDigits", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::setMinimumIntegerDigits", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::setMaximumFractionDigits", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::setMinimumFractionDigits", NULL, 0 },
+    { 0, "icuin44.dll", "icu:NumberFormat::(méthode non fournie)", NULL, 0 },
 };
 #define N_EXTRA ((int)(sizeof g_extra / sizeof g_extra[0]))
 /* VA du stub d'un import implémenté ou d'une entrée hors IAT (passe 4). */
@@ -2136,6 +2403,64 @@ uint32_t sc2_bnet_ordinal(uint32_t ord)
     return SC2_IAT_STUB_BASE + 16u * (uint32_t)(N_IMP + (int)ord - 1);
 }
 
+/* L3 (24/10, diagnostic de la sauvegarde) : SC2_IAT_PILE=<import>[,<import>…] journalise CHAQUE appel de ces imports
+ * (arguments, résultat, GetLastError) puis la pile fantôme, à partir de la frame SC2_IAT_PILE_DES (défaut 0), au plus
+ * SC2_IAT_PILE_MAX appels (défaut 64). Sans la variable : un test par appel d'import. */
+uint32_t sc2_frames_presentees(void) __attribute__((weak));
+/* L3 (24/10) : SC2_GUET=<adr>[>off][,…] (hex, 8 au plus) — guet de mots invités, relu à chaque appel d'import :
+ * « 01BF0EA0 » lit [0x01BF0EA0], « 01BF0EA0>240 » lit [[0x01BF0EA0] + 0x240]. Chaque changement est journalisé
+ * ([GUET], ancienne → nouvelle valeur, import courant) avec la pile fantôme, au plus SC2_GUET_MAX fois (défaut 40).
+ * La granularité est l'appel d'import : la pile est celle du premier import qui suit l'écriture. */
+static void guet(const char *nom, uint32_t ret)
+{
+    static int lu, n_g; static uint32_t base[8], off[8], val[8], vu[8], max = 40, n;
+    if (!lu) {
+        lu = 1; const char *e = getenv("SC2_GUET"), *m = getenv("SC2_GUET_MAX");
+        if (m) max = (uint32_t)strtoul(m, NULL, 10);
+        while (e && *e && n_g < 8) {
+            char *f; base[n_g] = (uint32_t)strtoul(e, &f, 16); if (f == e) break;
+            off[n_g] = 0xFFFFFFFFu; if (*f == '>') { e = f + 1; off[n_g] = (uint32_t)strtoul(e, &f, 16); }
+            n_g++; e = *f ? f + 1 : f;
+        }
+    }
+    for (int k = 0; k < n_g && n < max; k++) {
+        uint32_t v = rd32(base[k]);
+        if (off[k] != 0xFFFFFFFFu) v = (v >= 0x00010000u && v < 0xF0000000u) ? rd32(v + off[k]) : 0xDEADDEADu;
+        if (vu[k] && v == val[k]) continue;
+        char t[200]; snprintf(t, sizeof t, "[GUET] %08X%s%X : 0x%08X → 0x%08X (au retour de %s ← 0x%08X)", base[k],
+                              off[k] != 0xFFFFFFFFu ? ">" : "", off[k] != 0xFFFFFFFFu ? off[k] : 0u, val[k], v, nom, ret);
+        val[k] = v; vu[k] = 1; n++;
+        sc2_dump_ss(t);
+    }
+}
+static void iat_pile(const char *nom, const uint32_t *a, int argc, uint32_t r, uint32_t ret)
+{
+    guet(nom, ret);
+    static int lu, arme = 1; static const char *liste, *apres; static uint32_t des, max = 64, n;
+    if (!lu) { lu = 1; liste = getenv("SC2_IAT_PILE"); apres = getenv("SC2_IAT_PILE_APRES");
+               const char *d = getenv("SC2_IAT_PILE_DES"), *m = getenv("SC2_IAT_PILE_MAX");
+               if (d) des = (uint32_t)strtoul(d, NULL, 10);
+               if (m) max = (uint32_t)strtoul(m, NULL, 10);
+               if (apres && *apres) arme = 0; }
+    if (!liste || n >= max) return;
+    if (!arme) {   /* SC2_IAT_PILE_APRES=<sous-chaîne> : armé au 1er GetFileAttributesW/CreateFileW de ce chemin */
+        if (strcmp(nom, "GetFileAttributesW") && strcmp(nom, "CreateFileW")) return;
+        char u[1024]; w2u(a[0], u, sizeof u);
+        if (!strstr(u, apres)) return;
+        arme = 1;
+    }
+    if (des && (!sc2_frames_presentees || sc2_frames_presentees() < des)) return;
+    size_t l = strlen(nom); const char *p = liste;
+    for (;;) { p = strstr(p, nom); if (!p) return;
+               if ((p == liste || p[-1] == ',') && (p[l] == ',' || !p[l])) break; p += l; }
+    n++;
+    char args[96] = ""; size_t o = 0;
+    for (int k = 0; k < argc && k < 6; k++) o += (size_t)snprintf(args + o, sizeof args - o, "%s0x%X", k ? ", " : "", a[k]);
+    char t[160]; snprintf(t, sizeof t, "[IAT-PILE] %s(%s) → 0x%X, GetLastError %u, ← 0x%08X", nom, args, r,
+                          (unsigned)GetLastError(), ret);
+    sc2_dump_ss(t);
+}
+
 int sc2_iat_call(CPU *c, uint32_t va)
 {
     uint32_t i = (va - SC2_IAT_STUB_BASE) / 16u;
@@ -2154,7 +2479,15 @@ int sc2_iat_call(CPU *c, uint32_t va)
         sc2_trace("[IAT] %s!%s(%s)  ← 0x%08X%s", e->dll, e->nom, args, ret, e->n == 3 ? "  (suivants comptés)" : "");
     }
     uint32_t av = sc2_appel_ret; sc2_appel_ret = ret;   /* passe 10j : appelant invité de l'import (journal d'arène) */
-    uint32_t r = e->def->fn(c, a);
+    static int pile = -1;                                /* L3 : SC2_IAT_PILE, décidé une fois (chemin chaud) */
+    if (pile < 0) pile = getenv("SC2_IAT_PILE") != NULL || getenv("SC2_GUET") != NULL;
+    uint32_t r;
+    if (pile) {
+        uint32_t a0[6] = {0};                            /* arguments avant l'appel (l'appelée peut écrire la pile) */
+        for (int k = 0; k < e->def->argc && k < 6; k++) a0[k] = a[k];
+        r = e->def->fn(c, a);
+        iat_pile(e->nom, a0, e->def->argc, r, ret);
+    } else r = e->def->fn(c, a);
     sc2_appel_ret = av;
     c->eax = r;
     c->esp += 4u + (e->def->conv == STD ? 4u * (uint32_t)e->def->argc : 0u);
@@ -2174,6 +2507,8 @@ void sc2_iat_report(void)
     printf("[BILAN] [FS] %llu accès trouvés, %llu absents, %llu énumérations ; installation : %s\n",
            (unsigned long long)g_fs_ok, (unsigned long long)g_fs_absent, (unsigned long long)g_fs_enum,
            g_install[0] ? g_install : "(non consultée)");
+    printf("[BILAN] [FS] handles de fichiers : %llu course(s) évitée(s) entre CreateFile simultanés\n",
+           (unsigned long long)__atomic_load_n(&g_fh_courses, __ATOMIC_RELAXED));
     sc2_mpq_bilan();
     sc2_com_report();
 }
