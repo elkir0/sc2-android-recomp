@@ -1,0 +1,9 @@
+# inputs.txt — M8, critère 1 (v3-critique.md §3.4 ; conception A §2.4 L3-1) : WM_MOUSEMOVE aux coordonnées client
+# exactes, puis la même chose après TAILLE 1600 1000 (bandes noires : l'image 1280x720 est centrée dans la fenêtre,
+# l'échelle reste 2, sc2_geo_vers_jeu doit retrouver le même pixel client pour le point de vue correspondant).
+# Le « j 767 301 » attend la première géométrie (premier Present) ; TAILLE est en points, +60 Present laissent la
+# swapchain se recréer. QUITTER ferme par le chemin de Cmd+Q.
+@p +30 MOVE j 767 301
+TAILLE 1600 1000
+@p +60 MOVE j 767 301
+@p +30 QUITTER

@@ -1,0 +1,25 @@
+# chargement — l'écran « Press any key to continue » d'un chargement de carte attend une touche : Espace
+#   répété toutes les 5 s, de +20 s à +120 s après le déclenchement du segment QUAND:CARTE qui le porte.
+#   Sert au chargement de la mission comme au retour au bar. Sans effet une fois la carte chargée, le
+#   segment suivant annule le reste. 21 événements relatifs, jamais de point-virgule dans un commentaire.
++20:KEY:0x20
++25:KEY:0x20
++30:KEY:0x20
++35:KEY:0x20
++40:KEY:0x20
++45:KEY:0x20
++50:KEY:0x20
++55:KEY:0x20
++60:KEY:0x20
++65:KEY:0x20
++70:KEY:0x20
++75:KEY:0x20
++80:KEY:0x20
++85:KEY:0x20
++90:KEY:0x20
++95:KEY:0x20
++100:KEY:0x20
++105:KEY:0x20
++110:KEY:0x20
++115:KEY:0x20
++120:KEY:0x20

@@ -1,0 +1,64 @@
+# victoire.txt — M8, critère 5 (v3-critique.md §3.4 ; conception A §2.4 L3-6) : code de victoire tapé dans le chat
+# de TRaynor01 par les entrées Cocoa. Recette de scripts/entrees/traynor01-victoire-mac.txt (banc, 20/10) traduite
+# en grammaire SC2_MAC_EVENEMENTS : quatre clics « Close » sur le panneau d'aide (953, 588), puis Entrée, le code
+# « whatisbestinlife » (une touche TOUCHE par lettre : kVK ANSI, characters = la lettre), Entrée. La victoire écrit
+# …Victory.SC2Save dans le support ; « Continue » (998, 674) enchaîne. Lancement MI (notations §3.3) :
+# SC2_RUN_SANS_BNET=1 SC2_MANQUE_CONTINUE=1 SC2_SANS_VIDEOS=1 SC2_ARGS=-run Maps/Campaign/TRaynor01.SC2Map.
+# Exigé : ls $D/support/StarCraft\ II/Saves/*/*Victory.SC2Save non vide ; aucun WM_CHAR en double (les messages
+# KEYDOWN de la plateforme sont marqués fourni : i_TranslateMessage n'en re-synthétise aucun).
+# kVK : Entrée 0x24, w 0x0D, h 0x04, a 0x00, t 0x11, i 0x22, s 0x01, b 0x0B, e 0x0E, n 0x2D, l 0x25, f 0x03.
+ATTENDRE_LIGNE "[GLUE] écrans affichés 0x00 (était 0x10)" 400000
++7000 CLIC g j 953 588
++3000 CLIC g j 953 588
++3000 CLIC g j 953 588
++3000 CLIC g j 953 588
++3000 TOUCHE 0x24 "\r"
++300 TOUCHE 0x0D "w"
++300 TOUCHE 0x04 "h"
++300 TOUCHE 0x00 "a"
++300 TOUCHE 0x11 "t"
++300 TOUCHE 0x22 "i"
++300 TOUCHE 0x01 "s"
++300 TOUCHE 0x0B "b"
++300 TOUCHE 0x0E "e"
++300 TOUCHE 0x01 "s"
++300 TOUCHE 0x11 "t"
++300 TOUCHE 0x22 "i"
++300 TOUCHE 0x2D "n"
++300 TOUCHE 0x25 "l"
++300 TOUCHE 0x22 "i"
++300 TOUCHE 0x03 "f"
++300 TOUCHE 0x0E "e"
++600 TOUCHE 0x24 "\r"
+# victoire détectée par le module (sauvegarde écrite) : « Continue » jusqu'à la scène du bar, puis Cmd+Q
++8000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 CLIC g j 998 674
++5000 QUITTER

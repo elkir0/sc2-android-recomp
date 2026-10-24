@@ -1,0 +1,5 @@
+# bar.txt — M7, critère 1 (v3-critique.md §3.4) : lancement en fenêtre jusqu'au bar (carte TStory01 lue), 1500 Present
+# de plus (une trentaine de secondes, plusieurs lignes [FPS]), puis QUITTER (le chemin de Cmd+Q : applicationShouldTerminate:). Rejeu isolé.
+# Le motif évite « .SC2Map » (comptes des scripts de banc) : seules les lignes [MPQ] écrivent Campaign\TStory01.
+ATTENDRE_LIGNE "Campaign\\TStory01" 400000
+@p +1500 QUITTER

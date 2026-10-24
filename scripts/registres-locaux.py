@@ -65,17 +65,43 @@ littéral) ou un identifiant x87 déjà présent → repli x87 SEUL : la passe 1
 les formes x87 restent sur c (motif compté). Sans l'option, la sortie est identique octet
 pour octet.
 
+--sse (passe 10u) : dans chaque fonction transformée qui touche xmm0..xmm7, les 8 registres
+SSE vivent dans une variable locale `sse` (SC2_SSE_DECL, runtime/sc2_lifted.h) : chaque
+c->xmm[K] (K littéral 0..7, toutes formes — champ .f32/.u32/.u64…, registre entier,
+&c->xmm[K] des sse_load_ss/sse_load_sd, valeur passée à wrxm) devient sse->x[K], indices
+constants pour la scalarisation. Synchronisation aux MÊMES frontières que rl :
+SC2_SSE_VIDE(c, m) juste après SC2_RL_VIDE/SC2_RL_VIDEX (et SC2_X87_VIDE), SC2_SSE_CHARGE(c)
+juste après SC2_RL_CHARGE (et SC2_X87_CHARGE), masque 8 bits (xmm0..xmm7 = 0x01..0x80) par
+flot de données AVANT sur le même graphe (fusion = union, point fixe) ; est écriture toute
+affectation à c->xmm[K] ou à un de ses champs (=, ^=, ++…), et tout &c->xmm[K] passé à une
+aide (sur-approximation sûre : l'aide peut écrire à travers le pointeur) ; après une
+frontière (CHARGE), le masque repart de 0. Refus SSE SEUL (la passe 10s s'applique, les
+accès restent sur c, motif compté) : indice non littéral (c->xmm[expr], corps des
+for (int _i …) compris), c->xmm sans indice, adresse prise hors argument d'aide, écriture
+après une frontière, aide de cpu.h touchant xmm à travers c (relue depuis l'en-tête ;
+aucune dans cpu.h actuel), identifiant sse déjà présent. Sans l'option, la sortie est
+identique octet pour octet.
+
+--sse-seuil R (avec --sse, défaut 16) : la transformation n'est gardée que si la fonction
+n'aurait AUCUN SC2_SSE_CHARGE, ou si (accès c->xmm[K] réécrits) / (SC2_SSE_CHARGE) ≥ R :
+une fonction dont les valeurs xmm ne servent qu'une fois entre deux frontières paie le
+vidage + rechargement sans rien gagner (banc Fold : L_00C6CF10, 20 accès / 5
+rechargements, +8 % d'accès mémoire ; aucun gain global sans seuil). Sous le seuil → refus
+« sse : sous le seuil de rentabilité » (motif compté). 0 = tout transformer.
+
 --verifier : (a) le retrait de la passe (déballer les SC2_RL_VIDE/SC2_RL_VIDEX/
 SC2_RL_CHARGE, supprimer SC2_RL_DECL et le vidage final, rl->F → c->F, rl → c ; avec
---x87, aussi déballer/reconstituer les SC2_X87_*) doit
-redonner chaque fichier d'entrée octet pour octet ; (b) invariants : plus aucun
-c->F en cache ni d'aide en cache appelée avec c dans une fonction transformée,
-aucune aide hors cache ni frontière appelée avec rl, rl jamais passé ailleurs, x de
-SC2_RL_VIDEX fait de drapeaux disjoints de m ; avec --x87 : dans une fonction
-transformée côté x87 plus aucune forme x87 sur c, chaque SC2_RL_VIDE suivi de son
-SC2_X87_VIDE et chaque SC2_RL_CHARGE de son SC2_X87_CHARGE ; (c) les masques écrits (et
-les x de vivacité, avec la même analyse globale ; les masques x87 avec --x87) sont
-recalculés depuis l'entrée et comparés.
+--x87, aussi déballer/reconstituer les SC2_X87_* ; avec --sse, les SC2_SSE_* et
+sse->x[K] → c->xmm[K]) doit redonner chaque fichier d'entrée octet pour octet ; (b)
+invariants : plus aucun c->F en cache ni d'aide en cache appelée avec c dans une
+fonction transformée, aucune aide hors cache ni frontière appelée avec rl, rl jamais
+passé ailleurs, x de SC2_RL_VIDEX fait de drapeaux disjoints de m ; avec --x87 : dans
+une fonction transformée côté x87 plus aucune forme x87 sur c, chaque SC2_RL_VIDE
+suivi de son SC2_X87_VIDE et chaque SC2_RL_CHARGE de son SC2_X87_CHARGE ; avec --sse :
+plus aucun c->xmm dans une fonction transformée côté SSE, chaque SC2_RL_VIDE suivi de
+son SC2_SSE_VIDE et chaque SC2_RL_CHARGE de son SC2_SSE_CHARGE ; (c) les masques écrits
+(et les x de vivacité, avec la même analyse globale ; les masques x87 avec --x87, les
+masques SSE avec --sse) sont recalculés depuis l'entrée et comparés.
 Échec = code de retour 1, avec les écarts.
 """
 import argparse
@@ -106,11 +132,16 @@ MACROS_HORS_CACHE = ('FS_RD8', 'FS_RD16', 'FS_RD32', 'FS_WR8', 'FS_WR16', 'FS_WR
 LIGNE_DECL = '    SC2_RL_DECL(c);'
 LIGNE_BOUCLE = '    SC2_RL_BOUCLE();'
 LIGNE_DECL_X87 = '    SC2_X87_DECL(c);'
+LIGNE_DECL_SSE = '    SC2_SSE_DECL(c);'
 
 # ---- x87 : pile locale relative au sommet (--x87, passe 10t) ----
 CHAMPS_X87 = frozenset(('st', 'fpu_top', 'fpu_sw'))   # état x87 de *c couvert par la variable locale
 FORMES_X87 = ('fpush', 'fpop', 'fst', 'fcompare', 'fpu_fnstsw')   # réécrites en SC2_X87_*
 X87_S, X87_T, X87_SW = 0x0FF, 0x100, 0x200            # bits du masque : s0..s7, sommet, mot d'état
+
+# ---- SSE : registres xmm0..xmm7 locaux (--sse, passe 10u) ----
+CHAMP_XMM = 'xmm'                                     # champ de *c couvert par la variable locale
+MOTIF_SSE_SEUIL = 'sse : sous le seuil de rentabilité'   # --sse-seuil : accès/rechargement insuffisants sse
 
 MOTS_CLES_APPEL = frozenset(('if', 'while', 'for', 'switch', 'return', 'sizeof'))
 
@@ -138,17 +169,20 @@ def classer_aides(texte):
     (lecture ou écriture), avec fermeture transitive sur les appels aide(c, …) ;
     ecrits[ident] = masque des champs en cache ÉCRITS (pour l'analyse de flot).
     """
-    classes, ecr, _aides_x87 = analyser_cpu_h(texte)
+    classes, ecr, _aides_x87, _aides_sse = analyser_cpu_h(texte)
     return classes, ecr
 
 
 def analyser_cpu_h(texte):
-    """Classement complet de cpu.h : (classes, masques écrits, aides touchant l'état x87).
+    """Classement complet de cpu.h : (classes, masques écrits, aides touchant l'état x87, à xmm).
 
     Même calcul que classer_aides, plus aides_x87 : identifiants dont la fermeture
     transitive touche st, fpu_top ou fpu_sw (passe 10t : seuls fpush, fpop, fst,
     fcompare et fpu_fnstsw y sont réécrits, les autres refusent la transformation x87
-    de la fonction ; fpu_fldcw/fpu_fnstcw/wri*r ne touchent que fpu_cwx, hors périmètre).
+    de la fonction ; fpu_fldcw/fpu_fnstcw/wri*r ne touchent que fpu_cwx, hors périmètre),
+    et aides_sse : identifiants dont la fermeture touche xmm à travers c (passe 10u :
+    aucune réécriture prévue, une telle aide refuse la transformation SSE ; celles de
+    classe 'mixte' sont des frontières qui rechargent, seules les 'hors' refusent).
     """
     corps = {}
     for m in RX_DEF_CPU.finditer(texte):
@@ -193,7 +227,9 @@ def analyser_cpu_h(texte):
     for nom in MACROS_HORS_CACHE:
         classes[nom] = 'hors'
         ecr[nom] = 0
-    return classes, ecr, {nom for nom in noms if touches[nom] & CHAMPS_X87}
+    touches_xmm = {nom for nom in noms if CHAMP_XMM in touches[nom]}
+    return (classes, ecr, {nom for nom in noms if touches[nom] & CHAMPS_X87},
+            {nom for nom in touches_xmm if classes[nom] == 'hors'})
 
 
 # ---- analyse du code lifté ----
@@ -225,6 +261,13 @@ RX_FST_STRICT = re.compile(r'\*fst\(c, ([0-7])\)')
 RX_FST_AFFECT = re.compile(r'\s*(?:\+\+|--|(?:<<|>>|[-+*/%&|^])?=(?!=))')
 RX_X87_DEJA = re.compile(r'\bx87\b|sc2_x87_|SC2_X87_')
 
+# ---- formes SSE réécrites (--sse) : c->xmm[K] à indice littéral ; sinon refus SSE de la fonction ----
+RX_C_XMM = re.compile(r'\bc->xmm\b')
+RX_C_XMM_LIT = re.compile(r'\bc->xmm\[([0-7])\]')
+RX_C_XMM_AFFECT = re.compile(r'(?:\s*\.\s*\w+\s*(?:\[[^\]]*\])?)*\s*'
+                             r'(?:\+\+|--|(?:<<|>>|[-+*/%&|^])?=(?!=))')
+RX_SSE_DEJA = re.compile(r'\bsse\b|sc2_sse_|SC2_SSE_')
+
 # ---- vivacité interprocédurale des drapeaux (--vivacite-drapeaux) ----
 RX_ARG_CONST = re.compile(r'0x([0-9A-Fa-f]+)u')
 RX_ARG_IDENT = re.compile(r'[A-Za-z_]\w*')
@@ -242,6 +285,7 @@ RX_VIDE_XY = re.compile(r'SC2_RL_VIDEX?\(c, 0x([0-9A-F]{4})u(?:, 0x([0-9A-F]{4})
 RX_VIDEX_PAIRE = re.compile(r'SC2_RL_VIDEX\(c, 0x([0-9A-F]{4})u, 0x([0-9A-F]{4})u\)')
 RX_FIN_VIDE = re.compile(r'\{ SC2_RL_VIDEX?\(c, 0x[0-9A-F]{4}u(?:, 0x[0-9A-F]{4}u)?\); $')
 RX_FIN_VIDE_X87 = re.compile(r'SC2_X87_VIDE\(c, 0x[0-9A-F]{3}u\); $')
+RX_FIN_VIDE_SSE = re.compile(r'SC2_SSE_VIDE\(c, 0x[0-9A-F]{2}u\); $')
 
 # ---- retrait de la partie x87 (--verifier avec --x87) ----
 RX_X87_DECL_LIGNE = re.compile(re.escape(LIGNE_DECL_X87) + r'\n')
@@ -253,6 +297,15 @@ RX_RL_VIDE_TOUT = re.compile(r'SC2_RL_VIDEX?\(c, 0x[0-9A-F]{4}u(?:, 0x[0-9A-F]{4
 RX_RL_CHARGE_TOUT = re.compile(r'SC2_RL_CHARGE\(c\);')
 RX_X87_SUITE = re.compile(r'(?: SC2_X87_VIDE\(c, 0x[0-9A-F]{3}u\);|\n    SC2_X87_VIDE\(c, 0x[0-9A-F]{3}u\);)')
 RX_X87_RESTE = re.compile(r'\b(?:fpush\(c,|fpop\(c|fst\(c,|fcompare\(c,|fpu_fnstsw\(c)')
+
+# ---- retrait de la partie SSE (--verifier avec --sse) ----
+RX_SSE_DECL_LIGNE = re.compile(re.escape(LIGNE_DECL_SSE) + r'\n')
+RX_SSE_VIDE_LIGNE = re.compile(r'    SC2_SSE_VIDE\(c, 0x[0-9A-F]{2}u\);\n')
+RX_SSE_VIDE_ENLIGNE = re.compile(r'SC2_SSE_VIDE\(c, 0x[0-9A-F]{2}u\); ')
+RX_SSE_VIDE = re.compile(r'SC2_SSE_VIDE\(c, 0x([0-9A-F]{2})u\)')
+RX_SSE_X = re.compile(r'\bsse->x\[([0-7])\]')
+RX_SSE_SUITE = re.compile(r'(?: SC2_X87_VIDE\(c, 0x[0-9A-F]{3}u\);|\n    SC2_X87_VIDE\(c, 0x[0-9A-F]{3}u\);)?'
+                          r'(?: SC2_SSE_VIDE\(c, 0x[0-9A-F]{2}u\);|\n    SC2_SSE_VIDE\(c, 0x[0-9A-F]{2}u\);)')
 
 
 def erreur(message):
@@ -363,7 +416,7 @@ class LigneInstr:
     """Une ligne d'instruction analysée : statements, jetons de réécriture, emplacements."""
 
     __slots__ = ('brut', 'indice', 'code', 'suffixe', 'masque', 'stmts', 'args_c',
-                 'premiers_c', 'slots', 'x87_jeton', 'refus_x87')
+                 'premiers_c', 'slots', 'x87_jeton', 'refus_x87', 'refus_sse')
 
     def __init__(self, brut, indice, code, suffixe, masque):
         self.brut = brut
@@ -377,25 +430,32 @@ class LigneInstr:
         self.slots = []       # frontières et retours, dans l'ordre du texte
         self.x87_jeton = []   # (début, fin, texte, genre) des formes x87 réécrites
         self.refus_x87 = None # motif de repli x87 de la fonction (premier rencontré)
+        self.refus_sse = None # motif de repli SSE de la fonction (premier rencontré)
 
 
 class Contexte:
-    __slots__ = ('classes', 'ecrits', 'iat', 'x87', 'formes_x87', 'aides_x87_refus')
+    __slots__ = ('classes', 'ecrits', 'iat', 'x87', 'formes_x87', 'aides_x87_refus',
+                 'sse', 'aides_sse_refus', 'sse_seuil')
 
-    def __init__(self, classes, ecrits, iat=frozenset(), x87=False, aides_x87=frozenset()):
+    def __init__(self, classes, ecrits, iat=frozenset(), x87=False, aides_x87=frozenset(),
+                 sse=False, aides_sse=frozenset(), sse_seuil=16):
         self.classes = classes
         self.ecrits = ecrits
         self.iat = iat        # slots d'IAT de sc2_imports.h (adresses invitées)
         self.x87 = x87        # option --x87 active
         self.formes_x87 = frozenset(FORMES_X87) & aides_x87      # réécrites (présentes dans cpu.h)
         self.aides_x87_refus = aides_x87 - self.formes_x87       # touchent st/fpu_top/fpu_sw, non réécrites
+        self.sse = sse        # option --sse active
+        self.aides_sse_refus = aides_sse     # touchent xmm à travers c sans être des frontières
+        self.sse_seuil = sse_seuil           # --sse-seuil : accès réécrits par SC2_SSE_CHARGE exigés (0 = tout)
 
 
 class Analyse:
     """Résultat de l'analyse d'une fonction : lignes, masques, statistiques."""
 
     __slots__ = ('lignes', 'masque_final', 'masques', 'frontieres', 'retours', 'boucles',
-                 'etiquettes', 'masque_final_x', 'masques_x', 'refus_x87', 'x87_formes', 'x87_ok')
+                 'etiquettes', 'masque_final_x', 'masques_x', 'refus_x87', 'x87_formes', 'x87_ok',
+                 'masque_final_sse', 'masques_sse', 'refus_sse', 'sse_formes', 'sse_ok')
 
     def __init__(self):
         self.lignes = []       # LigneInstr indicées, dans l'ordre du corps
@@ -410,6 +470,11 @@ class Analyse:
         self.refus_x87 = None     # x87 : motif du repli x87 seul (la passe 10s s'applique quand même)
         self.x87_formes = 0       # x87 : formes réécrites dans la fonction
         self.x87_ok = False       # x87 : la fonction est transformée côté x87
+        self.masque_final_sse = 0 # SSE : idem, 8 bits (xmm0..xmm7)
+        self.masques_sse = []     # SSE : tous les masques, dans l'ordre du texte (+ final)
+        self.refus_sse = None     # SSE : motif du repli SSE seul (la passe 10s s'applique quand même)
+        self.sse_formes = 0       # SSE : accès c->xmm[K] réécrits dans la fonction
+        self.sse_ok = False       # SSE : la fonction est transformée côté SSE
 
 
 def _args_appel(masque, ouvrante, fermante):
@@ -520,9 +585,53 @@ def _forme_x87(masque, m, nom, ligne):
     return None
 
 
+def _refuser_sse(ligne, motif):
+    """Repli SSE seul : la passe 10s s'applique, les accès c->xmm restent sur c (premier motif gardé)."""
+    if ligne.refus_sse is None:
+        ligne.refus_sse = motif
+
+
+def _sse_evts(masque, s, e, ligne):
+    """Événements SSE de masque[s:e] : (pos, 'S', bit, None) par registre écrit (passe 10u).
+
+    Est écriture toute affectation à c->xmm[K] ou à un de ses champs (simple ou composée,
+    ++/-- compris) et tout &c->xmm[K] unaire passé à une aide (sur-approximation sûre :
+    l'aide peut écrire à travers le pointeur — sse_load_ss/sse_load_sd). Les lectures ne
+    salissent rien. Indice non littéral, c->xmm sans indice, adresse prise hors argument
+    d'aide → refus SSE de la fonction (les accès restent sur c).
+    """
+    evts = []
+    for m in RX_C_XMM.finditer(masque, s, e):
+        pos = m.start()
+        ml = RX_C_XMM_LIT.match(masque, pos, e)
+        if ml is None:
+            _refuser_sse(ligne, 'sse : indice de registre xmm non littéral'
+                         if masque.startswith('[', m.end()) else 'sse : forme c->xmm non reconnue')
+            continue
+        q = pos - 1                                     # & unaire (argument d'aide) ou et binaire ?
+        while q >= 0 and masque[q] in ' \t':
+            q -= 1
+        if q >= 0 and masque[q] == '&' and not (q > 0 and (masque[q - 1].isalnum() or masque[q - 1] in '_)]\'"')):
+            r = q - 1
+            while r >= 0 and masque[r] in ' \t':
+                r -= 1
+            if r >= 0 and masque[r] in '(,':
+                evts.append((pos, 'S', 1 << int(ml.group(1)), None))
+            else:
+                _refuser_sse(ligne, "sse : adresse de c->xmm hors argument d'aide")
+            continue
+        if RX_C_XMM_AFFECT.match(masque, ml.end(), e):  # cible d'affectation (simple ou composée)
+            evts.append((pos, 'S', 1 << int(ml.group(1)), None))
+            continue
+        if q >= 1 and masque[q - 1:q + 1] in ('++', '--'):   # pré-incrément
+            evts.append((pos, 'S', 1 << int(ml.group(1)), None))
+    return evts
+
+
 def _extraire(masque, s, e, ligne, ctx, dans_cond=False):
     """Événements ordonnés de masque[s:e] : (pos, 'W', bit, aide|None), (pos, 'R', bit,
-    None) pour les lectures c->F hors cible d'affectation, (pos, 'B', genre, info)."""
+    None) pour les lectures c->F hors cible d'affectation, (pos, 'B', genre, info),
+    (pos, 'S', bit, None) pour les écritures SSE (--sse)."""
     evts = []
     cibles = []                                    # spans « c->F » cibles d'une écriture
     for m in RX_C_ECRIT_CACHE.finditer(masque, s, e):
@@ -574,6 +683,8 @@ def _extraire(masque, s, e, ligne, ctx, dans_cond=False):
                     evts.append(ev)
             else:                                          # touche st/fpu_top/fpu_sw, non réécrite
                 _refuser_x87(ligne, 'x87 : aide x87 non réécrite (%s)' % nom)
+        elif ctx.sse and premier is not None and nom in ctx.aides_sse_refus:
+            _refuser_sse(ligne, 'sse : aide touchant xmm (%s)' % nom)   # écrit *c->xmm sans frontière
         elif nom in ctx.classes:
             cl = ctx.classes[nom]
             if cl == 'cache':
@@ -588,6 +699,8 @@ def _extraire(masque, s, e, ligne, ctx, dans_cond=False):
             # 'hors' : reste avec c, rien à faire
         elif premier is not None:
             evts.append((m.start(), 'B', 'inconnues', ('inconnue', None)))
+    if ctx.sse:
+        evts.extend(_sse_evts(masque, s, e, ligne))
     evts.sort(key=lambda t: t[0])
     if dans_cond and any(g == 'B' for _, g, _, _ in evts):
         raise PasReconnu('frontière dans une condition')
@@ -609,6 +722,8 @@ def _stmt_simple(masque, i, fin, ligne, ctx):
         raise PasReconnu('écriture après une frontière')
     if bornes and ctx.x87 and any(pos > bornes[0][0] for pos, g, _d, _i in evts if g == 'X'):
         _refuser_x87(ligne, 'x87 : écriture après une frontière')   # le CHARGE écraserait l'écriture locale
+    if bornes and ctx.sse and any(pos > bornes[0][0] for pos, g, _d, _i in evts if g == 'S'):
+        _refuser_sse(ligne, 'sse : écriture après une frontière')   # idem côté SSE
     if bornes:
         slot = {'span': (i, fin_i + 1), 'genre': bornes[0][1], 'masque': None,
                 'info': bornes[0][2]}
@@ -797,7 +912,11 @@ def _parser_pour(masque, i, e, contexte, ligne, ctx, stmts):
                 k += 1
             if k < len(segment) and segment[k] in ',)':
                 raise PasReconnu('contrôle switch/for/do/else')
-    stmts.append(('pour', i, fin_corps))
+    bits_sse = 0                                        # écritures xmm du corps (indice _i littéral requis)
+    if ctx.sse:
+        for _pos, _g, d, _info in _sse_evts(segment, 0, len(segment), ligne):
+            bits_sse |= d
+    stmts.append(('pour', i, fin_corps, bits_sse))
     return fin_corps
 
 
@@ -852,15 +971,26 @@ def _x87_possible(stmts, cond_evts):
     return x
 
 
-def _executer(stmts, D, enr, X=0):
-    """Marche les statements depuis (D, X) ; renvoie (chute ou None, [(étiquette, D, X)], chutex).
+def _sse_possible(stmts, cond_evts):
+    """Bits SSE POSSIBLEMENT écrits par un while (0 à n tours) : union conservatrice (pas de rotation)."""
+    bits = 0
+    for evts in [cond_evts] + [st[3] for st in stmts if st[0] in ('simple', 'si_rupture')]:
+        for _pos, g, d, _arg in evts:
+            if g == 'S':
+                bits |= d
+    return bits
 
-    D est le masque rl, X le masque x87 (10 bits), synchronisés aux mêmes frontières.
-    enr=True remplit les masques des emplacements (frontières, retours). La chute
-    vaut None quand la ligne ne tombe pas (return/goto) ; les écritures d'un bloc
-    if non terminé par return se fondent dans la chute (sur-approximation).
+
+def _executer(stmts, D, enr, X=0, S=0):
+    """Marche les statements depuis (D, X, S) ; renvoie (chute ou None, [(étiquette, D, X, S)], chutex, chutesse).
+
+    D est le masque rl, X le masque x87 (10 bits), S le masque SSE (8 bits),
+    synchronisés aux mêmes frontières. enr=True remplit les masques des emplacements
+    (frontières, retours). La chute vaut None quand la ligne ne tombe pas (return/goto) ;
+    les écritures d'un bloc if non terminé par return se fondent dans la chute
+    (sur-approximation).
     """
-    chute, chutex, sorties, tombe = D, X, [], True
+    chute, chutex, chutesse, sorties, tombe = D, X, S, [], True
     for st in stmts:
         genre = st[0]
         if genre == 'simple':
@@ -869,23 +999,30 @@ def _executer(stmts, D, enr, X=0):
                     chute |= d
                 elif g == 'X':
                     chutex = _x87_pas(chutex, d, _info)
+                elif g == 'S':
+                    chutesse |= d
                 elif g == 'B':                  # frontière : masque, puis rechargement complet
                     if enr:
                         st[4]['masque'] = chute
                         st[4]['masque_x'] = chutex
+                        st[4]['masque_sse'] = chutesse
                     chute = 0
                     chutex = 0
+                    chutesse = 0
         elif genre == 'retour':
             if enr:
                 st[3]['masque'] = chute
                 st[3]['masque_x'] = chutex
+                st[3]['masque_sse'] = chutesse
             chute = 0
             chutex = 0
+            chutesse = 0
             tombe = False
         elif genre == 'goto':
-            sorties.append((st[3], chute, chutex))
+            sorties.append((st[3], chute, chutex, chutesse))
             chute = 0
             chutex = 0
+            chutesse = 0
             tombe = False
         elif genre == 'si_goto':
             for _pos, g, d, _info in st[3]:
@@ -893,14 +1030,18 @@ def _executer(stmts, D, enr, X=0):
                     chute |= d
                 elif g == 'X':
                     chutex = _x87_pas(chutex, d, _info)
-            sorties.append((st[4], chute, chutex))
+                elif g == 'S':
+                    chutesse |= d
+            sorties.append((st[4], chute, chutex, chutesse))
         elif genre == 'si_bloc':
             for _pos, g, d, _info in st[3]:
                 if g == 'W':
                     chute |= d
                 elif g == 'X':
                     chutex = _x87_pas(chutex, d, _info)
-            dcorps, dcorpsx = chute, chutex
+                elif g == 'S':
+                    chutesse |= d
+            dcorps, dcorpsx, dcorpssse = chute, chutex, chutesse
             for cst in st[4]:
                 if cst[0] == 'simple':
                     for _pos, g, d, _info in cst[3]:
@@ -908,27 +1049,37 @@ def _executer(stmts, D, enr, X=0):
                             dcorps |= d
                         elif g == 'X':
                             dcorpsx = _x87_pas(dcorpsx, d, _info)
+                        elif g == 'S':
+                            dcorpssse |= d
                         elif g == 'B':               # frontière du bloc
                             if enr:
                                 cst[4]['masque'] = dcorps
                                 cst[4]['masque_x'] = dcorpsx
+                                cst[4]['masque_sse'] = dcorpssse
                             dcorps = 0
                             dcorpsx = 0
+                            dcorpssse = 0
                 else:                               # retour
                     if enr:
                         cst[3]['masque'] = dcorps
                         cst[3]['masque_x'] = dcorpsx
+                        cst[3]['masque_sse'] = dcorpssse
                     dcorps = 0
                     dcorpsx = 0
+                    dcorpssse = 0
             if not st[5]:                           # le corps participe à la chute
                 chute |= dcorps
                 chutex |= dcorpsx
+                chutesse |= dcorpssse
         elif genre == 'tantque':
             chute |= st[3]
             chutex |= _x87_possible(st[5], st[4])
-        elif genre in ('pour', 'rupture', 'si_rupture'):
+            chutesse |= _sse_possible(st[5], st[4])
+        elif genre == 'pour':
+            chutesse |= st[3]
+        elif genre in ('rupture', 'si_rupture'):
             pass
-    return (chute if tombe else None), sorties, (chutex if tombe else None)
+    return (chute if tombe else None), sorties, (chutex if tombe else None), (chutesse if tombe else None)
 
 
 def analyser_corps(corps, ctx):
@@ -970,27 +1121,29 @@ def analyser_corps(corps, ctx):
     d_in = [None] * n
     pile = []
     if n:
-        d_in[0] = (0, 0)
+        d_in[0] = (0, 0, 0)
         pile.append(0)
-    d_fin, d_fin_x, fin_atteinte = 0, 0, False
+    d_fin, d_fin_x, d_fin_sse, fin_atteinte = 0, 0, 0, False
     while pile:                                    # point fixe avant, fusion = union
         i = pile.pop()
-        chute, sorties, chutex = _executer(noeuds[i].stmts, d_in[i][0], False, d_in[i][1])
+        chute, sorties, chutex, chutesse = _executer(noeuds[i].stmts, d_in[i][0], False,
+                                                     d_in[i][1], d_in[i][2])
         aretes = []
         if chute is not None:
-            aretes.append((i + 1 if i + 1 < n else fin, chute, chutex))
-        for lbl, d, dx in sorties:
-            aretes.append((etiquettes[lbl], d, dx))
-        for t, d, dx in aretes:
+            aretes.append((i + 1 if i + 1 < n else fin, chute, chutex, chutesse))
+        for lbl, d, dx, ds in sorties:
+            aretes.append((etiquettes[lbl], d, dx, ds))
+        for t, d, dx, ds in aretes:
             if t == fin:
                 fin_atteinte = True
                 d_fin |= d
                 d_fin_x |= dx
+                d_fin_sse |= ds
             elif d_in[t] is None:
-                d_in[t] = (d, dx)
+                d_in[t] = (d, dx, ds)
                 pile.append(t)
-            elif d & ~d_in[t][0] or dx & ~d_in[t][1]:
-                d_in[t] = (d_in[t][0] | d, d_in[t][1] | dx)
+            elif d & ~d_in[t][0] or dx & ~d_in[t][1] or ds & ~d_in[t][2]:
+                d_in[t] = (d_in[t][0] | d, d_in[t][1] | dx, d_in[t][2] | ds)
                 pile.append(t)
 
     analyse.lignes = noeuds
@@ -1002,8 +1155,8 @@ def analyser_corps(corps, ctx):
                 if etiquettes[lbl] <= i:
                     analyse.boucles.add(lbl)
     for i, ligne in enumerate(noeuds):             # passe finale : enregistre les masques
-        entree = d_in[i] if d_in[i] is not None else (0, 0)
-        _executer(ligne.stmts, entree[0], True, entree[1])
+        entree = d_in[i] if d_in[i] is not None else (0, 0, 0)
+        _executer(ligne.stmts, entree[0], True, entree[1], entree[2])
         for slot in ligne.slots:
             if slot['genre'] == 'retours':
                 analyse.retours += 1
@@ -1011,10 +1164,13 @@ def analyser_corps(corps, ctx):
                 analyse.frontieres[slot['genre']] = analyse.frontieres.get(slot['genre'], 0) + 1
             analyse.masques.append(slot['masque'])
             analyse.masques_x.append(slot['masque_x'])
+            analyse.masques_sse.append(slot['masque_sse'])
     analyse.masque_final = d_fin if fin_atteinte else 0
     analyse.masques.append(analyse.masque_final)
     analyse.masque_final_x = d_fin_x if fin_atteinte else 0
     analyse.masques_x.append(analyse.masque_final_x)
+    analyse.masque_final_sse = d_fin_sse if fin_atteinte else 0
+    analyse.masques_sse.append(analyse.masque_final_sse)
     if ctx.x87:                                    # éligibilité x87 (passe 10t)
         refus = next((l.refus_x87 for l in noeuds if l.refus_x87 is not None), None)
         if refus is None and RX_X87_DEJA.search(masquer_chaines(corps)):
@@ -1022,6 +1178,17 @@ def analyser_corps(corps, ctx):
         analyse.refus_x87 = refus
         analyse.x87_formes = sum(len(l.x87_jeton) for l in noeuds)
         analyse.x87_ok = refus is None and analyse.x87_formes > 0
+    if ctx.sse:                                    # éligibilité SSE (passe 10u)
+        refus = next((l.refus_sse for l in noeuds if l.refus_sse is not None), None)
+        if refus is None and RX_SSE_DEJA.search(masquer_chaines(corps)):
+            refus = 'sse : identifiant sse déjà présent'
+        analyse.refus_sse = refus
+        analyse.sse_formes = sum(len(RX_C_XMM_LIT.findall(l.masque)) for l in noeuds)
+        analyse.sse_ok = refus is None and analyse.sse_formes > 0
+        charges = sum(analyse.frontieres.values())   # un SC2_SSE_CHARGE par frontière
+        if analyse.sse_ok and charges and analyse.sse_formes < ctx.sse_seuil * charges:
+            analyse.refus_sse = MOTIF_SSE_SEUIL      # la synchro coûte plus que les accès regagnés
+            analyse.sse_ok = False
     return analyse
 
 
@@ -1034,7 +1201,7 @@ def charger_semantique_drapeaux():
     écriture possible (compte de décalage nul : n'écrase pas), SANS_EFFET/prefixe mmx_ =
     rien. Un ident absent des tables est une inconnue : lit D6.
     """
-    chemin = REPO / 'recomp-sc2' / 'tools' / 'lift' / 'drapeaux-morts.py'
+    chemin = REPO / 'tools' / 'lift' / 'drapeaux-morts.py'   # privé : recomp-sc2/tools/lift
     spec = importlib.util.spec_from_file_location('drapeaux_morts', chemin)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -1140,6 +1307,8 @@ def _marche_evts(evts, p, certain, viva, resume):
                 resume.statique |= p0 if inconnue else (lus & p0)
         elif g == 'X':
             pass                                        # x87 : rien pour les drapeaux
+        elif g == 'S':
+            pass                                        # SSE : rien pour les drapeaux
         else:                                           # frontière : transparente pour P
             genre, cible = info
             if genre in ('dispatch_const', 'appel_nom', 'saut_const'):
@@ -1319,6 +1488,8 @@ def _reculer_evts(evts, vivant, certain, viva, slot=None):
             vivant |= d
         elif g == 'X':
             continue                                    # x87 : rien pour les drapeaux
+        elif g == 'S':
+            continue                                    # SSE : rien pour les drapeaux
         elif g == 'W':
             if info is not None:                        # retirer puis ajouter : la lecture précède
                 lus, ecrases, _possibles, inconnue = viva.sem_aide(info)
@@ -1385,9 +1556,9 @@ def appliquer_vivacite(analyse, viva):
     etiquettes = analyse.etiquettes
     tombes, cibles = [], []
     for ligne in noeuds:
-        chute, sorties, _chutex = _executer(ligne.stmts, 0, False)
+        chute, sorties, _chutex, _chutesse = _executer(ligne.stmts, 0, False)
         tombes.append(chute is not None)
-        cibles.append([lbl for lbl, _d, _dx in sorties])
+        cibles.append([lbl for lbl, _d, _dx, _ds in sorties])
     succs, preds = [], [[] for _ in range(n + 1)]
     for i in range(n):
         s = ([i + 1] if tombes[i] else []) + [etiquettes[lbl] for lbl in cibles[i]]
@@ -1438,12 +1609,20 @@ def _masque_hexa_x87(m):
     return '0x%03Xu' % m
 
 
-def reecrire_ligne(ligne, x87=False):
-    """Réécriture d'une ligne : c->F → rl->F, aide en cache c → rl, formes x87, ballotes de frontières."""
+def _masque_hexa_sse(m):
+    return '0x%02Xu' % m
+
+
+def reecrire_ligne(ligne, x87=False, sse=False):
+    """Réécriture d'une ligne : c->F → rl->F, aide en cache c → rl, formes x87, c->xmm[K] →
+    sse->x[K], ballotes de frontières."""
     jetons = [(m.start(), m.end(), 'rl->' + m.group(1)) for m in RX_C_CHAMP_CACHE.finditer(ligne.masque)]
     jetons += [(a, b, 'rl') for a, b in ligne.args_c]
     if x87:
         jetons += [(a, b, t) for a, b, t, _genre in ligne.x87_jeton]
+    if sse:
+        jetons += [(m.start(), m.end(), 'sse->x[%s]' % m.group(1))
+                   for m in RX_C_XMM_LIT.finditer(ligne.masque)]
     jetons.sort()
 
     def inner(s, e):
@@ -1460,20 +1639,27 @@ def reecrire_ligne(ligne, x87=False):
     for slot in ligne.slots:
         s, e = slot['span']
         if slot['genre'] == 'retours':
-            texte = '{ SC2_RL_VIDE(c, %s); return; }' % _masque_hexa(slot['masque'])
+            vides = ['SC2_RL_VIDE(c, %s)' % _masque_hexa(slot['masque'])]
             if x87:
-                texte = '{ SC2_RL_VIDE(c, %s); SC2_X87_VIDE(c, %s); return; }' % (
-                    _masque_hexa(slot['masque']), _masque_hexa_x87(slot['masque_x']))
-            remp.append((s, e, texte))
+                vides.append('SC2_X87_VIDE(c, %s)' % _masque_hexa_x87(slot['masque_x']))
+            if sse:
+                vides.append('SC2_SSE_VIDE(c, %s)' % _masque_hexa_sse(slot['masque_sse']))
+            remp.append((s, e, '{ %s; return; }' % '; '.join(vides)))
         else:
             x = slot.get('x', 0)
             ballot = ('SC2_RL_VIDEX(c, %s, %s)' % (_masque_hexa(slot['masque']), _masque_hexa(x))
                       if x else 'SC2_RL_VIDE(c, %s)' % _masque_hexa(slot['masque']))
-            texte = '{ %s; %s SC2_RL_CHARGE(c); }' % (ballot, inner(s, e))
+            vides = [ballot]
             if x87:
-                texte = '{ %s; SC2_X87_VIDE(c, %s); %s SC2_RL_CHARGE(c); SC2_X87_CHARGE(c); }' % (
-                    ballot, _masque_hexa_x87(slot['masque_x']), inner(s, e))
-            remp.append((s, e, texte))
+                vides.append('SC2_X87_VIDE(c, %s)' % _masque_hexa_x87(slot['masque_x']))
+            if sse:
+                vides.append('SC2_SSE_VIDE(c, %s)' % _masque_hexa_sse(slot['masque_sse']))
+            charges = ['SC2_RL_CHARGE(c)']
+            if x87:
+                charges.append('SC2_X87_CHARGE(c)')
+            if sse:
+                charges.append('SC2_SSE_CHARGE(c)')
+            remp.append((s, e, '{ %s; %s %s; }' % ('; '.join(vides), inner(s, e), '; '.join(charges))))
     for a, b, t in jetons:
         if not any(s <= a < e for s, e, _ in remp):
             remp.append((a, b, t))
@@ -1493,11 +1679,13 @@ def transformer_fonction(corps, ctx, viva=None):
     sites = omis = 0
     if viva is not None:
         sites, omis = appliquer_vivacite(analyse, viva)
-    reecrites = {l.indice: reecrire_ligne(l, analyse.x87_ok) for l in analyse.lignes}
+    reecrites = {l.indice: reecrire_ligne(l, analyse.x87_ok, analyse.sse_ok) for l in analyse.lignes}
     lignes = corps.split('\n')
     nouveaux = [LIGNE_DECL]
     if analyse.x87_ok:
         nouveaux.append(LIGNE_DECL_X87)
+    if analyse.sse_ok:
+        nouveaux.append(LIGNE_DECL_SSE)
     for i, brut in enumerate(lignes):
         nouveaux.append(reecrites.get(i, brut))
         if i not in reecrites and brut.strip()[:-1] in analyse.boucles and brut.strip().endswith(':'):
@@ -1505,6 +1693,8 @@ def transformer_fonction(corps, ctx, viva=None):
     nouveaux.insert(len(nouveaux) - 1, '    SC2_RL_VIDE(c, %s);' % _masque_hexa(analyse.masque_final))
     if analyse.x87_ok:                                # vidage x87 juste après celui de rl
         nouveaux.insert(len(nouveaux) - 1, '    SC2_X87_VIDE(c, %s);' % _masque_hexa_x87(analyse.masque_final_x))
+    if analyse.sse_ok:                                # vidage SSE juste après ceux de rl (et x87)
+        nouveaux.insert(len(nouveaux) - 1, '    SC2_SSE_VIDE(c, %s);' % _masque_hexa_sse(analyse.masque_final_sse))
     return '\n'.join(nouveaux), analyse, sites, omis
 
 
@@ -1544,6 +1734,17 @@ def transformer_texte(texte, ctx, chemin, stats, viva=None):
             motif = analyse.refus_x87
             stats['motifs_x87'][motif] = stats['motifs_x87'].get(motif, 0) + 1
             exemples = stats['exemples_x87'].setdefault(motif, [])
+            if len(exemples) < 5:
+                exemples.append(f"{chemin}:{nom}")
+        if analyse.sse_ok:
+            stats['sse_transformees'] += 1
+            stats['sse_formes'] += analyse.sse_formes
+            stats['sse_vidages'] += len(analyse.masques_sse)
+            stats['masques_sse'].extend(analyse.masques_sse)
+        elif ctx.sse and analyse.refus_sse is not None:
+            motif = analyse.refus_sse
+            stats['motifs_sse'][motif] = stats['motifs_sse'].get(motif, 0) + 1
+            exemples = stats['exemples_sse'].setdefault(motif, [])
             if len(exemples) < 5:
                 exemples.append(f"{chemin}:{nom}")
         morceaux.append(texte[pos:m.start(2)])
@@ -1597,9 +1798,21 @@ def _retirer_x87(corps):
     return corps.replace('SC2_X87_FNSTSW()', 'fpu_fnstsw(c)')
 
 
+def _retirer_sse(corps):
+    """Inverse de la partie SSE (passe 10u) : macros insérées retirées, accès reconstitués."""
+    if 'SC2_SSE_' not in corps and 'sse->x[' not in corps:
+        return corps
+    corps = RX_SSE_DECL_LIGNE.sub('', corps)
+    corps = RX_SSE_VIDE_LIGNE.sub('', corps)          # vidage final (ligne entière)
+    corps = RX_SSE_VIDE_ENLIGNE.sub('', corps)        # vidage en ligne, avant la frontière
+    corps = corps.replace(' SC2_SSE_CHARGE(c);', '')
+    return RX_SSE_X.sub(r'c->xmm[\1]', corps)
+
+
 def retirer_fonction(corps):
     """Inverse exact de la passe sur un corps transformé."""
     corps = _retirer_x87(corps)
+    corps = _retirer_sse(corps)
     corps = RX_DEBALLER.sub(r'\1', corps)
     corps = RX_RETOUR_BALLE.sub('return;', corps)
     lignes = [l for l in corps.split('\n')
@@ -1622,8 +1835,8 @@ def retirer_passe(texte):
     return ''.join(morceaux)
 
 
-def verifier_invariants(texte, classes, chemin, ecarts, x87=False):
-    """(b) dans chaque fonction transformée : rl propre, c->F en cache disparu… (+ x87)"""
+def verifier_invariants(texte, classes, chemin, ecarts, x87=False, sse=False):
+    """(b) dans chaque fonction transformée : rl propre, c->F en cache disparu… (+ x87, + SSE)"""
     caches = sorted(n for n, cl in classes.items() if cl == 'cache')
     autres = sorted(set(n for n, cl in classes.items() if cl != 'cache') | set(FRONTIERES)
                     | set(FRONTIERES_SANS_C))
@@ -1638,6 +1851,8 @@ def verifier_invariants(texte, classes, chemin, ecarts, x87=False):
             continue
         nom = m.group(1)
         est_x87 = corps.startswith(LIGNE_DECL + '\n' + LIGNE_DECL_X87 + '\n')
+        est_sse = (corps.startswith(LIGNE_DECL + '\n' + LIGNE_DECL_SSE + '\n')
+                   or corps.startswith(LIGNE_DECL + '\n' + LIGNE_DECL_X87 + '\n' + LIGNE_DECL_SSE + '\n'))
         if x87 and est_x87:
             corps_m = masquer_chaines(corps)
             for mm in RX_X87_RESTE.finditer(corps_m):     # plus aucune forme x87 sur c
@@ -1650,6 +1865,19 @@ def verifier_invariants(texte, classes, chemin, ecarts, x87=False):
                     ecarts.append(f"{chemin}:{nom}: SC2_RL_CHARGE non suivi de son SC2_X87_CHARGE")
         elif x87 and 'SC2_X87_' in masquer_chaines(corps):
             ecarts.append(f"{chemin}:{nom}: SC2_X87_* hors fonction transformée côté x87")
+        if sse and est_sse:
+            corps_m = masquer_chaines(corps)
+            for mm in RX_C_XMM.finditer(corps_m):         # plus aucun accès xmm sur c
+                ecarts.append(f"{chemin}:{nom}: c->xmm subsistant en fonction SSE : {mm.group(0)}")
+            for mm in RX_RL_VIDE_TOUT.finditer(corps_m):  # chaque vidage rl suivi (x87 ?) du vidage SSE
+                if not RX_SSE_SUITE.match(corps_m, mm.end()):
+                    ecarts.append(f"{chemin}:{nom}: SC2_RL_VIDE non suivi de son SC2_SSE_VIDE")
+            for mm in RX_RL_CHARGE_TOUT.finditer(corps_m):
+                attendu = ' SC2_X87_CHARGE(c); SC2_SSE_CHARGE(c);' if est_x87 else ' SC2_SSE_CHARGE(c);'
+                if not corps_m.startswith(attendu, mm.end()):
+                    ecarts.append(f"{chemin}:{nom}: SC2_RL_CHARGE non suivi de son SC2_SSE_CHARGE")
+        elif sse and 'SC2_SSE_' in masquer_chaines(corps):
+            ecarts.append(f"{chemin}:{nom}: SC2_SSE_* hors fonction transformée côté SSE")
         lignes_f = corps.split('\n')
         places = {}
         for k, brut in enumerate(lignes_f):
@@ -1677,10 +1905,11 @@ def verifier_invariants(texte, classes, chemin, ecarts, x87=False):
                     ecarts.append(f"{chemin}:{nom}: SC2_RL_VIDEX x=0x{x_x:04X} et m=0x{m_x:04X} "
                                   f"ne sont pas disjoints (ligne {num})")
             for mm in rx_frontiere.finditer(code):          # (d) frontière ou return non emballé
-                if mm.group(1) in hors or (mm.group(1) or '').startswith(('SC2_RL_', 'SC2_X87_')):
+                if mm.group(1) in hors or (mm.group(1) or '').startswith(('SC2_RL_', 'SC2_X87_', 'SC2_SSE_')):
                     continue
                 if not (RX_FIN_VIDE.search(code, 0, mm.start())
-                        or RX_FIN_VIDE_X87.search(code, 0, mm.start())):
+                        or RX_FIN_VIDE_X87.search(code, 0, mm.start())
+                        or RX_FIN_VIDE_SSE.search(code, 0, mm.start())):
                     ecarts.append(f"{chemin}:{nom}: {mm.group(0).strip()} non emballé par SC2_RL_VIDE (ligne {num})")
             restant = rx_aide_rl.sub(lambda mm: mm.group(1) + '(RLNEUTRALISE', code)
             restant = RX_RL_CHAMP.sub('RLCHAMP', restant)
@@ -1689,11 +1918,12 @@ def verifier_invariants(texte, classes, chemin, ecarts, x87=False):
 
 
 def verifier_masques(entree, sortie, ctx, chemin, ecarts, viva=None):
-    """(c) masques (et x de vivacité, même analyse globale ; masques x87 avec --x87) recalculés == écrits."""
+    """(c) masques (et x de vivacité, même analyse globale ; masques x87 avec --x87, SSE avec --sse) recalculés == écrits."""
     foncs_sortie = list(RX_FONC.finditer(sortie))
     for mi, mo in zip(RX_FONC.finditer(entree), foncs_sortie):
         attendus = []
         attendus_x = []
+        attendus_sse = []
         try:
             analyse = analyser_corps(mi.group(2), ctx)
         except PasReconnu:
@@ -1706,6 +1936,9 @@ def verifier_masques(entree, sortie, ctx, chemin, ecarts, viva=None):
             if analyse.x87_ok:
                 attendus_x = [s['masque_x'] for l in analyse.lignes for s in l.slots]
                 attendus_x.append(analyse.masque_final_x)
+            if analyse.sse_ok:
+                attendus_sse = [s['masque_sse'] for l in analyse.lignes for s in l.slots]
+                attendus_sse.append(analyse.masque_final_sse)
         ecrits = [(int(m_, 16), int(x_, 16) if x_ else 0)
                   for m_, x_ in RX_VIDE_XY.findall(mo.group(2))]
         if attendus != ecrits:
@@ -1714,6 +1947,10 @@ def verifier_masques(entree, sortie, ctx, chemin, ecarts, viva=None):
             ecrits_x = [int(m_, 16) for m_ in RX_X87_VIDE.findall(mo.group(2))]
             if attendus_x != ecrits_x:
                 ecarts.append(f"{chemin}:{mi.group(1)} : masques x87 écrits {ecrits_x} ≠ recalculés {attendus_x}")
+        if ctx.sse:
+            ecrits_sse = [int(m_, 16) for m_ in RX_SSE_VIDE.findall(mo.group(2))]
+            if attendus_sse != ecrits_sse:
+                ecarts.append(f"{chemin}:{mi.group(1)} : masques SSE écrits {ecrits_sse} ≠ recalculés {attendus_sse}")
 
 
 def verifier(source, sortie, ctx, classes, viva=None):
@@ -1732,7 +1969,7 @@ def verifier(source, sortie, ctx, classes, viva=None):
             if retirer_passe(texte_sortie) != texte_entree:
                 ecarts.append(f"{relatif} : ne redevient pas le fichier d'origine sans la passe")
             else:
-                verifier_invariants(texte_sortie, classes, str(relatif), ecarts, ctx.x87)
+                verifier_invariants(texte_sortie, classes, str(relatif), ecarts, ctx.x87, ctx.sse)
                 verifier_masques(texte_entree, texte_sortie, ctx, str(relatif), ecarts, viva)
             verifies += 1
         elif fichiers_identiques(chemin, origine):
@@ -1749,7 +1986,8 @@ def verifier(source, sortie, ctx, classes, viva=None):
     print(f"vérification : {verifies} fichier(s) conformes (retrait de la passe = entrée, "
           f"octet pour octet ; invariants et masques recalculés"
           + (", vivacité des drapeaux comprise" if viva is not None else "")
-          + (", pile x87 comprise" if ctx.x87 else "") + ")")
+          + (", pile x87 comprise" if ctx.x87 else "")
+          + (", registres SSE compris" if ctx.sse else "") + ")")
     return 0
 
 
@@ -1758,7 +1996,7 @@ def principal():
         description="Registres et drapeaux invités en variables locales dans le C lifté (passe 10s).")
     ap.add_argument("source", help="dossier d'entrée (les recomp_*.c, les autres fichiers recopiés)")
     ap.add_argument("sortie", help="dossier de sortie (créé si besoin)")
-    ap.add_argument("--cpu-h", metavar="CHEMIN", default=str(REPO / "recomp-sc2/runtime/cpu.h"),
+    ap.add_argument("--cpu-h", metavar="CHEMIN", default=str(REPO / "runtime/cpu.h"),
                     help="cpu.h à classifier (défaut : recomp-sc2/runtime/cpu.h du dépôt)")
     ap.add_argument("--verifier", action="store_true",
                     help="contrôle que <sortie> redevient <source> sans la passe, invariants et masques")
@@ -1772,6 +2010,13 @@ def principal():
                     help="pile x87 (st, fpu_top, fpu_sw) en variable locale relative au sommet, "
                          "synchronisée aux mêmes frontières (passe 10t) ; sans l'option, "
                          "sortie identique octet pour octet")
+    ap.add_argument("--sse", action="store_true",
+                    help="registres SSE xmm0..xmm7 en variable locale sse (c->xmm[K] → sse->x[K], "
+                         "K littéral), synchronisés aux mêmes frontières (passe 10u) ; sans "
+                         "l'option, sortie identique octet pour octet")
+    ap.add_argument("--sse-seuil", metavar="R", type=int, default=16,
+                    help="avec --sse : ne garder la transformation que sans rechargement ou avec "
+                         "≥ R accès réécrits par SC2_SSE_CHARGE (défaut 16 ; 0 = tout transformer)")
     args = ap.parse_args()
     if args.dump_vivacite and not args.vivacite_drapeaux:
         erreur("--dump-vivacite exige --vivacite-drapeaux")
@@ -1782,13 +2027,14 @@ def principal():
     cpu_h = Path(args.cpu_h)
     if not cpu_h.is_file():
         erreur(f"cpu.h introuvable : {cpu_h}")
-    classes, ecrits, aides_x87 = analyser_cpu_h(lire_texte(cpu_h))
+    classes, ecrits, aides_x87, aides_sse = analyser_cpu_h(lire_texte(cpu_h))
     fichiers = sorted(p for p in source.rglob("*") if p.is_file())
     if not any(est_recomp(p) for p in fichiers):
         erreur(f"aucun recomp_*.c dans {source}")
 
     viva = None
-    ctx = Contexte(classes, ecrits, x87=args.x87, aides_x87=aides_x87)
+    ctx = Contexte(classes, ecrits, x87=args.x87, aides_x87=aides_x87,
+                   sse=args.sse, aides_sse=aides_sse, sse_seuil=max(0, args.sse_seuil))
     if args.vivacite_drapeaux:
         ctx.iat = lire_iat(source / "sc2_imports.h")
         viva = construire_vivacite(source, fichiers, ctx)
@@ -1801,7 +2047,9 @@ def principal():
              "frontieres": {}, "retours": 0, "boucles": 0, "masques": [], "motifs": {}, "exemples": {},
              "rl_sites": 0, "rl_omis": 0,
              "x87_transformees": 0, "x87_push": 0, "x87_pop": 0, "x87_st": 0, "x87_fcom": 0,
-             "x87_fnstsw": 0, "x87_vidages": 0, "masques_x87": [], "motifs_x87": {}, "exemples_x87": {}}
+             "x87_fnstsw": 0, "x87_vidages": 0, "masques_x87": [], "motifs_x87": {}, "exemples_x87": {},
+             "sse_transformees": 0, "sse_formes": 0, "sse_vidages": 0, "masques_sse": [],
+             "motifs_sse": {}, "exemples_sse": {}}
     for chemin in fichiers:                          # fichier par fichier : jamais tout chargé
         destination = sortie / chemin.relative_to(source)
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1849,6 +2097,23 @@ def principal():
               f"FCOM {stats['x87_fcom']}, FNSTSW {stats['x87_fnstsw']}, vidages x87 : "
               f"{stats['x87_vidages']}, bits par masque x87 : {bits_x:.2f}")
         for motif, exemples in sorted(stats['exemples_x87'].items(), key=lambda kv: -stats['motifs_x87'][kv[0]]):
+            for exemple in exemples:
+                print(f"  {motif} : {exemple}")
+    if args.sse:
+        bits_ss = (sum(bin(m).count('1') for m in stats['masques_sse']) / len(stats['masques_sse'])
+                   if stats['masques_sse'] else 0.0)
+        ecartees = stats['motifs_sse'].get(MOTIF_SSE_SEUIL, 0)
+        autres = {k: v for k, v in stats['motifs_sse'].items() if k != MOTIF_SSE_SEUIL}
+        detail_ss = ', '.join(f"{k} : {v}" for k, v in sorted(autres.items(), key=lambda kv: -kv[1]))
+        print(f"sse : fonctions transformées côté SSE : {stats['sse_transformees']} sur "
+              f"{stats['transformees']}, écartées par le seuil ({ctx.sse_seuil} accès/rechargement) : "
+              f"{ecartees}, autres replis : {sum(autres.values())}"
+              + (f" ({detail_ss})" if detail_ss else "")
+              + f", formes réécrites : {stats['sse_formes']}, vidages SSE : {stats['sse_vidages']}, "
+              f"bits par masque SSE : {bits_ss:.2f}")
+        for motif, exemples in sorted(stats['exemples_sse'].items(), key=lambda kv: -stats['motifs_sse'][kv[0]]):
+            if motif == MOTIF_SSE_SEUIL:
+                continue                           # fonctions ordinaires sous le seuil : rien à inspecter
             for exemple in exemples:
                 print(f"  {motif} : {exemple}")
     if viva is not None:

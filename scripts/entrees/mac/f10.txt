@@ -1,0 +1,4 @@
+# f10.txt — M8, critère 6 (v3-critique.md §3.4) : TOUCHE 0x6D (kVK_F10) → VK_F10 (0x79) ; le runtime traite 0x79
+# comme Alt pour les SYSKEY : WM_SYSKEYDOWN (0x104, wParam 0x79. Un appui et un relâché propres, puis Cmd+Q.
+@p +30 TOUCHE 0x6D
+@p +30 QUITTER

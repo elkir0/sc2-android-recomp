@@ -1,0 +1,29 @@
+# bar-nouvelle — tout premier hub d'une campagne NEUVE (banques vides) : après la cinématique d'intro,
+#   le bar de Mar Sara s'ouvre avec la console « Mission Selection » DÉJÀ OUVERTE sur Liberation Day
+#   (relevé au banc le 24/10) — rien à cliquer pour l'ouvrir, « Launch » directement. L'Échap passe
+#   l'intro (quinze essais toutes les 2 s, sans effet une fois le bar calme). Puis « Launch » : un
+#   survol avant chaque clic, trois essais à 6 s d'écart (sans effet une fois la mission lancée : le
+#   segment suivant annule le reste). À coller sous un segment QUAND:PRET (le bar est chargé).
+#   22 événements relatifs, jamais de point-virgule dans un commentaire.
++2:ESC
++4:ESC
++6:ESC
++8:ESC
++10:ESC
++12:ESC
++14:ESC
++16:ESC
++18:ESC
++20:ESC
++22:ESC
++24:ESC
++26:ESC
++28:ESC
++30:ESC
++f2000:WAIT
++34:MOVE:725,627@ui
++35:CLIC:725,627@ui
++40:MOVE:725,627@ui
++41:CLIC:725,627@ui
++46:MOVE:725,627@ui
++47:CLIC:725,627@ui

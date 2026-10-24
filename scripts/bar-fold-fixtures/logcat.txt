@@ -1,0 +1,7 @@
+10-22 09:00:01.120 I/SC2Partout(12345): [ANDROID] fixture de bar-fold.sh (ADB_FAKE=1) : journal SYNTHÉTIQUE, aucun run réel
+10-22 09:00:02.500 I/SC2Partout(12345): [RUN] lanceur simulé (SC2_RUN_SANS_BNET=1) : « StarCraft II IPC Mem » ← état 4, mode 2, carte « Maps/Campaign/TStory01.SC2Map », 0 fichier(s) supplémentaire(s)
+10-22 09:00:02.501 I/SC2Partout(12345): [RUN] OpenProcess(accès 0x100000, PID 0) → NULL (aucun processus lanceur)
+10-22 09:00:30.000 I/SC2Partout(12345): [MPQ] Maps\Campaign\TStory01.SC2Map\DocumentHeader — 1re lecture
+10-22 09:02:10.000 I/SC2Partout(12345): [MPQ] Maps\Campaign\TRaynor02.SC2Map\DocumentHeader — 1re lecture
+10-22 09:04:20.000 I/SC2Partout(12345): [BILAN] frames présentées (Present) : 300
+10-22 09:04:20.001 I/SC2Partout(12345): [BILAN] draws : 123456 RÉELS (shaders traduits), 0 « lumière » (sans SPIR-V 0, sans déclaration 0, sans données 0) ; table SPIR-V embarquée : 2856 shaders

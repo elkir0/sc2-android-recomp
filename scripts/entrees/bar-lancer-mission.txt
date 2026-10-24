@@ -1,0 +1,22 @@
+# bar-lancer-mission.txt — entrée de campagne par le bar, sans joueur (21/10).
+# Prérequis : SC2_RUN_SANS_BNET=1 (carte d'histoire par défaut Maps/Campaign/TStory01.SC2Map, ou -run explicite) et
+# SC2_DOCUMENTS sur une COPIE de ~/code/sc2-apk/progression/apres-mission1/ (victoire en mission 1).
+# Coordonnées client 1280×720 :
+#   Échap ×5        cinématique d'arrivée au bar
+#   (270, 510)      point « Mission » sur le comptoir → console « Mission Selection » (The Outlaws)
+#   (725, 627)      bouton « Launch » → chargement de Maps/Campaign/TRaynor02.SC2Map
+# « Launch » : survol d'abord (le bouton doit être survolé avant le clic), puis deux clics de repli à 72 et 82 s
+# (au 1er essai du 21/10, le clic de 62 s sans survol préalable n'a rien lancé). Garde-fou : QUIT à 170 s.
+20:ESC
+25:ESC
+30:ESC
+35:ESC
+40:ESC
+50:CLIC:270,510
+60:MOVE:725,627
+62:CLIC:725,627
+70:MOVE:725,627
+72:CLIC:725,627
+80:MOVE:725,627
+82:CLIC:725,627
+170:QUIT

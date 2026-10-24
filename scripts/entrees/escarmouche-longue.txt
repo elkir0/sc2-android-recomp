@@ -1,0 +1,38 @@
+# escarmouche-longue.txt — escarmouche contre l'IA (V4.10, 23/10) : partie longue (≤ 21 min) jusqu'à la fin du joueur 1.
+# Partie : SC2_ESCARMOUCHE=SteppesofWar SC2_ESCARMOUCHE_RACE=terran SC2_ESCARMOUCHE_RACE_IA=zerg SC2_ESCARMOUCHE_IA=facile
+#   SC2_ESCARMOUCHE_FIN=1 (sans VISION : l'IA garde le brouillard). Le joueur ne fait rien : ses SCV restent au repos
+#   près du centre de commandement, la caméra reste sur sa base. Une capture par minute montre l'attaque de l'IA (unités
+#   zergs dans la base, ravitaillement « 6/11 » qui baisse : SCV perdus).
+# Fin de partie : la mêlée n'écrit pas de …Victory.SC2Save (QUAND:VICTOIRE ne sert pas) : SC2_ESCARMOUCHE_FIN ajoute au
+# MapScript deux déclencheurs TriggerAddEventPlayerLeft(1, victoire | défaite) qui écrivent les banques
+# EscarmoucheFinVictoire / EscarmoucheFinDefaite — d'où QUAND:FICHIER sur leur écriture. À la fin : captures de l'écran
+# de fin puis QUIT. Rien en 1260 s (SINON:SUITE) : captures et QUIT quand même, le bilan du segment dit « MAX ».
+# Banc du 23/10 : les banques ne sont PAS écrites (avec ou sans BankList.xml) — la partie s'arrête sur le MAX. IA Zerg
+# Facile : roaches et zerglings dans la base du joueur à 9 min, « Defeat! » à 10 min (captures t09m, t10m).
+# Coordonnées : aucune (caméra fixe). Horloge : depuis QUAND:PRET (fin du chargement).
+QUAND:PRET MAX:180 SINON:QUIT
++5:CAPTURE:t00m
++60:CAPTURE:t01m
++120:CAPTURE:t02m
++180:CAPTURE:t03m
++240:CAPTURE:t04m
++300:CAPTURE:t05m
++360:CAPTURE:t06m
++420:CAPTURE:t07m
++480:CAPTURE:t08m
++540:CAPTURE:t09m
++600:CAPTURE:t10m
++660:CAPTURE:t11m
++720:CAPTURE:t12m
++780:CAPTURE:t13m
++840:CAPTURE:t14m
++900:CAPTURE:t15m
++960:CAPTURE:t16m
++1020:CAPTURE:t17m
++1080:CAPTURE:t18m
++1140:CAPTURE:t19m
++1200:CAPTURE:t20m
+QUAND:FICHIER:*EscarmoucheFin*.SC2Bank ECRITURE MAX:1260
++2:CAPTURE:fin
++6:CAPTURE:fin2
++10:QUIT

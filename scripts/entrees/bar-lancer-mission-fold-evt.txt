@@ -1,0 +1,50 @@
+# bar-lancer-mission-fold-evt.txt — version Fold de bar-lancer-mission-evt.txt (23/10, après la séance S1 : l'ancien
+# scénario à instants fixes en 1280x720 manquait « Mission » et « Launch » en SC2_ECRAN=auto, 1280x1024). Mêmes gestes,
+# mêmes barrières en tours de pompe, délais élargis : le Fold pompe environ 2 fois moins vite pendant les chargements.
+# Choisi automatiquement par scripts/seance-fold.sh (étape 2). Version banc Mac d'origine :
+# Même parcours que bar-lancer-mission.txt (format 1, instants fixes) : cinématique passée, « Mission », « Launch »,
+# même verdict de banc-bar.sh (TStory01 puis TRaynor02 lues, 0 « lumière »), mais chaque étape part d'un événement.
+#   BANC_BAR_SCENARIO=scripts/entrees/bar-lancer-mission-evt.txt scripts/banc-bar.sh <binaire> <dossier>
+# Jamais de point-virgule dans un commentaire : il sépare les éléments, même après un « # ».
+# Prérequis : ceux de bar-lancer-mission.txt (SC2_RUN_SANS_BNET=1, progression apres-mission1) et un binaire V1.1 —
+# un binaire plus ancien rejette les éléments du format 2 (« N rejeté(s) » au bilan) : exiger 0 rejeté.
+# Coordonnées écrites pour 1280×720 (REF:) et ramenées au client réel : « Mission » sur le comptoir est dans la scène
+# 3D (@scene : en 1280×1024, (270, 510) → (270, 662)), « Launch » dans la console 2D (@ui : (725, 627) → (753, 836)).
+REF:1280x720
+GARDE:330
+# 1. la carte du bar est lue (DocumentHeader de TStory01), puis son chargement se termine (bit Loading de GlueUI retombé)
+QUAND:CARTE:TStory01 MAX:120 SINON:QUIT
+QUAND:PRET MAX:200 SINON:QUIT
+# 2. cinématique d'arrivée : Échap répétés (sans effet dans le bar une fois passée), puis compilation des pipelines
++1:ESC
++3:ESC
++5:ESC
++7:ESC
++9:ESC
++11:ESC
++13:ESC
++15:ESC
+# 3. « Mission » sur le comptoir, puis « Launch » dans la console (survol d'abord, deux essais de repli, sans effet
+#    une fois la cinématique lancée). Chaque geste attend DEUX conditions depuis PRET : un nombre de tours de pompe
+#    (« +fN:WAIT », barrière : un élément « f » garde son rang) et des secondes. Les tours ne comptent pas les arrêts de
+#    compilation des pipelines, les secondes suivent les animations (horloge murale du jeu). Sonde du 22/10 au banc
+#    (1280x720) : PRET au tour 61, Mission au tour 2061, console affichée vers le tour 2750 (environ 5 s après), Launch
+#    pris au tour 2761, cinématique de Tychus jusqu'à la lecture de TRaynor02 (environ 6 900 tours, 34 s).
++f2000:WAIT
++19:MOVE:270,510@scene
++20:CLIC:270,510@scene
++f2700:WAIT
++27:MOVE:725,627@ui
++f2800:WAIT
++28:CLIC:725,627@ui
++f3400:WAIT
++33:MOVE:725,627@ui
++f3500:WAIT
++34:CLIC:725,627@ui
++f4100:WAIT
++39:MOVE:725,627@ui
++f4200:WAIT
++40:CLIC:725,627@ui
+# 4. la carte de la mission est lue : le lancement a pris, fin du run au début de son chargement
+QUAND:CARTE:TRaynor02 MAX:240 SINON:QUIT
++10:QUIT

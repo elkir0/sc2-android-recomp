@@ -10,7 +10,9 @@ edi 80, cf 100, zf 200, sf 400, of 800, pf 1000, af 2000). Pour --x87 (passe
 10t) : s0 1, s1 2, s2 4, s3 8, s4 10, s5 20, s6 40, s7 80, t 100, sw 200 (3
 chiffres hexa) ; PUSH fait monter les bits s d'un cran (D' = ((D & 0x07F) << 1)
 | 0x001 | 0x100 | (D & 0x200)), POP les fait tourner vers le bas (s0 part en s7),
-écriture ST(i) salit 1 << i, fcom salit sw.
+écriture ST(i) salit 1 << i, fcom salit sw. Pour --sse (passe 10u) : xmm0 01,
+xmm1 02, … xmm7 80 (2 chiffres hexa) ; est écriture toute affectation à
+c->xmm[K] ou à un de ses champs et tout &c->xmm[K] passé à une aide.
 """
 import shutil
 import subprocess
@@ -20,7 +22,7 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "registres-locaux.py"
-CPU_H = Path(__file__).resolve().parent.parent / "recomp-sc2" / "runtime" / "cpu.h"
+CPU_H = Path(__file__).resolve().parent.parent / "runtime" / "cpu.h"
 
 ENTETE = '/* AUTO-GENERATED */\n#include "cpu.h"\n#include "sc2_lifted.h"\n\n'
 
@@ -543,6 +545,95 @@ V_X87_APPELANT = fonction("00C00110", [
 ])
 
 
+# ---- registres SSE xmm0..xmm7 locaux (--sse, passe 10u) ----
+# masques SSE : xmm0 0x01, xmm1 0x02, xmm2 0x04, xmm3 0x08, xmm4 0x10, xmm5 0x20, xmm6 0x40, xmm7 0x80
+
+# toutes les formes d'accès : lectures/écritures de champs, sse_load_ss, registre entier, ^=, u32, wrxm
+S_FORMES = fonction("00D00000", [
+    "    float _f = c->xmm[1].f32[0];                               /* 00D00000: movss xmm1, xmm0 */\n",
+    "    c->xmm[2].f32[0] = _f;                                     /* 00D00005: movss xmm2, xmm1 */\n",
+    "    sse_load_ss(&c->xmm[5], rdss((c->edi)));                   /* 00D0000A: movss xmm5, dword ptr [edi] */\n",
+    "    { XMM _s = c->xmm[2]; c->xmm[2].u64[0] ^= _s.u64[0]; }     /* 00D00010: pxor xmm2, xmm2 */\n",
+    "    c->xmm[2].u32[1] = c->xmm[5].u32[1];                       /* 00D00015: pshufd xmm2, xmm5 */\n",
+    "    wrxm((c->esi), c->xmm[2]);                                 /* 00D0001A: movdqu [esi], xmm2 */\n",
+    "    return;                                                    /* 00D0001F: ret */\n",
+])
+
+# écriture, frontière, écriture : VIDE 0x08 avant l'appel, CHARGE après, 0x40 au return
+S_FRONTIERE = fonction("00D00010", [
+    "    c->xmm[3].f32[0] = 1.0f;                                   /* 00D00010: movss xmm3, 1.0f */\n",
+    "    dispatch(c, 0x00A00040u);                                  /* 00D00015: call 0xa00040 */\n",
+    "    c->xmm[6] = c->xmm[3];                                     /* 00D0001A: movaps xmm6, xmm3 */\n",
+    "    return;                                                    /* 00D0001F: ret */\n",
+])
+
+# lectures seules (wrxm, champ f32) : masque 0 à la frontière finale
+S_LECTURE = fonction("00D00020", [
+    "    wrxm((c->edi), c->xmm[0]);                                 /* 00D00020: movdqu [edi], xmm0 */\n",
+    "    float _f = c->xmm[0].f32[3];                               /* 00D00025: movss xmm0, xmm0 */\n",
+    "    return;                                                    /* 00D0002A: ret */\n",
+])
+
+# fusion à une étiquette : deux chemins qui écrivent des registres différents → union
+S_FUSION = fonction("00D00030", [
+    "    if (c->zf) goto L_00D0004A;                                /* 00D00030: jz 0xd0004a */\n",
+    "    c->xmm[1].f32[0] = 1.0f;                                   /* 00D00035: movss */\n",
+    "    goto L_00D0004A;                                           /* 00D00040: jmp 0xd0004a */\n",
+    "L_00D0004A:\n",
+    "    c->xmm[7] = c->xmm[0];                                     /* 00D0004A: movaps xmm7, xmm0 */\n",
+    "    return;                                                    /* 00D0004F: ret */\n",
+])
+
+# boucle for (int _i …) du lifter (rsqrtps/rcpps) : registre littéral, champ à indice _i
+S_POUR_RSQRTPS = fonction("00D00040", [
+    "    for (int _i = 0; _i < 4; _i++) { c->xmm[0].f32[_i] = c->xmm[0].f32[_i] * 0.5f; } /* 00D00040: rsqrtps */\n",
+    "    return;                                                    /* 00D00045: ret */\n",
+])
+
+# repli SSE : adresse de c->xmm prise hors argument d'aide (pointeur qui s'échapperait)
+S_REPLI_ADRESSE = fonction("00D00050", [
+    "    XMM *p = &c->xmm[0];                                       /* 00D00050: (forme non émise) */\n",
+    "    return;                                                    /* 00D00052: ret */\n",
+])
+
+# x87 + SSE : DECL RL/X87/SSE, VIDE 0x101|0x10 à l'appel, 0x180|0x10 au return
+S_X87_SSE = fonction("00D00060", [
+    "    fpush(c, rdf64((GVA(0x01422108))));                       /* 00D00060: fld qword ptr [0x1422108] */\n",
+    "    c->xmm[4].f32[0] = 2.0f;                                   /* 00D00065: movss xmm4, 2.0f */\n",
+    "    dispatch(c, 0x00A00040u);                                  /* 00D0006A: call 0xa00040 */\n",
+    "    c->xmm[4].f32[1] = 3.0f;                                   /* 00D0006F: movss xmm4, 3.0f */\n",
+    "    wrf32((c->ecx), *fst(c, 0)); fpop(c);                     /* 00D00074: fstp dword ptr [ecx] */\n",
+    "    return;                                                    /* 00D00079: ret */\n",
+])
+
+# vivacité + SSE : l'appel direct combine SC2_RL_VIDEX (drapeaux omis) et SC2_SSE_VIDE (0x01)
+S_VIVACITE_APPELANT = fonction("00D00070", [
+    "    flags_sub(c, c->eax, 1u, 4);                               /* 00D00070: cmp eax, 1 */\n",
+    "    push32(c, 0x00A00100u);                                    /* 00D00072: push 0xa00100 */\n",
+    "    c->xmm[0].f32[0] = 1.0f;                                   /* 00D00077: movss xmm0, 1.0f */\n",
+    "    dispatch(c, 0x00A00100u);                                  /* 00D0007C: call 0xa00100 */\n",
+    "    c->esp = (uint32_t)(flags_add(c, c->esp, 0x4u, 4));        /* 00D00081: add esp, 4 */\n",
+    "    return;                                                    /* 00D00086: ret */\n",
+])
+
+# seuil de rentabilité (--sse-seuil) : 2 accès pour 2 rechargements (1 < 16) → écartée au
+# défaut, gardée à --sse-seuil 0 (ou 1 : 2/2 = 1 ≥ 1)
+S_SEUIL_DEUX_RECHARGEMENTS = fonction("00D00080", [
+    "    c->xmm[0].f32[0] = 1.0f;                                   /* 00D00080: movss xmm0, 1.0f */\n",
+    "    dispatch(c, 0x00A00040u);                                  /* 00D00085: call 0xa00040 */\n",
+    "    c->xmm[1].f32[0] = 2.0f;                                   /* 00D0008A: movss xmm1, 2.0f */\n",
+    "    dispatch(c, 0x00A00050u);                                  /* 00D0008F: call 0xa00050 */\n",
+    "    return;                                                    /* 00D00094: ret */\n",
+])
+
+# seuil : 4 accès sans AUCUNE frontière → toujours transformée, quel que soit le seuil
+S_SEUIL_SANS_FRONTIERE = fonction("00D00090", [
+    "    c->xmm[2].f32[0] = c->xmm[2].f32[1] + 1.0f;                /* 00D00090: addss xmm2, xmm2 */\n",
+    "    c->xmm[2].f32[1] = c->xmm[2].f32[0] + 1.0f;                /* 00D00095: addss xmm2, xmm2 */\n",
+    "    return;                                                    /* 00D0009A: ret */\n",
+])
+
+
 class TestRegistresLocaux(unittest.TestCase):
     def setUp(self):
         self.racine = Path(tempfile.mkdtemp(prefix="registres-locaux-test-"))
@@ -594,6 +685,28 @@ class TestRegistresLocaux(unittest.TestCase):
         (self.entree / "recomp_00.c").write_text(ENTETE + "".join(fonctions_c), encoding="utf-8")
         self.passage_x87(extra=extra)
         return (self.sortie / "recomp_00.c").read_text(encoding="utf-8")
+
+    def passage_sse(self, entree=None, sortie=None, extra=()):
+        resultat = self.lancer(entree or self.entree, sortie or self.sortie, "--cpu-h", str(CPU_H),
+                               "--sse", *extra)
+        self.assertEqual(resultat.returncode, 0, resultat.stderr)
+        return resultat
+
+    def transformer_sse(self, *fonctions_c, extra=()):
+        """Passe avec --sse sur un fichier réduit aux fonctions données."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + "".join(fonctions_c), encoding="utf-8")
+        self.passage_sse(extra=extra)
+        return (self.sortie / "recomp_00.c").read_text(encoding="utf-8")
+
+    def repli_sse(self, fonction_c, motif):
+        """Repli SSE seul : passe 10s appliquée, accès c->xmm intacts sur c, motif compté."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + fonction_c, encoding="utf-8")
+        resultat = self.passage_sse()
+        sortie = (self.sortie / "recomp_00.c").read_text(encoding="utf-8")
+        self.assertIn("SC2_RL_DECL(c);\n", sortie)      # la passe 10s s'applique bien
+        self.assertNotIn("SC2_SSE_", sortie)
+        self.assertIn(motif, resultat.stdout)
+        return sortie
 
     def repli_x87(self, fonction_c, motif):
         """Repli x87 seul : passe 10s appliquée, formes x87 intactes sur c, motif compté."""
@@ -1184,6 +1297,216 @@ class TestRegistresLocaux(unittest.TestCase):
                                        extra=("--vivacite-drapeaux",))
         self.assertIn("{ SC2_RL_VIDEX(c, 0x0010u, 0x3F00u); SC2_X87_VIDE(c, 0x101u); "
                       "dispatch(c, 0x00A00100u); SC2_RL_CHARGE(c); SC2_X87_CHARGE(c); }", sortie)
+
+    # ---- registres SSE xmm0..xmm7 locaux (--sse, passe 10u) ----
+
+    def test_sse_formes_acces(self):
+        """Toutes les formes réécrites en sse->x[K] ; écritures de xmm2 et xmm5 → 0x24 au return."""
+        sortie = self.transformer_sse(S_FORMES)
+        self.assertIn("    SC2_RL_DECL(c);\n    SC2_SSE_DECL(c);\n", sortie)
+        self.assertIn("float _f = sse->x[1].f32[0];", sortie)
+        self.assertIn("sse->x[2].f32[0] = _f;", sortie)
+        self.assertIn("sse_load_ss(&sse->x[5], rdss((rl->edi)));", sortie)
+        self.assertIn("{ XMM _s = sse->x[2]; sse->x[2].u64[0] ^= _s.u64[0]; }", sortie)
+        self.assertIn("sse->x[2].u32[1] = sse->x[5].u32[1];", sortie)
+        self.assertIn("wrxm((rl->esi), sse->x[2]);", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x24u); return; }", sortie)
+        self.assertIn("    SC2_SSE_VIDE(c, 0x00u);\n}", sortie)
+        self.assertNotIn("c->xmm", sortie)
+
+    def test_sse_frontiere_charge(self):
+        """Écriture puis appel : VIDE 0x08 avant, CHARGE après ; écriture ensuite → 0x40 au return.
+        Mécanique testée à --sse-seuil 0 (3 accès / 1 rechargement : sous le seuil par défaut)."""
+        sortie = self.transformer_sse(S_FRONTIERE, extra=("--sse-seuil", "0"))
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x08u); dispatch(c, 0x00A00040u); "
+                      "SC2_RL_CHARGE(c); SC2_SSE_CHARGE(c); }", sortie)
+        self.assertIn("sse->x[6] = sse->x[3];", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x40u); return; }", sortie)
+
+    def test_sse_lecture_seule(self):
+        """Lectures seules : masque 0 à la frontière finale, accès néanmoins réécrits."""
+        sortie = self.transformer_sse(S_LECTURE)
+        self.assertIn("wrxm((rl->edi), sse->x[0]);", sortie)
+        self.assertIn("float _f = sse->x[0].f32[3];", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x00u); return; }", sortie)
+
+    def test_sse_fusion_union(self):
+        """Deux chemins qui écrivent xmm1 (conditional) et xmm7 (après label) → union 0x82."""
+        sortie = self.transformer_sse(S_FUSION)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x82u); return; }", sortie)
+
+    def test_sse_pour_rsqrtps(self):
+        """for (int _i …) sur c->xmm[0].f32[_i] : réécrit, bit xmm0 sale (0x01)."""
+        sortie = self.transformer_sse(S_POUR_RSQRTPS)
+        self.assertIn("for (int _i = 0; _i < 4; _i++) { sse->x[0].f32[_i] = "
+                      "sse->x[0].f32[_i] * 0.5f; }", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x01u); return; }", sortie)
+
+    def test_sse_repli_indice_non_litteral(self):
+        """for sur c->xmm[_i] : repli SSE seul, la passe 10s s'applique, c->xmm intact."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + F_POUR_SSE, encoding="utf-8")
+        resultat = self.passage_sse()
+        sortie = (self.sortie / "recomp_00.c").read_text(encoding="utf-8")
+        self.assertIn("SC2_RL_DECL(c);\n", sortie)
+        self.assertIn("for (int _i = 0; _i < 4; _i++) { c->xmm[_i] = c->xmm[_i]; }", sortie)
+        self.assertNotIn("SC2_SSE_", sortie)
+        self.assertIn("sse : indice de registre xmm non littéral", resultat.stdout)
+
+    def test_sse_repli_adresse_hors_aide(self):
+        """XMM *p = &c->xmm[0] : repli SSE seul (l'adresse s'échapperait de la variable locale)."""
+        self.repli_sse(S_REPLI_ADRESSE, "sse : adresse de c->xmm hors argument d'aide")
+
+    def test_sse_sans_option_identique(self):
+        """Sans --sse, les accès restent sur c, aucune macro SC2_SSE_* émise."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + S_FORMES, encoding="utf-8")
+        self.passage()
+        sortie = (self.sortie / "recomp_00.c").read_text(encoding="utf-8")
+        self.assertIn("sse_load_ss(&c->xmm[5], rdss((rl->edi)));", sortie)
+        self.assertIn("wrxm((rl->esi), c->xmm[2]);", sortie)
+        self.assertNotIn("SC2_SSE_", sortie)
+        self.assertNotIn("sse->x[", sortie)
+
+    def test_sse_fonction_sans_xmm_inchangee(self):
+        """Sans accès xmm, la sortie de --sse est identique octet pour octet à la sortie sans option."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + F_SIMPLE, encoding="utf-8")
+        s1, s2 = self.racine / "s1", self.racine / "s2"
+        self.passage(sortie=s1)
+        self.passage_sse(sortie=s2)
+        self.assertEqual((s1 / "recomp_00.c").read_bytes(), (s2 / "recomp_00.c").read_bytes())
+        self.assertNotIn("SC2_SSE_", (s2 / "recomp_00.c").read_text(encoding="utf-8"))
+
+    def test_sse_x87_ensemble(self):
+        """--x87 et --sse (seuil 0) : DECL RL/X87/SSE, VIDE 0x101 puis 0x10 à l'appel, CHARGE RL/X87/SSE."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + S_X87_SSE, encoding="utf-8")
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H),
+                               "--x87", "--sse", "--sse-seuil", "0")
+        self.assertEqual(resultat.returncode, 0, resultat.stderr)
+        sortie = (self.sortie / "recomp_00.c").read_text(encoding="utf-8")
+        self.assertIn("    SC2_RL_DECL(c);\n    SC2_X87_DECL(c);\n    SC2_SSE_DECL(c);\n", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_X87_VIDE(c, 0x101u); SC2_SSE_VIDE(c, 0x10u); "
+                      "dispatch(c, 0x00A00040u); SC2_RL_CHARGE(c); SC2_X87_CHARGE(c); "
+                      "SC2_SSE_CHARGE(c); }", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_X87_VIDE(c, 0x100u); SC2_SSE_VIDE(c, 0x10u); "
+                      "return; }", sortie)
+        self.assertIn("sse->x[4].f32[1] = 3.0f;", sortie)
+
+    def test_sse_stats(self):
+        """Ligne de statistiques SSE : transformées, écartées par le seuil, replis, formes réécrites."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + S_FORMES + S_LECTURE + F_POUR_SSE
+                                                 + S_SEUIL_DEUX_RECHARGEMENTS, encoding="utf-8")
+        resultat = self.passage_sse()
+        self.assertRegex(resultat.stdout,
+                         r"sse : fonctions transformées côté SSE : 2 sur 4, "
+                         r"écartées par le seuil \(16 accès/rechargement\) : 1, "
+                         r"autres replis : 1 \(sse : indice de registre xmm non littéral : 1\), "
+                         r"formes réécrites : 10, vidages SSE : 4, "
+                         r"bits par masque SSE : [0-9]+\.[0-9]{2}")
+
+    def test_sse_verifier_conforme(self):
+        """--verifier --sse : retrait octet pour octet (macros SC2_SSE_* retirées), invariants."""
+        (self.entree / "recomp_00.c").write_text(
+            ENTETE + S_FORMES + S_FRONTIERE + S_LECTURE + S_FUSION + S_POUR_RSQRTPS
+            + S_REPLI_ADRESSE + F_SIMPLE, encoding="utf-8")
+        self.passage_sse()
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H), "--sse", "--verifier")
+        self.assertEqual(resultat.returncode, 0, resultat.stderr)
+        self.assertIn("registres SSE compris", resultat.stdout)
+
+    def test_sse_verifier_conforme_x87(self):
+        """--verifier --x87 --sse (seuil 0) ensemble : retrait et invariants des trois variables locales."""
+        (self.entree / "recomp_00.c").write_text(
+            ENTETE + S_X87_SSE + X_FRONTIERE + X_PUSH_FSTP + S_FORMES + F_SIMPLE, encoding="utf-8")
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H),
+                               "--x87", "--sse", "--sse-seuil", "0")
+        self.assertEqual(resultat.returncode, 0, resultat.stderr)
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H),
+                               "--x87", "--sse", "--sse-seuil", "0", "--verifier")
+        self.assertEqual(resultat.returncode, 0, resultat.stderr)
+        self.assertIn("registres SSE compris", resultat.stdout)
+
+    def test_sse_verifier_refuse_masque_altere(self):
+        """Un masque SC2_SSE_VIDE altéré : le vérificateur signale l'écart."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + S_FORMES, encoding="utf-8")
+        self.passage_sse()
+        cible = self.sortie / "recomp_00.c"
+        cible.write_text(cible.read_text(encoding="utf-8").replace(
+            "SC2_SSE_VIDE(c, 0x24u); return;", "SC2_SSE_VIDE(c, 0x20u); return;"), encoding="utf-8")
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H), "--sse", "--verifier")
+        self.assertNotEqual(resultat.returncode, 0)
+        self.assertIn("masques SSE", resultat.stderr)
+
+    def test_sse_verifier_refuse_c_xmm_reintroduit(self):
+        """Un c->xmm réintroduit dans une fonction SSE : le vérificateur le signale."""
+        (self.entree / "recomp_00.c").write_text(ENTETE + S_FORMES, encoding="utf-8")
+        self.passage_sse()
+        cible = self.sortie / "recomp_00.c"
+        cible.write_text(cible.read_text(encoding="utf-8").replace(
+            "sse->x[2].f32[0] = _f;", "c->xmm[2].f32[0] = _f;"), encoding="utf-8")
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H), "--sse", "--verifier")
+        self.assertNotEqual(resultat.returncode, 0)
+        self.assertIn("c->xmm subsistant", resultat.stderr)
+
+    def test_sse_compilation_cc(self):
+        """Une sortie --sse (seuil 0) compile avec cc, avec et sans -DSC2_RL_CONTROLE."""
+        if shutil.which("cc") is None:
+            self.skipTest("cc indisponible")
+        (self.entree / "recomp_00.c").write_text(ENTETE + S_FORMES + S_FRONTIERE + S_LECTURE
+                                                 + S_POUR_RSQRTPS + S_X87_SSE, encoding="utf-8")
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H),
+                               "--x87", "--sse", "--sse-seuil", "0")
+        self.assertEqual(resultat.returncode, 0, resultat.stderr)
+        for options in ([], ["-DSC2_ACCES_VOLATILS"], ["-DSC2_ACCES_VOLATILS", "-DSC2_RL_CONTROLE"]):
+            resultat = subprocess.run(["cc", "-fsyntax-only", "-Wno-parentheses-equality", *options,
+                                       "-include", str(CPU_H.parent / "sc2_lifted.h"),
+                                       "-I", str(CPU_H.parent),
+                                       str(self.sortie / "recomp_00.c")],
+                                      capture_output=True, text=True)
+            self.assertEqual(resultat.returncode, 0, f"{options} : {resultat.stderr}")
+
+    def test_sse_vivacite_combine(self):
+        """Vivacité + SSE (seuil 0) : SC2_RL_VIDEX (drapeaux omis) suivi de SC2_SSE_VIDE à l'appel direct."""
+        sortie = self.transformer_sse(V_TOUT_ECRIT, S_VIVACITE_APPELANT,
+                                      extra=("--vivacite-drapeaux", "--sse-seuil", "0"))
+        self.assertIn("{ SC2_RL_VIDEX(c, 0x0010u, 0x3F00u); SC2_SSE_VIDE(c, 0x01u); "
+                      "dispatch(c, 0x00A00100u); SC2_RL_CHARGE(c); SC2_SSE_CHARGE(c); }", sortie)
+
+    # ---- seuil de rentabilité SSE (--sse-seuil, défaut 16) ----
+
+    def test_sse_seuil_sans_frontiere_transformee(self):
+        """Aucun rechargement : la fonction est transformée quel que soit le seuil (défaut ici)."""
+        sortie = self.transformer_sse(S_SEUIL_SANS_FRONTIERE)
+        self.assertIn("sse->x[2].f32[0] = sse->x[2].f32[1] + 1.0f;", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x04u); return; }", sortie)
+        self.assertNotIn("c->xmm", sortie)
+
+    def test_sse_seuil_deux_acces_deux_rechargements(self):
+        """2 accès / 2 rechargements : écartée au seuil 16 (c->xmm intacts), transformée à --sse-seuil 0."""
+        sortie_repli = self.repli_sse(S_SEUIL_DEUX_RECHARGEMENTS,
+                                      "écartées par le seuil (16 accès/rechargement) : 1")
+        self.assertIn("c->xmm[0].f32[0] = 1.0f;", sortie_repli)
+        self.assertIn("c->xmm[1].f32[0] = 2.0f;", sortie_repli)
+        sortie = self.transformer_sse(S_SEUIL_DEUX_RECHARGEMENTS, extra=("--sse-seuil", "0"))
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x01u); dispatch(c, 0x00A00040u); "
+                      "SC2_RL_CHARGE(c); SC2_SSE_CHARGE(c); }", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x02u); dispatch(c, 0x00A00050u); "
+                      "SC2_RL_CHARGE(c); SC2_SSE_CHARGE(c); }", sortie)
+        self.assertIn("{ SC2_RL_VIDE(c, 0x0000u); SC2_SSE_VIDE(c, 0x00u); return; }", sortie)
+
+    def test_sse_seuil_a_la_frontiere_exacte(self):
+        """--sse-seuil 1 : 2 accès / 2 rechargements = 1 ≥ 1 → transformée (le seuil est inclusif)."""
+        sortie = self.transformer_sse(S_SEUIL_DEUX_RECHARGEMENTS, extra=("--sse-seuil", "1"))
+        self.assertIn("SC2_SSE_DECL(c);", sortie)
+        self.assertNotIn("c->xmm", sortie)
+
+    def test_sse_seuil_verifier_conforme(self):
+        """--verifier avec le seuil par défaut : fonctions retenues et écartées coexistent, tout retombe."""
+        (self.entree / "recomp_00.c").write_text(
+            ENTETE + S_SEUIL_SANS_FRONTIERE + S_SEUIL_DEUX_RECHARGEMENTS + S_FORMES
+            + S_FRONTIERE + F_SIMPLE, encoding="utf-8")
+        self.passage_sse()
+        resultat = self.lancer(self.entree, self.sortie, "--cpu-h", str(CPU_H), "--sse", "--verifier")
+        self.assertEqual(resultat.returncode, 0, resultat.stderr)
+        self.assertIn("registres SSE compris", resultat.stdout)
 
 
 if __name__ == "__main__":

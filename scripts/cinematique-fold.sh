@@ -5,20 +5,23 @@
 # de la cinématique. Options du runtime à tester en arguments (ex. SC2_VK_SYNCHRONE=1). Le sc2.env du Fold est
 # REMPLACÉ pendant le run et sauvegardé avant dans <sortie>/sc2.env.avant : le remettre ensuite (adb push).
 # Sortie : ~/code/sc2-apk/mesures/<jour>/cine-<nom>/ (sc2.env, logcat.txt, frames/*.png, planche.png).
-D=${SC2_ADB_SERIAL:?série adb (adb devices -l)}; N=$1; A=$2; shift 2
+# Appareil : SC2_ADB_SERIAL, sinon le Fold (modèle SM_F976B) trouvé dans « adb devices -l » (scripts/lib-fold.sh).
+N=$1; A=$2; shift 2
 R="$(cd "$(dirname "$0")/.." && pwd)"; O=$HOME/code/sc2-apk/mesures/$(date +%Y%m%d)/cine-$N; mkdir -p "$O"
-a() { adb -s $D "$@"; }
+. "$R/scripts/lib-fold.sh"; D=$(fold_serie) || exit 1
+a() { adb -s "$D" "$@"; }
 statut() { a shell 'dumpsys thermalservice | grep -m1 "Thermal Status"' | tr -dc '0-9'; }
 until [ "$(statut)" = 0 ]; do sleep 20; done
 [ "$A" != - ] && { a install -r "$A" 2>&1 | tail -1; a shell appops set fr.sc2partout MANAGE_EXTERNAL_STORAGE allow; }
 a push "$R/scripts/entrees/traynor01-victoire-fold.txt" /sdcard/SC2Partout/entrees-fold.txt >/dev/null
 a shell cat /sdcard/SC2Partout/sc2.env > "$O/sc2.env.avant"
-{ printf 'SC2_RUN_SANS_BNET=1\nSC2_MANQUE_CONTINUE=1\nSC2_ARGS=-run Maps/Campaign/TRaynor01.SC2Map\n'
-  printf 'SC2_BANC_ENTREES=@/sdcard/SC2Partout/entrees-fold.txt\nSC2_FRAMES_PAS=50\n'; for v in "$@"; do echo "$v"; done; } > "$O/sc2.env"
+{ printf 'SC2_ECRAN=1280x720\nSC2_RUN_SANS_BNET=1\nSC2_MANQUE_CONTINUE=1\nSC2_ARGS=-run Maps/Campaign/TRaynor01.SC2Map\n'
+  printf 'SC2_BANC_ENTREES=@/sdcard/SC2Partout/entrees-fold.txt\nSC2_FRAMES=1\nSC2_FRAMES_PAS=50\n'   # SC2_FRAMES=1 : V0.1
+  for v in "$@"; do echo "$v"; done; } > "$O/sc2.env"
 a push "$O/sc2.env" /sdcard/SC2Partout/sc2.env >/dev/null
 a shell am force-stop fr.sc2partout; a logcat -c
 a shell am start -n fr.sc2partout/android.app.NativeActivity >/dev/null; echo "$(date +%T) [$N] lancé"
-adb -s $D logcat -v time -s SC2Partout:I libc:F DEBUG:F > "$O/logcat.txt" 2>&1 & P=$!
+adb -s "$D" logcat -v time -s SC2Partout:I libc:F DEBUG:F > "$O/logcat.txt" 2>&1 & P=$!
 sleep 230; a shell input keyevent --longpress KEYCODE_BACK; sleep 12; kill $P; a shell am force-stop fr.sc2partout
 a push "$O/sc2.env.avant" /sdcard/SC2Partout/sc2.env >/dev/null; echo "sc2.env d'origine remis"
 X=$(grep -a 'Loading' "$O/logcat.txt" | grep -o 'Present n°[0-9]*' | tail -1 | tr -dc '0-9'); echo "chargement du bar au Present $X"

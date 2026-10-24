@@ -1,0 +1,8 @@
+# molette.txt — M8, critère 4 (v3-critique.md §3.4 ; conception A §2.4 L3-4) : MOLETTE 3 (trois crans vers l'avant)
+# → WM_MOUSEWHEEL (0x20A, wParam 0x1680000 (360 << 16 : 3 crans × 120), puis zoom mesuré par AE entre captures
+# (SC2_FRAMES=1 SC2_FRAMES_PAS=50). Première preuve du zoom en mission (inv. E §5.11) : à jouer sur TRaynor01 —
+# ATTENDRE_LIGNE sur la fin de l'écran de chargement puis +15 s de stabilisation (le rejeu n'attend que la géométrie
+# pour convertir, mais la preuve AE demande la mission à l'écran).
+ATTENDRE_LIGNE "[GLUE] écrans affichés 0x00 (était 0x10)" 400000
++15000 MOLETTE 3
+@p +100 QUITTER

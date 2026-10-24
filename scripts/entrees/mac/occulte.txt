@@ -1,0 +1,6 @@
+# occulte.txt — M7, critère 4 (greffe 2) : fenêtre occultée du Present n°300 au n°500 environ. Attendu : présentation
+# suspendue une fois, AUCUNE pause, aucune bascule, et les Present continuent (les @p +100 passent pendant l'occultation).
+@p 300 OCCULTE 1
+@p +100 JOURNAL "occultée depuis 100 Present"
+@p +100 OCCULTE 0
+@p +60 QUITTER

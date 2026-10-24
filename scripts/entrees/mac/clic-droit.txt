@@ -1,0 +1,6 @@
+# clic-droit.txt — M8, critère 3 (v3-critique.md §3.4) : CLIC d (bouton droit NSEvent) et CLIC g mods=ctrl
+# (Ctrl physique tenu) doivent donner TOUS DEUX WM_RBUTTONDOWN puis WM_RBUTTONUP. Le Ctrl+clic mémorise le bouton
+# joué (2) : le relâché sans Ctrl reste un clic droit (sc2s_bouton_relache).
+@p +30 CLIC d j 640 360
++500 CLIC g j 640 360 mods=ctrl
+@p +30 QUITTER

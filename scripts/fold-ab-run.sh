@@ -8,10 +8,11 @@
 # Sortie (hors dépôt) : ~/code/sc2-apk/mesures/<jour>/<nom>/ (logcat.txt, resume.txt, deroule.txt, rapport-*.txt),
 # à dépouiller par scripts/fold-ab.py.
 # logcat restreint aux étiquettes du jeu et des plantages (rien d'autre du téléphone).
-D=${SC2_ADB_SERIAL:?série adb (adb devices -l)}; N=$1; A=$2; J=${3:-60}; S=${4:-60}
+# Appareil : SC2_ADB_SERIAL (posé par fold-ab-auto.sh), sinon le Fold trouvé dans « adb devices -l » (lib-fold.sh).
+N=$1; A=$2; J=${3:-60}; S=${4:-60}
 O=$HOME/code/sc2-apk/mesures/$(date +%Y%m%d)/$N; mkdir -p "$O"
-a() { adb -s $D "$@"; }
-[ "$(adb -s $D get-state 2>/dev/null)" = device ] || { echo "Fold absent d'adb : run annulé"; exit 1; }
+. "$(dirname "$0")/lib-fold.sh"; D=$(fold_serie) || exit 1
+a() { adb -s "$D" "$@"; }
 temp() { a shell 'dumpsys thermalservice 2>/dev/null | grep -m1 -E "Thermal Status|mStatus:" ; dumpsys thermalservice 2>/dev/null | grep "mName=AP," | tail -1' | tr -s ' \t\n' ' ' | cut -c1-160; }
 statut() { a shell 'dumpsys thermalservice 2>/dev/null | grep -m1 "Thermal Status"' | tr -dc '0-9'; }
 dit() { echo "$(date +%T) $*" | tee -a "$O/deroule.txt"; }
@@ -25,10 +26,13 @@ fi
 echo "apk : $A $( [ "$A" != - ] && md5 -q "$A")" >> "$O/resume.txt"
 a shell dumpsys package fr.sc2partout | grep -m1 lastUpdateTime | tee -a "$O/resume.txt"
 a shell cat /sdcard/SC2Partout/sc2.env > "$O/sc2.env"
+# V0.1 : ce script ne réécrit pas le sc2.env (fold-ab-auto.sh y pose SC2_FRAMES=1) ; lancé seul, il le signale s'il
+# manque — avec le défaut de la vague 0 bis (SC2_FRAMES=0), ni capture ni coût de relecture : runs non comparables
+grep -q '^SC2_FRAMES=1' "$O/sc2.env" || dit "attention : sc2.env sans SC2_FRAMES=1 (captures selon le défaut de l'APK)"
 a shell am force-stop fr.sc2partout; a logcat -c
 a shell am start -n fr.sc2partout/android.app.NativeActivity >/dev/null
-dit "jeu lancé — le mainteneur : ferme le panneau d'aide quand il apparaît, puis joue sans t'arrêter"
-adb -s $D logcat -v time -s SC2Partout:I libc:F DEBUG:F AndroidRuntime:E > "$O/logcat.txt" 2>&1 & P=$!
+dit "jeu lancé — joueur : ferme le panneau d'aide quand il apparaît, puis joue sans t'arrêter"
+adb -s "$D" logcat -v time -s SC2Partout:I libc:F DEBUG:F AndroidRuntime:E > "$O/logcat.txt" 2>&1 & P=$!
 until grep -aq "WM_LBUTTONDOWN" "$O/logcat.txt"; do
   sleep 1; kill -0 $P 2>/dev/null || { dit "logcat interrompu"; exit 1; }
   grep -aqE 'Fatal signal|FATAL-JEU' "$O/logcat.txt" && { dit "plantage avant le 1er clic"; break; }
@@ -42,7 +46,7 @@ if [ "$S" -gt 0 ]; then
   dit "profil fini"
 fi
 a shell input keyevent --longpress KEYCODE_BACK
-dit "appui long sur Retour (bilan de sortie) — le mainteneur : tu peux lâcher"
+dit "appui long sur Retour (bilan de sortie) — joueur : tu peux lâcher"
 sleep 12
 echo "$(date +%T) [$N] température après : $(temp)" | tee -a "$O/resume.txt"
 kill $P; wait $P 2>/dev/null

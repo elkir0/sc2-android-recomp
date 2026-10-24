@@ -1,0 +1,49 @@
+# bar-hyperion — hub de l'Hyperion (TStory01, après Zero Hour), sans joueur, 1280x720, relevé au banc le
+#   24/10 (E19b-E23). Le retour de mission atterrit dans la CANTINE : l'onglet « Bridge » 577,702@ui mène
+#   au pont, dont l'entrée peut démarrer une conversation (Raynor) — Échap après le clic d'onglet. Le
+#   centre de la table holographique 520,480@scene ouvre la carte stellaire (≈ 3 s) : JAMAIS d'Échap
+#   ensuite, Échap la referme. La planète vise le marqueur « {planete} », remplacé par la coordonnée du
+#   plan (« hub hyperion 573,496 » — 2 planètes à 573/720, 3 planètes à 507/640/769, y ≈ 496, @ui).
+#   « Launch » ×2 à 6 s d'écart, puis l'Échap passe la cinématique qui précède le chargement de la
+#   mission — le QUAND:CARTE (ou CHARGEMENT) de la mission annule le reste. Les Échap d'arrivée et de
+#   pont sont espacés de 4 s, ceux de fin de 10 s : c'est la version resserrée (37 événements) qui fait
+#   tenir SIX missions sous la limite de 1024 événements du banc. À coller sous un segment QUAND:PRET.
+#   Jamais de point-virgule dans un commentaire.
++4:ESC
++8:ESC
++12:ESC
++16:ESC
++20:ESC
++24:ESC
++28:ESC
++32:ESC
++36:ESC
++40:ESC
++44:ESC
++48:ESC
++f2000:WAIT
++51:MOVE:577,702@ui
++52:CLIC:577,702@ui
++56:ESC
++60:ESC
++64:ESC
++68:ESC
++72:ESC
++76:ESC
++80:ESC
++84:MOVE:520,480@scene
++85:CLIC:520,480@scene
++93:MOVE:{planete}@ui
++94:CLIC:{planete}@ui
++99:MOVE:725,627@ui
++100:CLIC:725,627@ui
++105:MOVE:725,627@ui
++106:CLIC:725,627@ui
++115:ESC
++125:ESC
++135:ESC
++145:ESC
++155:ESC
++165:ESC
++175:ESC
++185:ESC

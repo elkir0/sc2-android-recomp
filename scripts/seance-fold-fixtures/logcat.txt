@@ -1,0 +1,26 @@
+10-22 09:00:00.000 I/SC2Partout(12345): [ANDROID] fixture de seance-fold.sh (ADB_FAKE=1) : journal SYNTHÉTIQUE, aucun run réel
+10-22 09:00:01.100 I/SC2Partout(12345): [FENETRE] INIT_WINDOW 2176x1812 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-22 09:00:02.300 I/SC2Partout(12345): [OMBRES] PS 00000000000000a1 : variante Dref3 réclamée → repli sampler-texture (shader 42)
+10-22 09:00:02.400 I/SC2Partout(12345): [OMBRES] PS 00000000000000a1 sampler s0 ← texture de profondeur 2176×1812 D3DFMT 42 (drapeau profondeur_1)
+10-22 09:00:02.500 I/SC2Partout(12345): [VK] fonction vkCmdSetScissor : absente → repli (émulation par vkCmdSetViewport)
+10-22 09:00:02.600 I/SC2Partout(12345): [VK] fonction vkCmdBlendConstants : absente → repli (pipeline re-lié)
+10-22 09:00:05.000 I/SC2Partout(12345): [AFFICHAGE] 1er tampon de fenêtre verrouillé : 1280x1066, stride 1280, format 1 (attendu 1 = RGBA_8888)
+10-22 09:00:05.010 I/SC2Partout(12345): [AFFICHAGE] 1er tampon posté à SurfaceFlinger (copie CPU)
+10-22 09:00:05.020 I/SC2Partout(12345): frame n°1 affichée à l'écran (1 affichées)
+10-22 09:00:10.000 I/SC2Partout(12345): [RUN] lanceur simulé (SC2_RUN_SANS_BNET=1) : « StarCraft II IPC » Mémoire → état 4, mode 2, carte « Maps/Campaign/TStory01.SC2Map », 0 fichier(s) supplémentaire(s)
+10-22 09:00:12.000 I/SC2Partout(12345): [MPQ] Maps\Campaign\TStory01.SC2Map\DocumentHeader — 1re lecture
+10-22 09:00:20.000 I/SC2Partout(12345): [MPQ] Maps\Campaign\TRaynor02.SC2Map\DocumentHeader — 1re lecture
+10-22 09:00:30.000 I/SC2Partout(12345): [FPS] 5.9 images/s sur 5.0 s (frames 12→41, copie CPU) ; moyenne depuis la 1re : 5.9 ; phase menu ; ms/frame : jeu 120.4, backend 40.2
+10-22 09:00:40.000 I/SC2Partout(12345): [BANC] entrée rejouée : WM_LBUTTONDOWN (312, 1050) → menu lanceur
+10-22 09:00:50.000 I/SC2Partout(12345): [PAUSE] activité en pause : suspension du jeu
+10-22 09:00:52.100 I/SC2Partout(12345): [PAUSE] arrière-plan : jeu suspendu au Present n°432
+10-22 09:00:55.000 I/SC2Partout(12345): [PAUSE] activité reprise
+10-22 09:00:55.100 I/SC2Partout(12345): [PAUSE] reprise après 2.9 s : horloge du jeu décalée d'autant (pauses : 1, 2.9 s en tout)
+10-22 09:01:00.000 I/SC2Partout(12345): [FPS] 11.8 images/s sur 5.0 s (frames 100→159, copie CPU) ; moyenne depuis la 1re : 10.4 ; ms/frame : jeu 42.1, backend 32.0
+10-22 09:01:05.000 I/SC2Partout(12345): [MEM] mémoire : 3072/8192 Mo adressables, 1180 Mo libres
+10-22 09:01:10.000 I/SC2Partout(12345): [FPS] 12.0 images/s sur 5.0 s (frames 160→220, copie CPU) ; moyenne depuis la 1re : 10.9 ; ms/frame : jeu 41.5, backend 31.8
+10-22 09:01:20.000 I/SC2Partout(12345): [FPS] 11.9 images/s sur 5.0 s (frames 220→280, copie CPU) ; moyenne depuis la 1re : 11.0 ; ms/frame : jeu 41.9, backend 31.9
+10-22 09:01:30.000 I/SC2Partout(12345): [FPS] 12.1 images/s sur 5.0 s (frames 280→341, copie CPU) ; moyenne depuis la 1re : 11.1 ; ms/frame : jeu 41.2, backend 31.7
+10-22 09:01:35.000 I/SC2Partout(12345): [BILAN] frames présentées (Present) : 1200
+10-22 09:01:35.100 I/SC2Partout(12345): [BILAN] draws : 24680 RIELS (shaders traduits), 0 ± lumière 0 (sans SPIR-V 0, sans déclaration 0, sans données 0) ; table SPIR-V embarquée : 2856 shaders
+10-22 09:01:36.000 I/SC2Partout(12345): sortie demandée par la plate-forme (appui long sur Retour) : arrêt propre

@@ -1,0 +1,10 @@
+alphadepthWrite=1
+aolight=0
+creepnormalmap=1
+creepQuality=1
+creepreflection=0
+creepselfshadow=0
+creeptrans=1
+deff=0
+deffspec=0
+depthDisp=0

@@ -1,0 +1,10 @@
+# bord.txt — M8 (v3-critique.md §3.4 ; conception A §2.4 L3-5) : défilement au bord en PLEIN ÉCRAN, en mission
+# (ATTENDRE_LIGNE sur la fin du chargement, +15 s de stabilisation). PLEIN_ECRAN, puis le curseur au bord gauche
+# (MOVE f 0 0.5) tenu 2 s : la caméra doit défiler (AE plein cadre entre deux captures, SC2_FRAMES=1
+# SC2_FRAMES_PAS=50). À jouer sur TRaynor01. « Exige le mainteneur » à la séance : bords extérieurs (f 1 0.5, f 0.5 0,
+# f 0.5 1) ; PLEIN_ECRAN exige une session ouverte (refusé session verrouillée, constat M7).
+ATTENDRE_LIGNE "[GLUE] écrans affichés 0x00 (était 0x10)" 400000
++15000 PLEIN_ECRAN 1
+@p +60 MOVE f 0 0.5
++2000 MOVE f 0.01 0.5
+@p +100 QUITTER

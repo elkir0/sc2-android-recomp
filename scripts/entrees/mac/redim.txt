@@ -1,0 +1,8 @@
+# redim.txt — M7, critères 5 et 6 : taille 1600x900 points (swapchain 3200x1800 à l'échelle 2), plein écran (taille
+# de l'écran en pixels), retour au fenêtré, puis Cmd+Q. Avec SC2_SWAPCHAIN_TEST_ECHEC=-4 : bascule au 1er present,
+# réarmée par le redimensionnement (critère 6).
+@p 200 TAILLE 1600 900
+@p +60 PLEIN_ECRAN 1
+@p +120 JOURNAL "plein écran depuis 120 Present"
+@p +10 PLEIN_ECRAN 0
+@p +60 QUITTER

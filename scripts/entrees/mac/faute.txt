@@ -1,0 +1,3 @@
+# faute.txt — M7/M10 : chemin de plantage, avec SC2_MAC_TEST_FAUTE=principal:600 ou jeu:600 (faute provoquée par
+# l'hôte au Present n°600 ; rc=139 attendu). Garde : QUITTER au n°3000 si la faute n'a pas eu lieu.
+@p 3000 QUITTER

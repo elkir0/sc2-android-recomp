@@ -1,0 +1,13 @@
+# groupe.txt — M8 (v3-critique.md §3.4 ; conception A §2.4 L3-7, « Exige le mainteneur » : VOIE file, keyUp sous Cmd qui
+# prend le focus). MODS cmd (flagsChanged : Cmd gauche tenue → VK_LCONTROL côté jeu, SC2_MAC_CMD=ctrl ; le runtime
+# poste le VK générique 0x11), puis TOUCHE 0x12 "1" mods=cmd (kVK_ANSI_1 → VK 0x31) : WM_KEYDOWN 0x11 puis 0x31,
+# et le keyUp SOUS Cmd — c'est le cœur de la séance : en VOIE file, AppKit avale d'ordinaire ce keyUp, le routeur
+# sendEvent: de M7 le récupère. MODS - relâche Cmd. Attendu dans le journal (constaté le 24/10) : WM_KEYDOWN
+# (0x100, wParam 0x11 puis 0x31), WM_KEYUP (0x101, wParam 0x31 puis 0x11) ; bilan « touches tenues 0 ».
+# ISOLE 0 (la VOIE file exige le focus).
+ISOLE 0
+VOIE file
+@p +30 MODS cmd
+TOUCHE 0x12 "1" mods=cmd
++500 MODS -
+@p +30 QUITTER

@@ -1,0 +1,2 @@
+SC2_HZ=commutable
+SC2_VERSION=passe-fixture

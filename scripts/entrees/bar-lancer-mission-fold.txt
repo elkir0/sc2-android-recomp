@@ -1,0 +1,30 @@
+# bar-lancer-mission-fold.txt — entrée de campagne par le bar sur le Fold, sans joueur (21/10).
+# Même déroulé que bar-lancer-mission.txt (banc Mac), délais élargis : le Fold pompe ≈ 2× moins vite pendant les
+# chargements (tour 670 à 40 s contre 1 476 au banc). Échap répétés de 30 à 90 s : au banc, un Échap dans le bar
+# n'ouvre rien (images 1250 et 1500 du 21/10). Survol de Tychus (900, 200) à 95-100 s : silhouette blanche (stencil) ?
+# Coordonnées client 1280×720 : (270, 510) « Mission », (725, 627) « Launch » (survol puis clic, quatre essais).
+30:ESC
+35:ESC
+40:ESC
+45:ESC
+50:ESC
+55:ESC
+60:ESC
+65:ESC
+70:ESC
+75:ESC
+80:ESC
+85:ESC
+90:ESC
+95:MOVE:900,200
+97:MOVE:905,205
+100:MOVE:900,200
+105:CLIC:270,510
+118:MOVE:725,627
+120:CLIC:725,627
+130:MOVE:725,627
+132:CLIC:725,627
+142:MOVE:725,627
+144:CLIC:725,627
+154:MOVE:725,627
+156:CLIC:725,627

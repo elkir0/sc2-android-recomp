@@ -1,0 +1,7 @@
+# focus-touche.txt — M8, critère 7 (v3-critique.md §3.4 ; conception A §2.4 L3-9) : une touche tenue (« a », kVK 0x00
+# → VK 0x41) au moment de la perte du focus. sc2m_focus(0) appelle sc2_input_tout_relacher : le jeu doit voir
+# WM_KEYUP (0x101, wParam 0x41. Retour du focus ensuite (resync Verr. maj), puis Cmd+Q.
+@p +30 TOUCHE_BAS 0x00 "a"
++500 FOCUS 0
++1500 FOCUS 1
+@p +30 QUITTER

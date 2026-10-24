@@ -1,0 +1,118 @@
+# f10-menu-evt.txt — L2 (24/10) : menu de jeu F10 complet en mode histoire, sans joueur, PILOTÉ PAR ÉVÉNEMENTS.
+# Bar (progression apres-mission1) → mission 2 (TRaynor02), puis F10 → Options → Gamma → Accept → « YES » de la
+# confirmation d'affichage → Return to Game → F10 → Restart (difficulté) → mission rechargée → F10 → Quit Campaign.
+#   BANC_BAR_SCENARIO=scripts/entrees/f10-menu-evt.txt scripts/banc-bar.sh <binaire> <dossier>
+# Attendu : rc=0, « [GLUE] menu principal atteint » (le jeu se termine au menu principal en mode lanceur), segments tous
+# déclenchés, captures f10-*.ppm. Jamais de point-virgule dans un commentaire. Coordonnées 1280x720 (REF:), mode @ui.
+GARDE:480
+# 1. la carte du bar est lue (DocumentHeader de TStory01), puis son chargement se termine (bit Loading de GlueUI retombé)
+QUAND:CARTE:TStory01 MAX:60 SINON:QUIT
+QUAND:PRET MAX:90 SINON:QUIT
+# 2. cinématique d'arrivée : Échap répétés (sans effet dans le bar une fois passée), puis compilation des pipelines
++1:ESC
++3:ESC
++5:ESC
++7:ESC
++9:ESC
++11:ESC
++13:ESC
++15:ESC
+# 3. « Mission » sur le comptoir, puis « Launch » dans la console (survol d'abord, deux essais de repli, sans effet
+#    une fois la cinématique lancée). Chaque geste attend DEUX conditions depuis PRET : un nombre de tours de pompe
+#    (« +fN:WAIT », barrière : un élément « f » garde son rang) et des secondes. Les tours ne comptent pas les arrêts de
+#    compilation des pipelines, les secondes suivent les animations (horloge murale du jeu). Sonde du 22/10 au banc
+#    (1280x720) : PRET au tour 61, Mission au tour 2061, console affichée vers le tour 2750 (environ 5 s après), Launch
+#    pris au tour 2761, cinématique de Tychus jusqu'à la lecture de TRaynor02 (environ 6 900 tours, 34 s).
++f2000:WAIT
++19:MOVE:270,510@scene
++20:CLIC:270,510@scene
++f2700:WAIT
++27:MOVE:725,627@ui
++f2800:WAIT
++28:CLIC:725,627@ui
++f3400:WAIT
++33:MOVE:725,627@ui
++f3500:WAIT
++34:CLIC:725,627@ui
++f4100:WAIT
++39:MOVE:725,627@ui
++f4200:WAIT
++40:CLIC:725,627@ui
+# 4. chargement de la mission : l'écran « Press any key to continue » attend une touche (Espace répété)
+QUAND:CARTE:TRaynor02 MAX:150 SINON:QUIT
++20:KEY:0x20
++25:KEY:0x20
++30:KEY:0x20
++35:KEY:0x20
++40:KEY:0x20
++45:KEY:0x20
++50:KEY:0x20
++55:KEY:0x20
++60:KEY:0x20
++65:KEY:0x20
++70:KEY:0x20
++75:KEY:0x20
++80:KEY:0x20
++85:KEY:0x20
++90:KEY:0x20
++95:KEY:0x20
++100:KEY:0x20
++105:KEY:0x20
++110:KEY:0x20
++115:KEY:0x20
++120:KEY:0x20
+# 5. F10 → Options (onglet Graphics) → curseur Gamma déplacé → Accept : le jeu demande de garder l'affichage (compte à
+#    rebours de 15 s, sinon il revient en arrière par un Reset) → « YES » → menu de jeu → Return to Game
+QUAND:PRET MAX:150 SINON:QUIT
++25:KEY:0x79
++28:MOVE:640,131@ui
++29:CLIC:640,131@ui
++32:MOVE:900,184@ui
++33:CLIC:900,184@ui
++36:MOVE:1002,644@ui
++37:CLIC:1002,644@ui
++41:CAPTURE:f10-confirmation
++42:MOVE:513,334@ui
++43:CLIC:513,334@ui
++46:CAPTURE:f10-menu-apres-oui
++47:MOVE:640,376@ui
++48:CLIC:640,376@ui
++52:CAPTURE:f10-jeu-repris
+# 6. F10 → Restart → « Restart » du choix de difficulté : la mission est relue
++55:KEY:0x79
++58:MOVE:640,215@ui
++59:CLIC:640,215@ui
++62:CAPTURE:f10-restart-difficulte
++63:MOVE:640,250@ui
++64:CLIC:640,250@ui
+QUAND:CARTE:TRaynor02 MAX:120 SINON:QUIT
++20:KEY:0x20
++25:KEY:0x20
++30:KEY:0x20
++35:KEY:0x20
++40:KEY:0x20
++45:KEY:0x20
++50:KEY:0x20
++55:KEY:0x20
++60:KEY:0x20
++65:KEY:0x20
++70:KEY:0x20
++75:KEY:0x20
++80:KEY:0x20
++85:KEY:0x20
++90:KEY:0x20
++95:KEY:0x20
++100:KEY:0x20
++105:KEY:0x20
++110:KEY:0x20
++115:KEY:0x20
++120:KEY:0x20
+# 7. F10 → Quit Campaign : menu principal natif, inerte, donc fin du jeu en mode lanceur (SC2_MENU_PRINCIPAL)
+QUAND:PRET MAX:150 SINON:QUIT
++20:KEY:0x79
++23:MOVE:640,299@ui
++24:CLIC:640,299@ui
++28:CAPTURE:f10-quitter
++29:MOVE:513,334@ui
++30:CLIC:513,334@ui
++90:QUIT

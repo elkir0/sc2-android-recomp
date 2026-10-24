@@ -1,0 +1,40 @@
+# inst-ab-pret.txt — V2.2 (23/10) : scénario des CAPTURE A/B à instants de jeu FIXES (format 2 de V1.1), mission
+# lancée par SC2_ARGS, sans joueur ni victoire. Usage :
+#   scripts/capture-ab.sh $BIN <sortie> THanson03A scripts/entrees/inst-ab-pret.txt scenario 2 -- \
+#       A:SC2_INSTANCES=0 B:SC2_INSTANCES=1 D:SC2_INSTANCES_DIAG=1
+# PRET = bit Loading de GlueUI vu posé puis retombé depuis l'activation (fin du chargement de la carte, Present n°122
+# environ sur THanson03A). Les instants « + » comptent depuis PRET, en secondes.
+# Coordonnées client 1280×720 (REF:, mêmes repères que inst-ab.txt et victoire-generique.txt) :
+#   (953, 588)  bouton « Close » du panneau d'aide — cliqué de +15 à +28 s (l'aide s'ouvre tard sous charge)
+# Puis curseur reposé au même point toutes les 2 s (MOVE, sans clic ni défilement : échantillons « [INPUT] banc t=…s
+# tour N » des images/s) et CAPTURE à PRET + 30, 40, 50 et 60 s (acceptation de V2.2 : CAPTURE A/B à QUAND:PRET + 30 s).
+# Jamais de point-virgule dans un commentaire : il sépare les éléments.
+REF:1280x720
+GARDE:200
+QUAND:PRET MAX:150 SINON:QUIT
++15:CLIC:953,588@ui
++20:CLIC:953,588@ui
++25:CLIC:953,588@ui
++28:CLIC:953,588@ui
++29:MOVE:1100,200@ui
++30:CAPTURE:pret30
++31:MOVE:1100,200@ui
++33:MOVE:1100,200@ui
++35:MOVE:1100,200@ui
++37:MOVE:1100,200@ui
++39:MOVE:1100,200@ui
++40:CAPTURE:pret40
++41:MOVE:1100,200@ui
++43:MOVE:1100,200@ui
++45:MOVE:1100,200@ui
++47:MOVE:1100,200@ui
++49:MOVE:1100,200@ui
++50:CAPTURE:pret50
++51:MOVE:1100,200@ui
++53:MOVE:1100,200@ui
++55:MOVE:1100,200@ui
++57:MOVE:1100,200@ui
++59:MOVE:1100,200@ui
++60:CAPTURE:pret60
++61:MOVE:1100,200@ui
++62:QUIT

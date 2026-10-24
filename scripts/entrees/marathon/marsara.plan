@@ -1,0 +1,11 @@
+# marsara.plan — marathon de référence : deux missions depuis le bar de Mar Sara, en une exécution du jeu.
+#   La progression de départ (mission 1 terminée) est celle du banc : ~/code/sc2-apk/progression/apres-mission1.
+# Format (voyez LISEZMOI.md) : une directive par ligne, « # » en tête de ligne commente, lignes vides ignorées.
+#   hub <recette>     visite le hub bar-<recette>.txt, qui lance la mission suivante
+#   mission <Carte>   enchaîne la carte : chargement, triche de victoire, « Continue », retour au bar
+# Mission 2 « The Outlaws » : libérer les colons de Mar Sara.
+hub marsara
+mission TRaynor02
+# De retour au bar, la mission 3 « Zero Hour » : tenir 20 minutes — ou un code de triche.
+hub marsara
+mission TRaynor03

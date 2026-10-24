@@ -1,0 +1,37 @@
+# options-accept.txt — V1.5 (22/10) : TRaynor01, mesure puis PREUVE d'application des réglages semés (scripts/banc-options.sh).
+# Format 1 : instants en secondes, coordonnées du client 1280×720 (sans REF: , à lancer sans SC2_ECRAN=auto).
+# Tiré de diag/mission-aide-fermee.txt (aide fermée) et de diag/f10-options-ultra-accept-retour.txt (chemin F10 → Options).
+# Le jeu ne réécrit Variables.txt qu'après un changement accepté (vérifié le 22/10 : semé puis Accept sans changement,
+# ou High → Ultra → Accept, fichier intact) : un changement NEUTRE pour la mesure (curseur Gamma, une fois la mesure
+# faite) lui fait vider tous ses réglages en mémoire dans Variables.txt, relu ensuite par banc-options.sh.
+# Revue du 22/10 : à instants fixes, l'aide de mission s'ouvre APRÈS la transmission du portrait, vers 39-45 s selon le
+# préréglage (matrice/{low,medium,high,ultra,fold} : frames 6400, 2750, 2000, 1950, 2850), donc en pleine fenêtre de
+# mesure de l'ancienne version (32-46 s) ; les « Close » de 20-30 s tombent dans la cinématique d'intro. D'où des
+# « Close » jusqu'à 52 s (953,588 est sans effet sans l'aide : console du bas) et une fenêtre de mesure APRÈS, aide
+# fermée et transmission finie. Le portrait se mesure sur les images où son cadre est présent (banc-options.sh), pas
+# dans cette fenêtre. Après fusion de V1.1 (format 2) : QUAND:PRET puis « Close », témoins, et CAPTURE: du portrait.
+#   20-30 s  « Close » ×3 (sans effet pendant la cinématique d'intro, gardés si le chargement est plus rapide)
+#   40-52 s  « Close » de l'aide de mission ×5 (elle s'ouvre vers 39-45 s)
+#   56, 70 s témoins MOVE au même point (953,588 : rien ne bouge) — tours de pompe entre les deux = images/s en jeu,
+#            scène sans aide ni portrait (banc-options.sh le vérifie sur les images capturées entre les témoins)
+#   72 s     F10 (menu) , 76 s « Options » (640,131), qui s'ouvre sur l'onglet Graphics
+#   80 s     curseur Gamma (bouton à 952,184) déplacé à 900,184 , 84 s « Accept » (1002,644) : Variables.txt réécrit
+#   92 s     QUIT
+20:CLIC:953,588
+25:CLIC:953,588
+30:CLIC:953,588
+40:CLIC:953,588
+43:CLIC:953,588
+46:CLIC:953,588
+49:CLIC:953,588
+52:CLIC:953,588
+56:MOVE:953,588
+70:MOVE:953,588
+72:KEY:0x79
+75:MOVE:640,131
+76:CLIC:640,131
+79:MOVE:900,184
+80:CLIC:900,184
+83:MOVE:1002,644
+84:CLIC:1002,644
+92:QUIT
