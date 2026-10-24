@@ -147,7 +147,7 @@ copie légitime du jeu, hors-ligne, sans distribution d'aucun dérivé.*
   registres/drapeaux/octets écrits. **76 650 fonctions** balayées ; les 3 985 écarts
   initiaux étaient des artefacts du harnais (cadre de retour simulé), 0 vraie
   divergence après correctifs. C'est lui qui a certifié chaque patch du lifter.
-- **Trois bancs, trois rôles** : devbox x86 (Lavapipe — seule la métrique CPU/frame
+- **Trois bancs, trois rôles** : serveur Linux x86 (Lavapipe — seule la métrique CPU/frame
   compte), **banc Mac M4 natif** (même arch/compilateur que la cible ; build 6 min,
   mission 90 s), le Fold comme juge final. La méthode « banc d'abord, matériel en
   dernier » a divisé le coût d'itération par dix.

@@ -12,7 +12,7 @@ Analyse et rédaction uniquement : aucun build ni run n'a été lancé pour écr
 | « miroir `~/code/reverse/sc2-partout-mac/recomp-sc2` » | Miroir **ancien** (passe 5a, `6ed4b21`) : **aucun** patch MoltenVK, `ZONE_FIN = 0x38000000`. Ne pas s'en servir comme base. |
 | (non cité) | **Vrai banc Mac** : `~/code/sc2-partout-mac/` (hors git) — `BANC-MAC.md`, `7q/` (arbre c2dedfe + lift + patchs Mac), `build-7q/`, `run-7u.sh`, `install-7u/`, `runs/`, `captures/`, `ref-7u-x86/`. |
 | `references/portage-arm64-macos.md` | `~/.hermes/profiles/reversosc2/skills/security/sc2-partout/references/portage-arm64-macos.md` (skill Hermes). Il couvre la zone hôte + delta et les guards Darwin, **pas MoltenVK**. |
-| « NOTES.md du dépôt » | Sur le devbox : `~/code/reverse/sc2-partout/NOTES.md` (main `835ba54`), lignes 1784–1854 ; et `~/missions/BUS-SC2.md` l. 1126 et 1141. |
+| « NOTES.md du dépôt » | Sur le serveur Linux : `~/code/reverse/sc2-partout/NOTES.md` (main `835ba54`), lignes 1784–1854 ; et `~/missions/BUS-SC2.md` l. 1126 et 1141. |
 | Transcript de la session morte | `~/.claude/projects/<user>/ddb9b36c-…jsonl` (cwd `~/code`, dernier message 12:48Z). |
 
 ## 1. État exact de la piste MoltenVK (reconstitué)
@@ -31,7 +31,7 @@ Analyse et rédaction uniquement : aucun build ni run n'a été lancé pour écr
     - f750–1200 : 1,6 % des pixels à écart > 16.
 - **Correctif Mac indispensable** (copie `7q/` seulement) : `ZONE_FIN = 0xF0000000` dans `zone_hote_init`. Sans lui, l'arène LAA de débordement 0x80000000–0xF0000000 tombe hors zone et le run meurt à la frame 466 avec « arène invitée épuisée ».
 - MoltenVK est **innocenté** sur la fidélité : le même arbre sous qemu + lavapipe donne le même état de jeu.
-- **Main devbox `835ba54` ne contient NI le fallback MoltenVK NI le correctif `ZONE_FIN`** (vérifié par grep le 16/10). Main a depuis gagné la table 1 639 (7s) et les samplers d'ombres à comparaison (7v2/7v3).
+- **Main serveur Linux `835ba54` ne contient NI le fallback MoltenVK NI le correctif `ZONE_FIN`** (vérifié par grep le 16/10). Main a depuis gagné la table 1 639 (7s) et les samplers d'ombres à comparaison (7v2/7v3).
 
 ### 1.2 L'« arbitrage en suspens » : binaire officiel vs compilation depuis les sources
 **Aucune trace écrite de cet arbitrage nulle part** : ni NOTES.md, ni BUS-SC2.md, ni le skill, ni le transcript ddb9b36c (recherche `molten|officiel|sources|MVK`). La session opus2 est morte **avant** d'avoir reçu sa mission « 7u MoltenVK ». La supervision l'a relancée comme « mission à re-spécifier » (NOTES l. 1831). L'arbitrage est donc reconstitué ici à partir de l'état technique. Il se pose pour trois raisons concrètes :
@@ -104,9 +104,9 @@ cp "$L" ../libMoltenVK.dylib && shasum -a 256 ../libMoltenVK.dylib >> ../MoltenV
 
 Le dylib officiel ne sera **pas identique au bit** à la bottle Homebrew (toolchain et options différentes). C'est attendu : l'équivalence se juge au run (étape 5), pas au sha.
 
-### Étape 3 — Patchs runtime à remonter dans `main` (code ; sur le devbox, worktree de mission)
-- **Base** : `main` du devbox (`835ba54` ou plus récent). Pas le miroir 5a, pas `7q/`.
-- **Branche** : `hermes/<AAAAMMJJ>-passe7u-moltenvk`, créée par `git worktree add` selon HANDOVER-DEVBOX §2. **Baseline** sous Linux avant toute modification : défaut ×2, empreintes `be01318c/d3cd40be/8d1ec057`.
+### Étape 3 — Patchs runtime à remonter dans `main` (code ; sur le serveur Linux, worktree de mission)
+- **Base** : `main` du serveur Linux (`835ba54` ou plus récent). Pas le miroir 5a, pas `7q/`.
+- **Branche** : `hermes/<AAAAMMJJ>-passe7u-moltenvk`, créée par `git worktree add` selon la procédure de passation du serveur Linux (§2, document privé). **Baseline** sous Linux avant toute modification : défaut ×2, empreintes `be01318c/d3cd40be/8d1ec057`.
 
 1. **`sc2_runtime.c` / `zone_hote_init`** : `ZONE_FIN = 0xF0000000u` sous `__APPLE__`. Toujours sous `__APPLE__`, ajouter un garde-fou : tout `mmap` « FIXED » doit viser une adresse comprise dans `[zone, zone+taille)`, sinon le code doit tracer l'appel et le refuser. Ce garde-fou neutralise le danger de l'alias `MAP_FIXED_NOREPLACE → MAP_FIXED`.
 2. **`sc2_d3d9v.c` : ordre de chargement explicite et journalisé** (`__APPLE__`) :
@@ -132,8 +132,8 @@ Le dylib officiel ne sera **pas identique au bit** à la bottle Homebrew (toolch
 
 ### Étape 4 — Sync + build Mac (lourd mais court ; préconditions §3)
 ```sh
-rsync -a devbox:~/code/reverse/sc2-partout/.claude/worktrees/<wt>/recomp-sc2/ ~/code/sc2-partout-mac/7u-mvk/recomp-sc2/
-rsync -a devbox:~/code/reverse/sc2-partout/extraction/lifted-source/ ~/code/sc2-partout-mac/7u-mvk/recomp-sc2/src/lifted/   # SANS --delete
+rsync -a serveur:~/code/reverse/sc2-partout/.claude/worktrees/<wt>/recomp-sc2/ ~/code/sc2-partout-mac/7u-mvk/recomp-sc2/
+rsync -a serveur:~/code/reverse/sc2-partout/extraction/lifted-source/ ~/code/sc2-partout-mac/7u-mvk/recomp-sc2/src/lifted/   # SANS --delete
 cmake -S ~/code/sc2-partout-mac/7u-mvk/recomp-sc2 -B ~/code/sc2-partout-mac/build-7u-mvk -DCMAKE_BUILD_TYPE=Release
 nice cmake --build ~/code/sc2-partout-mac/build-7u-mvk -j6 --target recomp-sc2 2>&1 | tee ~/code/sc2-partout-mac/runs/build-7u-mvk.log | grep -E 'error|Built target'
 ls -l ~/code/sc2-partout-mac/build-7u-mvk/recomp-sc2; date
@@ -230,7 +230,7 @@ find Package -name libMoltenVK.dylib -path '*macOS*'
 ### Étape 10 — Documentation et livraison
 - **`BANC-MAC.md`** : nouvelle section « 7u-MoltenVK » avec le tableau S1–S8 et le chemin du paquet.
 - **Skill `references/portage-arm64-macos.md`** : nouvelle section « MoltenVK ». Elle couvre l'ordre de chargement, le drapeau de portabilité pour le loader, `portability_subset`, `brew pin`, le tar officiel avec son sha256, et le piège `ZONE_FIN`.
-- **Devbox** : fusion uniquement sur **feu vert écrit du mainteneur**, après une R2 Linux (défaut ×2 avec empreintes exactes).
+- **Serveur Linux** : fusion uniquement sur **feu vert écrit du mainteneur**, après une R2 Linux (défaut ×2 avec empreintes exactes).
 - **Fin de passe** : marqueurs `P7UMVK_FIN`.
 
 ## 5. Risques
@@ -249,13 +249,13 @@ find Package -name libMoltenVK.dylib -path '*macOS*'
 | **Écarts dus à l'horloge** (f550–700 ; le Mac est ~1,7× plus rapide) | certain / faux positifs | plage exclue des seuils |
 | **Variante `-privateapi`** du tar officiel | — | non retenue : elle utilise des API Metal privées ; à n'envisager que si un déclencheur de l'étape 9 la désigne |
 | **Toolchain pour C** : Xcode 26 présent mais `xcode-select` pointe sur les CLT, `metal` introuvable | élevé si C / build cassé | `DEVELOPER_DIR` explicite ; si la toolchain Metal manque : `xcodebuild -downloadComponent MetalToolchain` (à vérifier) |
-| **Divergence miroir et banc** : `~/code/reverse/sc2-partout-mac/recomp-sc2` est obsolète | élevé / patcher le mauvais arbre | base unique : le worktree devbox de l'étape 3 ; le miroir 5a n'est pas touché |
+| **Divergence miroir et banc** : `~/code/reverse/sc2-partout-mac/recomp-sc2` est obsolète | élevé / patcher le mauvais arbre | base unique : le worktree serveur Linux de l'étape 3 ; le miroir 5a n'est pas touché |
 
 ## 6. Définition de fini (DoD)
 - S1 à S8 verts.
 - Étapes 6 et 7 consignées.
 - Paquet de l'étape 8 qui tourne sans Homebrew MoltenVK.
 - Décision sur l'option C écrite avec ses mesures.
-- Patchs remontés sur une branche devbox avec la R2 Linux verte.
+- Patchs remontés sur une branche serveur Linux avec la R2 Linux verte.
 - BANC-MAC et skill mis à jour.
 - Aucun run lancé pendant que l'émulateur vivait.

@@ -3,7 +3,7 @@
 2. L'« arbitrage officiel vs sources » n'est consigné nulle part (NOTES, BUS, skill, transcript ddb9b36c) : opus2 est morte avant de recevoir sa mission. Il est reconstitué dans la SPEC §1.2.
 3. Décision recommandée : Homebrew épinglé pour le développement ; tar officiel Khronos v1.4.2 (même tag, sha256 figé) pour la référence et l'embarquement ; compilation depuis les sources seulement sur déclencheur mesuré (SPEC étape 9).
 4. Raisons d'écarter les sources pour l'instant : aucun bug MoltenVK identifié, 5,3 Gio de disque libre, Xcode non sélectionné, et l'émulateur vit sur le M4.
-5. Urgent : main devbox `835ba54` n'a ni le fallback MoltenVK ni `ZONE_FIN=0xF0000000`. Un Mac synchronisé sur main meurt à la frame 466.
+5. Urgent : main serveur Linux `835ba54` n'a ni le fallback MoltenVK ni `ZONE_FIN=0xF0000000`. Un Mac synchronisé sur main meurt à la frame 466.
 6. Plan en 10 étapes : inventaire et `brew pin`, tar officiel, patchs (ordre de dlopen, portabilité, subset, CMake), build, runs A/B, ombres, validation, paquet, porte C, docs.
 7. Critères mesurables S1–S8 (rc, 1 200 f, % de pixels à écart > 16 par plage de frames, 0 draw refusé, durée) ; DoD dans la SPEC §6.
 8. Risques principaux : disque, RAM et émulateur, `MAP_FIXED` silencieux, `portability_subset` non activé, triangle fans, samplers d'ombres.

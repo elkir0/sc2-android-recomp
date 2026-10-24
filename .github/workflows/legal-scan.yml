@@ -18,7 +18,10 @@ jobs:
             -o -iname '*.s2map' -o -iname '*.sc2map' -o -iname '*.sc2bank' -o -iname '*.bank' \
             -o -iname '*.s2v' -o -iname '*.iso' -o -iname '*.w3x' \
             -o -iname '*.bin' -o -iname '*.pak' -o -iname '*.ogv' -o -iname '*.swf' \
-            -o -iname '*.fxa' -o -iname '*.ogg' -o -iname '*.wav' -o -iname '*.mp4' \) -print)
+            -o -iname '*.fxa' -o -iname '*.ogg' -o -iname '*.wav' -o -iname '*.mp4' \
+            -o -iname '*.dylib' -o -iname '*.s2ma' -o -iname '*.sc2save' -o -iname '*.sc2replay' \) -print)
+          APP=$(find . -path ./.git -prune -o -type d -iname '*.app' -print)
+          if [ -n "$APP" ]; then echo "::error::Application bundle (.app: recompiled game code)::$APP"; FAIL=1; fi
           if [ -n "$BAD" ]; then echo "::error::Forbidden files (game binaries/assets/shader bytecodes)::$BAD"; FAIL=1; fi
           # 2) gros fichiers / oversized files
           BIG=$(find . -path ./.git -prune -o -type f -size +20M -print)
@@ -32,9 +35,13 @@ jobs:
           if [ -n "$HASH" ]; then echo "::error::Known game artifact hash literal::$HASH"; FAIL=1; fi
           # 5) images : ensemble documentaire borné (docs/ + racine, <=12, <=2 Mo chacune)
           IMG_ALL=$(find . -path ./.git -prune -o -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print | grep -v '^\./\.git' || true)
+          # animations (GIF) : comptées dans les 12, hors plafond de 2 Mo (la vidéo de démonstration du README)
+          GIF_ALL=$(find . -path ./.git -prune -o -type f -iname '*.gif' -print | grep -v '^\./\.git' || true)
+          GIF_BAD=$(echo "$GIF_ALL" | grep -vE '^\./(docs/[^/]+|[^/]+)\.gif$' | grep . || true)
+          if [ -n "$GIF_BAD" ]; then echo "::error::Animations allowed only at docs/ top level or repo root::$GIF_BAD"; FAIL=1; fi
           IMG_BAD=$(echo "$IMG_ALL" | grep -vE '^\./(docs/[^/]+|[^/]+)\.(png|jpg|jpeg|webp)$' || true)
           if [ -n "$IMG_BAD" ]; then echo "::error::Images allowed only at docs/ top level or repo root::$IMG_BAD"; FAIL=1; fi
-          IMG_N=$(echo "$IMG_ALL" | grep -c . || true)
+          IMG_N=$(printf '%s\n%s\n' "$IMG_ALL" "$GIF_ALL" | grep -c . || true)
           if [ "${IMG_N:-0}" -gt 12 ]; then echo "::error::Too many images (policy: curated set <= 12, found $IMG_N)"; FAIL=1; fi
           IMG_BIG=$(echo "$IMG_ALL" | xargs -r -I{} find {} -maxdepth 0 -size +2M 2>/dev/null || true)
           if [ -n "$IMG_BIG" ]; then echo "::error::Image over 2MB::$IMG_BIG"; FAIL=1; fi
@@ -43,4 +50,10 @@ jobs:
             --include='*.py' --include='*.sh' --include='*.md' --include='*.json' --include='*.yml' --include='*.c' --include='*.h' . 2>/dev/null \
             | grep -v '^\./\.git' | grep -v 'DISCORD_WEBHOOK' | head -3 || true)
           if [ -n "$SEC" ]; then echo "::error::Possible secret::$SEC"; FAIL=1; fi
+          # 7) données personnelles et d'infrastructure (motifs génériques) : chemins de dossier personnel absolus,
+          #    adresses IPv4 privées ou CGNAT, identifiants mDNS d'appareil adb, adresses e-mail (hors noreply)
+          PERSO=$(git ls-files | grep -vE '^android/assets/polices/' | xargs grep -nEI \
+            '((^|[^A-Za-z0-9_.$/-])/(Users|home)/[a-z][a-z0-9_-]+/|\b192\.168\.[0-9]{1,3}\.[0-9]{1,3}\b|\b10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\b|\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}\b|adb-[A-Z0-9]{6,}-[A-Za-z0-9]+\._adb|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z]{2,})' \
+            2>/dev/null | grep -vE 'noreply|/(Users|home)/(essai|sc2|test|user)/|\.github/workflows/legal-scan\.yml' | head -5 || true)
+          if [ -n "$PERSO" ]; then echo "::error::Personal or infrastructure identifier::$PERSO"; FAIL=1; fi
           exit $FAIL
