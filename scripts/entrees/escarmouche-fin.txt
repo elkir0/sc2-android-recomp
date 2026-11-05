@@ -1,0 +1,43 @@
+# escarmouche-fin.txt — L6 (24/10) : escarmouche contre l'IA jusqu'à l'écran de fin de partie (Victory!/Defeat!).
+# Partie : SC2_ESCARMOUCHE=SteppesofWar SC2_ESCARMOUCHE_RACE=terran SC2_ESCARMOUCHE_RACE_IA=zerg SC2_ESCARMOUCHE_IA=facile
+#   (celle d'escarmouche-longue : « Defeat! » vers 10 min, banc du 23/10). Le joueur ne fait rien, la caméra reste sur
+#   sa base : une capture par minute montre l'attaque de l'IA, les captures t09m et t10m encadrent la défaite.
+# Fin : les banques EscarmoucheFin* ne sont pas écrites (banc du 23/10), QUAND:VICTOIRE et QUAND:FICHIER ne servent pas.
+#   L'écran de fin s'ouvre sur le dialogue GameMenuDialog du moteur : menu_jeu (sc2_runtime.c) le reconnaît à
+#   L_00B80810(1) sur le cadre +0x3C4 ou L_00B7DC50(1) appelé de L_00A28EA0 — le menu F10 ne montre ni l'un ni l'autre —
+#   et appelle sc2_banc_fin_partie, d'où QUAND:FINPARTIE. La suite : capture de l'écran de fin, clic « Score Screen »
+#   (bas du dialogue, 1280x720 : 640,318), capture de l'écran de score, puis QUIT. Banc du 24/10 : défaite détectée à
+#   t=561 s (L_00A28EA0) et capture « fin » prise. Le clic 640,318 TOMBE bien sur « Score Screen » : le moteur quitte la
+#   partie vers le menu principal (écran 0x01 « Background ») — dans WoL l'écran des scores relève du client Battle.net,
+#   absent — et en mode lanceur (SC2_MENU_PRINCIPAL, L2) le jeu se termine aussitôt (Android : retour à l'écran titre).
+#   La capture « score » n'est donc jamais prise : c'est le comportement voulu, rc=0.
+# Rien en 1260 s (SINON:SUITE) : le clic et les captures partent quand même, le bilan du segment dit « MAX ».
+# Jamais de point-virgule dans un commentaire. Coordonnées : brutes 1280x720 (sans REF:), client du banc.
+QUAND:PRET MAX:180 SINON:QUIT
++5:CAPTURE:t00m
++60:CAPTURE:t01m
++120:CAPTURE:t02m
++180:CAPTURE:t03m
++240:CAPTURE:t04m
++300:CAPTURE:t05m
++360:CAPTURE:t06m
++420:CAPTURE:t07m
++480:CAPTURE:t08m
++540:CAPTURE:t09m
++600:CAPTURE:t10m
++660:CAPTURE:t11m
++720:CAPTURE:t12m
++780:CAPTURE:t13m
++840:CAPTURE:t14m
++900:CAPTURE:t15m
++960:CAPTURE:t16m
++1020:CAPTURE:t17m
++1080:CAPTURE:t18m
++1140:CAPTURE:t19m
++1200:CAPTURE:t20m
+QUAND:FINPARTIE MAX:1260 SINON:SUITE
++2:CAPTURE:fin
++4:MOVE:640,318
++5:CLIC:640,318
++10:CAPTURE:score
++12:QUIT

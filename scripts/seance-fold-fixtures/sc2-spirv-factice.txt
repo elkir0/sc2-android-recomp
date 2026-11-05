@@ -1,0 +1,1 @@
+SC2-SPIRV fixture seance-fold — contenu synthetique, aucun shader reel

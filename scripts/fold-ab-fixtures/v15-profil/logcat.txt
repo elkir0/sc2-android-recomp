@@ -1,0 +1,49 @@
+10-19 12:28:24.126 I/SC2Partout(22915): [FPS] 7.2 images/s sur 5.0 s (frames 1→37, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 7.2 ; phase chargement ; ms/frame : jeu 134.5, backend 1.2, présentation GPU 0.3
+10-19 12:28:29.197 I/SC2Partout(22915): [FPS] 9.7 images/s sur 5.1 s (frames 37→86, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 8.4 ; phase chargement ; ms/frame : jeu 103.3, backend 0.1, présentation GPU 0.1
+10-19 12:28:34.257 I/SC2Partout(22915): [FPS] 2.4 images/s sur 5.1 s (frames 86→98, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 6.4 ; phase chargement ; ms/frame : jeu 421.5, backend 0.1, présentation GPU 0.2
+10-19 12:28:40.184 I/SC2Partout(22915): [FPS] 7.3 images/s sur 5.9 s (frames 98→141, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 6.6 ; phase chargement ; ms/frame : jeu 136.9, backend 0.7, présentation GPU 0.2
+10-19 12:28:45.242 I/SC2Partout(22915): [FPS] 7.3 images/s sur 5.1 s (frames 141→178, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 6.8 ; phase chargement ; ms/frame : jeu 134.2, backend 2.3, présentation GPU 0.2
+10-19 12:28:50.268 I/SC2Partout(22915): [FPS] 20.3 images/s sur 5.0 s (frames 178→280, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 9.0 ; phase chargement ; ms/frame : jeu 48.2, backend 0.9, présentation GPU 0.2
+10-19 12:28:55.298 I/SC2Partout(22915): [FPS] 25.8 images/s sur 5.0 s (frames 280→410, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 11.3 ; phase chargement ; ms/frame : jeu 37.5, backend 1.0, présentation GPU 0.2
+10-19 12:28:57.062 I/SC2Partout(22915): [INPUT] frame 461 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00C60385 = (901, 198)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:28:58.360 I/SC2Partout(22915): [INPUT] frame 498 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00C1034F = (847, 193)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:00.308 I/SC2Partout(22915): [FPS] 25.4 images/s sur 5.0 s (frames 410→537, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 13.0 ; phase chargement ; ms/frame : jeu 38.6, backend 0.6, présentation GPU 0.2
+10-19 12:29:00.433 I/SC2Partout(22915): [INPUT] frame 541 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00D70355 = (853, 215)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:05.325 I/SC2Partout(22915): [FPS] 21.5 images/s sur 5.0 s (frames 537→645, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 13.9 ; phase chargement ; ms/frame : jeu 45.4, backend 0.8, présentation GPU 0.2
+10-19 12:29:10.377 I/SC2Partout(22915): [FPS] 19.2 images/s sur 5.1 s (frames 645→742, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 14.5 ; phase chargement ; ms/frame : jeu 50.9, backend 0.9, présentation GPU 0.2
+10-19 12:29:15.388 I/SC2Partout(22915): [FPS] 19.0 images/s sur 5.0 s (frames 742→837, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 14.9 ; phase chargement ; ms/frame : jeu 51.6, backend 0.9, présentation GPU 0.2
+10-19 12:29:17.008 I/SC2Partout(22915): [INPUT] frame 868 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x023904D2 = (1234, 569)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:18.381 I/SC2Partout(22915): [INPUT] frame 893 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01170321 = (801, 279)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:20.268 I/SC2Partout(22915): [INPUT] frame 927 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024904D2 = (1234, 585)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:20.426 I/SC2Partout(22915): [FPS] 18.3 images/s sur 5.0 s (frames 837→929, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 15.1 ; phase chargement ; ms/frame : jeu 53.5, backend 1.0, présentation GPU 0.2
+10-19 12:29:21.138 I/SC2Partout(22915): [INPUT] frame 943 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00FF02FB = (763, 255)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:22.768 I/SC2Partout(22915): [INPUT] frame 976 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025D04D7 = (1239, 605)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:24.059 I/SC2Partout(22915): [INPUT] frame 1001 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x006F0345 = (837, 111)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:25.204 I/SC2Partout(22915): [INPUT] frame 1024 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024E04D4 = (1236, 590)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:25.440 I/SC2Partout(22915): [FPS] 19.7 images/s sur 5.0 s (frames 929→1028, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 15.5 ; phase chargement ; ms/frame : jeu 49.5, backend 0.9, présentation GPU 0.2
+10-19 12:29:26.703 I/SC2Partout(22915): [INPUT] frame 1054 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x005B037B = (891, 91)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:30.442 I/SC2Partout(22915): [FPS] 18.6 images/s sur 5.0 s (frames 1028→1121, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 15.7 ; phase chargement ; ms/frame : jeu 52.6, backend 0.9, présentation GPU 0.2
+10-19 12:29:33.898 I/SC2Partout(22915): [INPUT] frame 1183 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025204EB = (1259, 594)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:35.490 I/SC2Partout(22915): [FPS] 17.8 images/s sur 5.0 s (frames 1121→1211, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 15.8 ; phase chargement ; ms/frame : jeu 54.8, backend 1.0, présentation GPU 0.2
+10-19 12:29:36.149 I/SC2Partout(22915): [INPUT] frame 1224 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x003D0270 = (624, 61)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:38.458 I/SC2Partout(22915): [INPUT] frame 1266 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024204CF = (1231, 578)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:40.159 I/SC2Partout(22915): [INPUT] frame 1300 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01590197 = (407, 345)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:29:40.513 I/SC2Partout(22915): [FPS] 18.7 images/s sur 5.0 s (frames 1211→1305, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 16.0 ; phase chargement ; ms/frame : jeu 52.3, backend 0.9, présentation GPU 0.2
+10-19 12:29:45.547 I/SC2Partout(22915): [FPS] 21.5 images/s sur 5.0 s (frames 1305→1413, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 16.3 ; phase chargement ; ms/frame : jeu 45.7, backend 0.7, présentation GPU 0.2
+10-19 12:29:50.566 I/SC2Partout(22915): [FPS] 22.7 images/s sur 5.0 s (frames 1413→1527, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 16.7 ; phase chargement ; ms/frame : jeu 43.1, backend 0.7, présentation GPU 0.2
+10-19 12:29:55.572 I/SC2Partout(22915): [FPS] 22.2 images/s sur 5.0 s (frames 1527→1638, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.0 ; phase chargement ; ms/frame : jeu 44.2, backend 0.7, présentation GPU 0.2
+10-19 12:30:00.591 I/SC2Partout(22915): [FPS] 20.9 images/s sur 5.0 s (frames 1638→1743, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.2 ; phase chargement ; ms/frame : jeu 46.8, backend 0.8, présentation GPU 0.2
+10-19 12:30:05.639 I/SC2Partout(22915): [FPS] 18.8 images/s sur 5.0 s (frames 1743→1838, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.2 ; phase chargement ; ms/frame : jeu 52.0, backend 0.9, présentation GPU 0.2
+10-19 12:30:08.671 I/SC2Partout(22915): [INPUT] frame 1894 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024C04F0 = (1264, 588)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:30:10.206 I/SC2Partout(22915): [INPUT] frame 1921 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025804DD = (1245, 600)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:30:10.644 I/SC2Partout(22915): [FPS] 18.2 images/s sur 5.0 s (frames 1838→1929, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.3 ; phase chargement ; ms/frame : jeu 53.8, backend 1.0, présentation GPU 0.2
+10-19 12:30:11.054 I/SC2Partout(22915): [INPUT] frame 1938 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x0062024A = (586, 98)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:30:12.756 I/SC2Partout(22915): [INPUT] frame 1974 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025604DC = (1244, 598)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:30:13.943 I/SC2Partout(22915): [INPUT] frame 2000 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00A2012C = (300, 162)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:30:15.683 I/SC2Partout(22915): [FPS] 20.6 images/s sur 5.0 s (frames 1929→2033, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.4 ; phase chargement ; ms/frame : jeu 47.4, backend 0.8, présentation GPU 0.2
+10-19 12:30:16.044 I/SC2Partout(22915): [INPUT] frame 2041 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024D04D2 = (1234, 589)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:30:17.812 I/SC2Partout(22915): [INPUT] frame 2076 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01E5017F = (383, 485)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 12:30:20.707 I/SC2Partout(22915): [FPS] 20.3 images/s sur 5.0 s (frames 2033→2135, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.6 ; phase chargement ; ms/frame : jeu 48.3, backend 0.8, présentation GPU 0.2
+10-19 12:30:25.747 I/SC2Partout(22915): [FPS] 20.0 images/s sur 5.0 s (frames 2135→2236, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.7 ; phase chargement ; ms/frame : jeu 48.8, backend 0.9, présentation GPU 0.2
+10-19 12:30:30.779 I/SC2Partout(22915): [FPS] 19.7 images/s sur 5.0 s (frames 2236→2335, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.7 ; phase chargement ; ms/frame : jeu 49.7, backend 0.9, présentation GPU 0.2
+10-19 12:30:31.565 I/SC2Partout(22915): [BILAN] [VIDEO-AMC] inactif : 0 vidéo(s) ouvertes, 0 en décodage matériel, 0 saut(s) dont 0 de secours

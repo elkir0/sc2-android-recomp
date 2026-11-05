@@ -1,0 +1,19 @@
+# acte1 — les six missions de l'acte 1 en un lancement, depuis une campagne NEUVE (banques vides).
+#   Progression à donner au banc : ~/dev/sc2-bancs/20261023/l4-marathon/progression-vide (Banks/ vide).
+# Hub initial : le bar de Mar Sara d'une campagne neuve, console « Mission Selection » déjà ouverte
+#   (bar-nouvelle.txt). Après Liberation Day et après The Outlaws : même bar de Mar Sara (bar-marsara.txt).
+# Après Zero Hour le hub devient l'HYPERION : onglet « Bridge », table holographique, planète à cliquer —
+#   la coordonnée dépend des missions disponibles (2 planètes → 573/720, 3 planètes → 507/640/769, y ≈ 496).
+#   Dernière mission : Monlyth, carte non repérée au banc → « mission * » (détectée à son chargement).
+hub nouvelle
+mission TRaynor01
+hub marsara
+mission TRaynor02
+hub marsara
+mission TRaynor03
+hub hyperion 573,496
+mission THanson01
+hub hyperion 507,496
+mission THanson02
+hub hyperion 573,496
+mission *

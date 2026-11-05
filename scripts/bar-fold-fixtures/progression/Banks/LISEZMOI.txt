@@ -1,0 +1,1 @@
+Progression FACTICE de bar-fold.sh en ADB_FAKE=1 : le dossier Banks/ doit exister, rien n'est lu ni poussé.

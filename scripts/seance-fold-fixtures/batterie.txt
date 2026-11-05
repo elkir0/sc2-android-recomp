@@ -1,0 +1,4 @@
+Current Battery Service state:
+  AC powered: false
+  status: 2
+  temperature: 285

@@ -1,0 +1,16 @@
+Cmdline: /system/bin/simpleperf record --app fr.sc2partout --add-meta-info app_type=debuggable --in-app --tracepoint-events /data/local/tmp/tracepoint_events --out-fd 3 --stop-signal-fd 4 -e cpu-clock -f 4000 --call-graph fp --duration 60
+Arch: arm64
+Event: cpu-clock (type 1, config 0x0, config1 0x0, config2: 0x0)
+Samples: 202152
+Event count: 50538000000
+
+Overhead  Sample  Command
+94.24%    190516  sc2-jeu
+2.42%     4889    fr.sc2partout:jeu
+2.30%     4642    AAudio_1
+0.34%     684     j00BD6210
+0.27%     552     j00EE0490
+0.20%     397     binder:22915_3
+0.19%     394     binder:22915_4
+0.04%     75      binder:22915_5
+0.00%     3       Jit thread pool

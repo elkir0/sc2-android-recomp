@@ -1,0 +1,20 @@
+--- a/disasm32.py
++++ b/disasm32.py
+@@ -1028,6 +1028,17 @@
+             f = _add_func(t, "alias")
+             if f is not None:
+                 f.end, f.size = t + sizes[t], sizes[t]
++                # [sc2-partout patch] Same release as the discovery rounds: these
++                # alias bodies are never harvested, and on SC2.exe (15.7 MB) the
++                # 7,718 of them kept ~650 MB of capstone operand detail alive,
++                # taking the process from 7.33 GB to the 8 GB `ulimit -v` cap --
++                # MemoryError or SIGSEGV inside capstone/ctypes (4 runs).
++                # Opt-in exactly like the rounds: without release_operands
++                # (the in-process lifter path) nothing changes.
++                if release_operands:
++                    for b in f.blocks.values():
++                        for ins in b.instructions:
++                            ins.operands = None
+         return functions
+ 
+ 

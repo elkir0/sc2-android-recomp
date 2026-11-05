@@ -1,0 +1,108 @@
+diff --git a/runtime/recomp32_cpu/cpu.h b/runtime/recomp32_cpu/cpu.h
+index a234400..e73f0e6 100644
+--- a/runtime/recomp32_cpu/cpu.h
++++ b/runtime/recomp32_cpu/cpu.h
+@@ -103,6 +103,13 @@ typedef struct {
+ #define SET16(r, v)   ((r) = ((r) & 0xFFFF0000u) | (uint16_t)(v))
+ 
+ /* ---- memory access: register holds a real 32-bit address ---- */
++/* GPTR: host pointer for a guest address. The lifter's atomic forms (xchg
++ * with memory, lock-prefixed read-modify-write, cmpxchg8b) take it to hand the
++ * __atomic builtins a real pointer. Identity here; a host that maps the guest
++ * at an offset defines its own before including this header. */
++#ifndef GPTR
++#define GPTR(va) ((void *)(uintptr_t)(uint32_t)(va))
++#endif
+ static inline uint8_t  rd8 (uint32_t a) { return *(uint8_t  *)(uintptr_t)a; }
+ static inline uint16_t rd16(uint32_t a) { return *(uint16_t *)(uintptr_t)a; }
+ static inline uint32_t rd32(uint32_t a) { return *(uint32_t *)(uintptr_t)a; }
+diff --git a/tools/lift/lift32_cpu.py b/tools/lift/lift32_cpu.py
+index b62b2d3..818e6c2 100644
+--- a/tools/lift/lift32_cpu.py
++++ b/tools/lift/lift32_cpu.py
+@@ -408,9 +408,18 @@ class Lifter:
+         # underneath is the one to translate; the atomicity is in the helper
+         # the xadd/cmpxchg cases below reach for, and for everything else a
+         # `lock` on a single store is what the hardware does anyway.
+-        if m.startswith("lock "):
++        locked = m.startswith("lock ")
++        if locked:
+             m = m[5:]
+ 
++        # xchg with memory is atomic whether or not it carries `lock`, and the
++        # other locked forms are what a spinlock, an Interlocked* call or a
++        # reference count compiles to. A plain read then write is right until
++        # two threads meet on the same word - see _atomic.
++        atom = self._atomic(insn, m, ops, locked)
++        if atom is not None:
++            return atom
++
+         def two(): return ops[0], ops[1]
+         def sz0(): return ops[0].size
+ 
+@@ -1529,6 +1538,65 @@ class Lifter:
+ 
+         return [_todo(insn.address, f"sse {m} {insn.op_str}")]
+ 
++    # ---- atomic memory operations ----
++    _AT_FETCH = {"add": "__atomic_fetch_add", "sub": "__atomic_fetch_sub", "and": "__atomic_fetch_and",
++                 "or": "__atomic_fetch_or", "xor": "__atomic_fetch_xor"}
++
++    def _aptr(self, insn, op):
++        """Host pointer to a memory operand, for the __atomic builtins. GPTR is
++        the guest-to-host mapping of cpu.h (identity in a 1:1 32-bit build)."""
++        return "((volatile uint%d_t *)GPTR(%s))" % (op.size * 8, self.mem_addr(insn, op))
++
++    def _atomic(self, insn, m, ops, locked):
++        """Atomic forms, or None to fall through to the ordinary translation.
++
++        Covered: xchg r/m,reg (8/16/32, implicitly locked on x86); lock
++        add/sub/and/or/xor/inc/dec on memory; lock xadd/cmpxchg at 8/16 bits
++        (32 bits stays with atomic_xadd32/atomic_cmpxchg32 below); cmpxchg8b,
++        locked or not. Flags are computed from the value memory held before,
++        exactly as the instruction defines them. GCC/Clang builtins: a cl.exe
++        build would need _Interlocked* equivalents. fs:-relative operands
++        (the TIB, per thread) keep the plain path."""
++        def memop(op):
++            return (op.type == X86_OP_MEM and op.size in (1, 2, 4)
++                    and self.seg_name(op) in (None, "ds", "ss", "es"))
++        if m == "xchg" and len(ops) == 2:
++            mo, ro = (ops[0], ops[1]) if ops[0].type == X86_OP_MEM else (ops[1], ops[0])
++            if memop(mo) and ro.type == X86_OP_REG:
++                t = "uint%d_t" % (mo.size * 8)
++                rn = self.md.reg_name(ro.reg)
++                return ["{ %s _t = __atomic_exchange_n(%s, (%s)(%s), __ATOMIC_SEQ_CST); %s }"
++                        % (t, self._aptr(insn, mo), t, reg_read(rn), reg_write(rn, "_t"))]
++            return None
++        if m == "cmpxchg8b" and ops and ops[0].type == X86_OP_MEM and self.seg_name(ops[0]) in (None, "ds", "ss", "es"):
++            a = self.mem_addr(insn, ops[0])
++            return ["{ uint64_t _e = ((uint64_t)c->edx << 32) | c->eax, _n = ((uint64_t)c->ecx << 32) | c->ebx;",
++                    "  uint64_t _old = __sync_val_compare_and_swap((volatile uint64_t *)GPTR(%s), _e, _n);" % a,
++                    "  c->zf = (_old == _e);",
++                    "  if (!c->zf) { c->eax = (uint32_t)_old; c->edx = (uint32_t)(_old >> 32); } }"]
++        if not locked or not ops or not memop(ops[0]):
++            return None
++        d = ops[0]; sz = d.size; t = "uint%d_t" % (sz * 8); p = self._aptr(insn, d)
++        if m in self._AT_FETCH and len(ops) == 2:
++            res = {"add": "flags_add(c, _old, _v, %d)", "sub": "flags_sub(c, _old, _v, %d)",
++                   "and": "flags_logicz(c, _old & _v, %d)", "or": "flags_logicz(c, _old | _v, %d)",
++                   "xor": "flags_logicz(c, _old ^ _v, %d)"}[m] % sz
++            return ["{ %s _v = (%s)(%s); %s _old = %s(%s, _v, __ATOMIC_SEQ_CST); (void)%s; }"
++                    % (t, t, self.src(insn, ops[1]), t, self._AT_FETCH[m], p, res)]
++        if m in ("inc", "dec") and len(ops) == 1:
++            fn, fl = ("__atomic_fetch_add", "flags_incs") if m == "inc" else ("__atomic_fetch_sub", "flags_decs")
++            return ["{ %s _old = %s(%s, 1, __ATOMIC_SEQ_CST); (void)%s(c, _old, %d); }" % (t, fn, p, fl, sz)]
++        if sz != 4 and m == "xadd" and len(ops) == 2 and ops[1].type == X86_OP_REG:
++            rn = self.md.reg_name(ops[1].reg)
++            return ["{ %s _v = (%s)(%s); %s _old = __atomic_fetch_add(%s, _v, __ATOMIC_SEQ_CST); %s (void)flags_add(c, _old, _v, %d); }"
++                    % (t, t, reg_read(rn), t, p, reg_write(rn, "_old"), sz)]
++        if sz != 4 and m == "cmpxchg" and len(ops) == 2:
++            acc = {1: "R8L(c->eax)", 2: "R16(c->eax)"}[sz]
++            setacc = {1: "SET8L(c->eax, _old);", 2: "SET16(c->eax, _old);"}[sz]
++            return ["{ %s _old = (%s)%s; __atomic_compare_exchange_n(%s, &_old, (%s)(%s), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);" % (t, t, acc, p, t, self.src(insn, ops[1])),
++                    "  (void)flags_sub(c, %s, _old, %d); %s }" % (acc, sz, setacc)]
++        return None
++
+     def _read_dst(self, insn, op):
+         # read a dst operand (for read-modify-write)
+         if op.type == X86_OP_REG: return reg_read(self.md.reg_name(op.reg))

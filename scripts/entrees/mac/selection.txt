@@ -1,0 +1,15 @@
+# selection.txt — M8, critère 2 (v3-critique.md §3.4 ; conception A §2.4 L3-2) : sélection par cadre sur TRaynor01.
+# ATTENDRE_LIGNE sur la fin de l'écran de chargement ([GLUE] écrans affichés 0x00, était 0x10 Loading), +15 s de
+# stabilisation (intro, panneau d'aide), puis DOWN g j 400 300 → WM_LBUTTONDOWN (400, 300) ; DRAG jusqu'à (700, 500)
+# en quatre pas ; UP g j 700 500 → WM_LBUTTONUP (700, 500). À lancer avec SC2_FRAMES=1 SC2_FRAMES_PAS=50 (une capture
+# toutes les 50 frames) : le cadre de sélection dessiné entre les captures doit donner un AE au-delà du seuil
+# (scripts/comparer-captures.sh, zone du cadre 400,300 → 700,500). Scénario générique : la mission est chargée par
+# SC2_ARGS (TRaynor01 pour la preuve).
+ATTENDRE_LIGNE "[GLUE] écrans affichés 0x00 (était 0x10)" 400000
++15000 DOWN g j 400 300
++400 DRAG g j 475 350
++400 DRAG g j 550 400
++400 DRAG g j 625 450
++400 DRAG g j 700 500
++400 UP g j 700 500
+@p +100 QUITTER

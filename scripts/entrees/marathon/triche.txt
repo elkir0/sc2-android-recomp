@@ -1,0 +1,35 @@
+# triche — victoire immédiate par code de triche, quatre essais espacés d'une minute (éprouvé au banc les
+#   22-23/10 : la victoire arrive une dizaine de secondes après le code, 48 s après PRET). Chaque essai :
+#   quatre clics pour fermer l'aide qui s'ouvre à l'Entrée, Entrée, le code tapé une touche par caractère,
+#   Entrée. Garde : arrêt volontaire à +260 s si aucune victoire — sinon le segment QUAND:VICTOIRE qui suit
+#   ne se déclencherait jamais. À coller sous un segment QUAND:PRET (la mission est jouable).
+#   89 événements (le code vaut un événement par caractère), jamais de point-virgule dans un commentaire.
++20:CLIC:953,588@ui
++25:CLIC:953,588@ui
++30:CLIC:953,588@ui
++35:CLIC:953,588@ui
++40:KEY:0x0D
++40.5:TEXTE:whatisbestinlife
++47:KEY:0x0D
++80:CLIC:953,588@ui
++85:CLIC:953,588@ui
++90:CLIC:953,588@ui
++95:CLIC:953,588@ui
++100:KEY:0x0D
++100.5:TEXTE:whatisbestinlife
++107:KEY:0x0D
++140:CLIC:953,588@ui
++145:CLIC:953,588@ui
++150:CLIC:953,588@ui
++155:CLIC:953,588@ui
++160:KEY:0x0D
++160.5:TEXTE:whatisbestinlife
++167:KEY:0x0D
++200:CLIC:953,588@ui
++205:CLIC:953,588@ui
++210:CLIC:953,588@ui
++215:CLIC:953,588@ui
++220:KEY:0x0D
++220.5:TEXTE:whatisbestinlife
++227:KEY:0x0D
++260:QUIT

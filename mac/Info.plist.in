@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- mac/Info.plist.in — paquet SC2Partout.app (V3, lot M0 ; FINALISÉ par M9, 24/10/2026). configure_file(@ONLY) par
+     mac/mac.cmake : @SC2M_REVISION@ (git describe) et @SC2M_OS_MINIMUM@ (sw_vers -productVersion de l'hôte du paquet).
+     L'exécutable est recomp-sc2 lui-même (clone APFS du binaire du banc) : LSEnvironment pose SC2_FENETRE=1 pour tout
+     lancement par LaunchServices (Finder, open) ; une exécution directe de Contents/MacOS/recomp-sc2 reste le banc.
+     NSPrincipalClass SC2Application : la sous-classe de NSApplication de sc2_mac_fenetre.m (M7), qui intercepte les
+     touches du système (plein écran, Cmd+Q). Ni icône ni ressource de Blizzard. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>fr</string>
+	<key>CFBundleExecutable</key>
+	<string>recomp-sc2</string>
+	<key>CFBundleIdentifier</key>
+	<string>fr.sc2partout.mac</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>SC2 Partout</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.3.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>SC2PartoutRevision</key>
+	<string>@SC2M_REVISION@</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.strategy-games</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>@SC2M_OS_MINIMUM@</string>
+	<key>LSEnvironment</key>
+	<dict>
+		<key>SC2_FENETRE</key>
+		<string>1</string>
+	</dict>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>SC2Application</string>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+</dict>
+</plist>

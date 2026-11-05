@@ -1,0 +1,138 @@
+--- a/tools/lift/lift32_cpu.py
++++ b/tools/lift/lift32_cpu.py
+@@ -35,7 +35,12 @@
+ funcs.txt lines: "0xADDR  size  name" (IDA/Ghidra export), used for bounds.
+ With no addresses given, lifts every function in funcs.txt.
+ """
+-import sys, re
++import sys, re, os
++
++# SC2 Partout passe 7k : mot de contrôle x87 modélisé (fldcw/fnstcw/fninit, arrondi RC de
++# fist/fistp/frndint, « integer indefinite » hors plage). Opt-in tant que tous les cpu.h
++# appariés n'ont pas fpu_fldcw/fpu_fnstcw/fpu_fninit/wriNr/fpu_rndint (voir NOTES-SC2.md).
++FPU_CW = os.environ.get("PCRECOMP_FPU_CW") == "1"
+ from capstone import *
+ from capstone.x86 import *
+ 
+@@ -849,6 +854,9 @@
+         if m in ("fist", "fistp"):
+             pop = "; fpop(c);" if m == "fistp" else ";"
+             sz = memop.size; a = self.addr_expr(insn, memop)
++            if FPU_CW:   # arrondi selon RC du mot de contrôle, valeur indéfinie hors plage
++                st = {2: "wri16r", 4: "wri32r", 8: "wri64r"}[sz]
++                return [f"{st}(c, {a}, *fst(c, 0)){pop}"]
+             st = {2: "wri16", 4: "wri32", 8: "wri64"}[sz]
+             return [f"{st}({a}, *fst(c, 0)){pop}"]
+         if m in ("fprem", "fprem1"):
+@@ -871,7 +879,9 @@
+         if m in ("fcos",):  return ["*fst(c, 0) = cos(*fst(c, 0));"]
+         if m in ("fptan",): return ["*fst(c, 0) = tan(*fst(c, 0)); fpush(c, 1.0);"]
+         if m in ("fpatan",):return ["*fst(c, 1) = atan2(*fst(c, 1), *fst(c, 0)); fpop(c);"]
+-        if m in ("frndint",): return ["*fst(c, 0) = nearbyint(*fst(c, 0));"]
++        if m in ("frndint",):
++            if FPU_CW: return ["*fst(c, 0) = fpu_rndint(c, *fst(c, 0));"]
++            return ["*fst(c, 0) = nearbyint(*fst(c, 0));"]
+         if m in ("fscale",): return ["*fst(c, 0) = ldexp(*fst(c, 0), (int)*fst(c, 1));"]
+         if m in ("fsincos",): return ["{ double _s=sin(*fst(c,0)), _c=cos(*fst(c,0)); *fst(c,0)=_s; fpush(c,_c); }"]
+         # The rest of the 8087's transcendental set. These are not exotic: a
+@@ -986,11 +996,17 @@
+             if m != "fcomi" and m != "fucomi": out.append("fpop(c);")
+             return out
+         if m == "fnstsw":
++            sw = "(uint16_t)fpu_fnstsw(c)" if FPU_CW else "(uint16_t)c->fpu_sw"   # 7k : + champ TOP
+             if ops and ops[0].type == X86_OP_REG:   # ax
+-                return ["SET16(c->eax, (uint16_t)c->fpu_sw);"]
+-            return [self.wr(insn, ops[0], "(uint16_t)c->fpu_sw")]
++                return [f"SET16(c->eax, {sw});"]
++            return [self.wr(insn, ops[0], sw)]
+         if m == "fnstcw":
++            if FPU_CW: return [self.wr(insn, ops[0], "fpu_fnstcw(c)")]
+             return [self.wr(insn, ops[0], "0x027Fu")]   # default control word
++        if FPU_CW and m == "fldcw":
++            return [f"fpu_fldcw(c, rd16({self.addr_expr(insn, ops[0])}));"]
++        if FPU_CW and m == "fninit":
++            return ["fpu_fninit(c);"]
+         if m in ("fldcw", "fwait", "wait", "fnclex", "fclex", "fninit"):
+             return [f"/* {m} ignored */"]
+         if m in ("fldenv", "fnstenv"):
+--- a/runtime/recomp32_cpu/cpu.h
++++ b/runtime/recomp32_cpu/cpu.h
+@@ -92,6 +92,10 @@
+      * per thread, and fs:[off] reads ordinary memory at fs_base+off. Left 0 and
+      * unused on the MSVC default path, which reads the real segment. */
+     uint32_t fs_base;
++    /* x87 control word, stored XOR 0x027F so a zeroed CPU has the Windows default
++     * (53-bit precision, round to nearest, all exceptions masked). Read by
++     * fist/fistp/frndint when the lifter runs with PCRECOMP_FPU_CW=1. */
++    uint16_t fpu_cwx;
+ } CPU;
+ 
+ /* ---- partial register access (preserve unaffected bits, like x86) ---- */
+@@ -314,18 +318,24 @@
+ static inline uint32_t op_shl(CPU *c, uint32_t v, uint32_t cnt, int sz) {
+     uint32_t m = mask_sz(sz); cnt &= 31; if (!cnt) return v & m;
+     c->cf = (v >> (sz * 8 - cnt)) & 1; uint32_t r = (v << cnt) & m;
+-    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r); return r;
++    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r);
++    c->of = c->sf ^ c->cf;   /* defined for a count of 1 (MSB(r) xor CF), undefined above */
++    return r;
+ }
+ static inline uint32_t op_shr(CPU *c, uint32_t v, uint32_t cnt, int sz) {
+     uint32_t m = mask_sz(sz); v &= m; cnt &= 31; if (!cnt) return v;
+     c->cf = (v >> (cnt - 1)) & 1; uint32_t r = v >> cnt;
+-    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r); return r;
++    c->zf = (r == 0); c->sf = (r & sign_sz(sz)) != 0; c->pf = parity8((uint8_t)r);
++    c->of = (v & sign_sz(sz)) != 0;   /* count 1: MSB of the original operand */
++    return r;
+ }
+ static inline uint32_t op_sar(CPU *c, uint32_t v, uint32_t cnt, int sz) {
+     uint32_t m = mask_sz(sz), s = sign_sz(sz); v &= m; cnt &= 31; if (!cnt) return v;
+     uint32_t ext = (v & s) ? (m << (sz * 8 - cnt)) & m : 0;
+     c->cf = (v >> (cnt - 1)) & 1; uint32_t r = ((v >> cnt) | ext) & m;
+-    c->zf = (r == 0); c->sf = (r & s) != 0; c->pf = parity8((uint8_t)r); return r;
++    c->zf = (r == 0); c->sf = (r & s) != 0; c->pf = parity8((uint8_t)r);
++    c->of = 0;   /* count 1: cleared */
++    return r;
+ }
+ 
+ /* ---- rotates. Unlike the shifts these leave ZF/SF/PF alone, which is not an
+@@ -497,6 +507,39 @@
+ static inline void   wri16(uint32_t a, double v) { int16_t i = (int16_t)nearbyint(v); memcpy((void *)(uintptr_t)a, &i, 2); }
+ static inline void   wri64(uint32_t a, double v) { int64_t i = (int64_t)nearbyint(v); memcpy((void *)(uintptr_t)a, &i, 8); }
+ 
++/* ---- x87 control word (PCRECOMP_FPU_CW=1) ----
++ * `fnstcw; or ah, 0x0C; fldcw; fistp; fldcw` is how MSVC truncates a float to an
++ * int on x87. Ignoring fldcw rounds to nearest instead: 2.7 becomes 3. Out of
++ * range (and NaN) stores the "integer indefinite" - the C cast is undefined
++ * there and saturates on AArch64. */
++static inline uint32_t fpu_fnstcw(CPU *c) { return (uint16_t)(c->fpu_cwx ^ 0x027Fu); }
++static inline void fpu_fldcw(CPU *c, uint32_t cw) { c->fpu_cwx = (uint16_t)(cw ^ 0x027Fu); }
++static inline uint32_t fpu_fnstsw(CPU *c) {
++    return (c->fpu_sw & ~0x3800u & 0xFFFFu) | (((uint32_t)c->fpu_top & 7u) << 11);
++}
++static inline void fpu_fninit(CPU *c) { c->fpu_cwx = (uint16_t)(0x037Fu ^ 0x027Fu); c->fpu_sw = 0; c->fpu_top = 0; }
++static inline double fpu_rndint(CPU *c, double v) {
++    switch ((fpu_fnstcw(c) >> 10) & 3) {
++    case 1:  return floor(v);
++    case 2:  return ceil(v);
++    case 3:  return trunc(v);
++    default: return nearbyint(v);
++    }
++}
++static inline void wri32r(CPU *c, uint32_t a, double v) {
++    double r = fpu_rndint(c, v); int32_t i = (r >= -2147483648.0 && r < 2147483648.0) ? (int32_t)r : INT32_MIN;
++    memcpy((void *)(uintptr_t)a, &i, 4);
++}
++static inline void wri16r(CPU *c, uint32_t a, double v) {
++    double r = fpu_rndint(c, v); int16_t i = (r >= -32768.0 && r < 32768.0) ? (int16_t)r : INT16_MIN;
++    memcpy((void *)(uintptr_t)a, &i, 2);
++}
++static inline void wri64r(CPU *c, uint32_t a, double v) {
++    double r = fpu_rndint(c, v);
++    int64_t i = (r >= -9223372036854775808.0 && r < 9223372036854775808.0) ? (int64_t)r : INT64_MIN;
++    memcpy((void *)(uintptr_t)a, &i, 8);
++}
++
+ 
+ /* fcom/fcomp: set C3/C2/C0 (st0 vs v). Cleared C1. */
+ static inline void fcompare(CPU *c, double a, double b) {

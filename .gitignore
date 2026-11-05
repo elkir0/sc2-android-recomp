@@ -1,0 +1,29 @@
+# Safety net: everything derived from the game stays on the user's machine (LEGAL.md, AGENTS.md).
+# Some scripts keep the private working tree's layout and write these folders inside the clone.
+extraction/
+recomp-sc2/
+shaders-dumps/
+artifacts/
+artifacts-mac/
+build*/
+*.app/
+
+# Game files and archives, wherever they land (one pattern per line)
+*.iso
+*.mpq*
+*.exe
+*.dll
+*.dds
+*.m3
+*.apk
+*.SC2Map
+*.SC2Save
+*.SC2Bank
+*.SC2Replay
+
+# Local tooling
+__pycache__/
+*.pyc
+.venv/
+.fleet-runs/
+.DS_Store

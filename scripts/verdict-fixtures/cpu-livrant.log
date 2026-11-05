@@ -1,0 +1,9 @@
+--------- beginning of main
+10-17 07:10:02.300  6230  6262 I SC2Partout: [ANDROID] SC2 Partout - passe 7a, /sdcard/SC2Partout/install
+10-17 07:10:02.410  6230  6262 I SC2Partout: [FENETRE] INIT_WINDOW 2176x1812 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-17 07:10:14.902  6230  6263 I SC2Partout: fenêtre 2176x1812 → tampon 1280x1066, image du jeu 1280x720 en (0, 173)
+10-17 07:10:14.903  6230  6263 I SC2Partout: [AFFICHAGE] 1er tampon de fenêtre verrouillé : 1280x1066, stride 1280, format 1 (attendu 1 = RGBA_8888)
+10-17 07:10:14.910  6230  6263 I SC2Partout: [AFFICHAGE] 1er tampon posté à SurfaceFlinger (copie CPU)
+10-17 07:10:14.911  6230  6263 I SC2Partout: frame n°1 affichée à l'écran (1 affichées)
+10-17 07:10:31.004  6230  6263 I SC2Partout: [FPS] 6.2 images/s sur 5.0 s (frames 92→123, copie CPU) ; moyenne depuis la 1re : 5.9 ; phase menu
+10-17 07:11:20.447  6230  6263 I SC2Partout: frame n°600 affichée à l'écran (600 affichées)

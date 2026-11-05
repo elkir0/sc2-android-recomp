@@ -1,0 +1,79 @@
+name: Bug report
+description: Something breaks on your machine — bring a scrubbed report, never game files.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Two hard rules before the form:
+
+        - **No game files.** No executable, archive, asset, save, map, screenshot of
+          game content or dump taken from the game — attaching one closes the issue.
+          If a guide would need the game executable itself, stop at the scope boundary
+          described in [AGENTS.md](../../AGENTS.md#scope).
+        - **No personal data.** Build the report with
+          `python3 scripts/rapport-bug.py --journal <log>`, which scrubs home paths,
+          login names, IP and e-mail addresses, device serials and tokens, then read
+          every log yourself before attaching it.
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      description: Where does it break?
+      options:
+        - macOS (Apple Silicon)
+        - Android device
+        - Linux
+        - Other / several of these
+    validations:
+      required: true
+  - type: textarea
+    id: what-you-did
+    attributes:
+      label: What you did
+      description: The exact commands, from the root of your clone, and the guide you followed (docs/agents/).
+      placeholder: |
+        bash scripts/verifier.sh
+        python3 scripts/fold-ab.py runs/marathon-07 --json
+    validations:
+      required: true
+  - type: textarea
+    id: what-you-expected
+    attributes:
+      label: What you expected
+      description: The behaviour the documentation or the tool promised.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The failure, verbatim where possible (scrubbed — see rapport-bug.py).
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Output of scripts/rapport-bug.py
+      description: |
+        Run `python3 scripts/rapport-bug.py --journal <log> …` and paste its whole
+        output here. It lists your environment, repository revision, `SC2_*`
+        variables and log tails, already scrubbed. If you have no log, run it
+        without `--journal`.
+      render: markdown
+    validations:
+      required: true
+  - type: checkboxes
+    id: no-game-content
+    attributes:
+      label: No game content
+      options:
+        - label: I attached no game file, asset, save or screenshot of game content beyond what is needed
+          required: true
+  - type: checkboxes
+    id: no-personal-data
+    attributes:
+      label: No personal data
+      options:
+        - label: I removed any personal data
+          required: true

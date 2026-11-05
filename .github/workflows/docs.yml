@@ -1,0 +1,15 @@
+name: docs
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Documentation checks and bug-report scrubber
+        # mêmes modules que l'étape 3 de scripts/verifier.sh (discover -s scripts),
+        # nommés ici pour que l'échec dise lequel des deux est en cause
+        run: >
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
+          scripts/test_docs.py scripts/test_rapport_bug.py -v

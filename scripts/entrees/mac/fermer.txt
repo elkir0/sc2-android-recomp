@@ -1,0 +1,2 @@
+# fermer.txt — M7, critère 7 : bouton de fermeture (performClose: → windowShouldClose: rend NO → sortie demandée).
+@p 300 FERMER

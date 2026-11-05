@@ -1,0 +1,92 @@
+Cmdline: /system/bin/simpleperf record --app fr.sc2partout --add-meta-info app_type=debuggable --in-app --tracepoint-events /data/local/tmp/tracepoint_events --out-fd 3 --stop-signal-fd 4 -e cpu-clock -f 4000 --call-graph fp --duration 60
+Arch: arm64
+Event: cpu-clock (type 1, config 0x0, config1 0x0, config2: 0x0)
+Samples: 190516
+Event count: 47629000000
+
+Overhead  Sample  Shared Object                                                                                           Symbol
+14.69%    27989   /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  sc2_dispatch
+8.24%     15708   /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  dessin_reel
+4.64%     8836    /apex/com.android.runtime/lib64/bionic/libc.so                                                          __memmove_aarch64_nt
+2.42%     4618    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  pipeline5
+1.68%     3194    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009C3A50
+1.42%     2701    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A02FF0
+1.16%     2214    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A037A0
+1.01%     1927    /apex/com.android.runtime/lib64/bionic/libc.so                                                          __ioctl
+0.99%     1880    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C4F310
+0.97%     1840    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CC4BE0
+0.91%     1732    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009DAF10
+0.87%     1654    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C4DB40
+0.83%     1585    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C6BA60
+0.82%     1562    /apex/com.android.runtime/lib64/bionic/libc.so                                                          .tiny_end
+0.81%     1547    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A683D0
+0.78%     1491    /vendor/lib64/hw/vulkan.adreno.so                                                                       !!!0000!35563cdacfc1124681773d04567ac1!2e66171171!
+0.75%     1433    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A030F0
+0.69%     1319    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CC8220
+0.66%     1261    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A029D0
+0.66%     1254    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A02B20
+0.64%     1217    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  v_SetVertexShaderConstantF
+0.64%     1214    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A51B20
+0.61%     1155    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009F99D0
+0.60%     1146    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C580E0
+0.60%     1139    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009C3C10
+0.57%     1088    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00B8B5E0
+0.55%     1049    /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C6CF10
+0.49%     943     /apex/com.android.runtime/bin/linker64                                                                  [linker]tlsdesc_resolver_dynamic
+0.45%     861     /apex/com.android.runtime/lib64/bionic/libc.so                                                          scudo::HybridMutex::tryLock()
+0.44%     840     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CC7470
+0.43%     817     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C4FAE0
+0.42%     806     /apex/com.android.runtime/lib64/bionic/libc.so                                                          pthread_mutex_lock
+0.41%     781     /vendor/lib64/hw/vulkan.adreno.so                                                                       !!!0000!930a54021fc79e2ca8e33a3096f253!2e66171171!
+0.41%     779     /vendor/lib64/hw/vulkan.adreno.so                                                                       !!!0000!65bb4f16e1c4caf7a56f18c58bd23d!2e66171171!
+0.37%     703     /vendor/lib64/hw/vulkan.adreno.so                                                                       qglinternal::vkCmdBindPipeline(VkCommandBuffer_T*, VkPipelineBindPoint, VkPipeline_T*)
+0.36%     690     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  sc2_iat_call
+0.36%     677     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C6D550
+0.35%     673     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A67DF0
+0.35%     663     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CE0100
+0.35%     663     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CE80D0
+0.34%     656     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C51E20
+0.34%     648     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009FAC50
+0.33%     629     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C6CD20
+0.32%     610     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C20BC0
+0.32%     607     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009DAAE0
+0.32%     607     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  d3dv_dessiner
+0.32%     601     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009FECA0
+0.31%     599     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CE1250
+0.30%     581     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C58440
+0.30%     579     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00B02850
+0.30%     577     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  sc2_com_call
+0.30%     572     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CE06C0
+0.30%     570     /vendor/lib64/hw/vulkan.adreno.so                                                                       qglinternal::vkCmdDrawIndexed(VkCommandBuffer_T*, unsigned int, unsigned int, unsigned int, int, unsigned int)
+0.29%     556     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009F9020
+0.28%     535     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C3D670
+0.28%     530     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CBD390
+0.28%     530     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CE0530
+0.27%     523     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C24080
+0.27%     520     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009F9270
+0.27%     515     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_01041040
+0.27%     513     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CF0480
+0.26%     503     /apex/com.android.runtime/lib64/bionic/libc.so                                                          pthread_mutex_unlock
+0.26%     499     /apex/com.android.runtime/lib64/bionic/libc.so                                                          madvise
+0.26%     495     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CC9140
+0.26%     486     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C9A5A0
+0.25%     485     /apex/com.android.runtime/lib64/bionic/libc.so                                                          NonPI::MutexLockWithTimeout(pthread_mutex_internal_t*, bool, timespec const*) (.__uniq.8908157144215114713334022205380908012)
+0.25%     480     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009FDF60
+0.25%     473     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00CE1340
+0.25%     472     /apex/com.android.runtime/lib64/bionic/libc.so                                                          scudo::HybridMutex::unlock()
+0.25%     467     /apex/com.android.runtime/lib64/bionic/libc.so                                                          scudo::Allocator<scudo::AndroidNormalConfig, &scudo_malloc_postinit>::quarantineOrDeallocateChunk(scudo::Options const&, void*, scudo::Chunk::UnpackedHeader*, unsigned long)
+0.24%     465     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C58240
+0.24%     457     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C06720
+0.24%     456     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A00880
+0.24%     456     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C57EF0
+0.23%     442     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009DA0F0
+0.23%     438     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009FF750
+0.23%     432     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C6A920
+0.23%     430     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C81AA0
+0.22%     423     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C6D290
+0.22%     412     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C68660
+0.21%     405     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C5EF90
+0.21%     399     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A09510
+0.21%     396     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_009FE2E0
+0.21%     395     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00A632D0
+0.21%     392     /data/app/~~92oreFzuplEQc2XDOF3fDQ==/fr.sc2partout-pK6-_aSxy3coz5U5kH23IQ==/lib/arm64/libSC2Partout.so  L_00C50A70

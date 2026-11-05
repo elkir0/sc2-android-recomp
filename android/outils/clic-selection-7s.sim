@@ -1,0 +1,23 @@
+# Passe 7s — sélection d'unités dans TRaynor01 (vue « base », 1280×720 = pixels des captures PPM du banc x86).
+# Format (5f) : frame <n> souris <x> <y> [bouton g|m|d down|up] | frame <n> touche <vk> down|up ; n = tours de pompe.
+# 1. fermer l'aide (« Close » ~940,584 ; l'aide s'ouvre entre f750 et f950) — comme clic-fermer-aide-7q.txt mais
+#    SANS les clics après f1000 : ils tomberaient sur la vue de jeu et désélectionneraient.
+frame 700 souris 940 584
+frame 702 souris 940 584 bouton g down
+frame 704 souris 940 584 bouton g up
+frame 800 souris 940 584
+frame 802 souris 940 584 bouton g down
+frame 804 souris 940 584 bouton g up
+frame 900 souris 940 584
+frame 902 souris 940 584 bouton g down
+frame 904 souris 940 584 bouton g up
+frame 1000 souris 940 584
+frame 1002 souris 940 584 bouton g down
+frame 1004 souris 940 584 bouton g up
+# 2. sélection par rectangle autour des 6 marines + Raynor (route, capture 7w f1500 : x 565..705, y 285..405)
+frame 1100 souris 530 260
+frame 1102 souris 530 260 bouton g down
+frame 1106 souris 640 340
+frame 1110 souris 740 430
+frame 1114 souris 740 430 bouton g up
+frame 1120 souris 640 200

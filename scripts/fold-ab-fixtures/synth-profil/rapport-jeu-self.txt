@@ -1,0 +1,20 @@
+Cmdline: simpleperf report --comms sc2-jeu --sort dso,symbol -n (synthétique)
+Arch: arm64
+Samples: 760
+Event count: 190000000
+
+Overhead  Sample  Shared Object                            Symbol
+13.16%    100     /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  L_00A02FF0
+13.16%    100     /vendor/lib64/hw/vulkan.adreno.so                    L_0000AB
+6.58%     50      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  sc2_dispatch
+3.95%     30      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  dispatch_truc
+1.32%     10      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  dispatch_un
+5.26%     40      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  dessin_reel
+2.63%     20      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  vk_present
+2.63%     20      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  v_init
+2.63%     20      /vendor/lib64/hw/vulkan.adreno.so                    pilote_foo
+3.95%     30      /apex/com.android.runtime/lib64/bionic/libc.so         memcpy
+5.26%     40      [kernel.kallsyms]                                     native_queued_spin_lock_slowpath
+6.58%     50      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  runtime_foo
+7.89%     60      /data/app/~~synth/fr.sc2partout/lib/arm64/libSC2Partout.so  symbole avec espaces
+2.63%     20      /system/lib64/libdrift.so                             mystere

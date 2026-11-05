@@ -1,0 +1,5 @@
+# pause20.txt — M7, critère 2 : réduction (miniaturize:) au Present n°600, restauration 20 s plus tard, puis Cmd+Q.
+# Attendu : « [PAUSE] arrière-plan : jeu suspendu… » puis « [PAUSE] reprise après 20.x s ».
+@p 600 MINIATURISER
++20000 RESTAURER
+@p +120 QUITTER

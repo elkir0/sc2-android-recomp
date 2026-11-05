@@ -1,0 +1,8 @@
+12:28:18 jeu lancé
+12:28:57 1er clic (panneau) ; profil dans 20 s
+12:29:17 simpleperf 60 s
+simpleperf I cmd_record.cpp:864] Recorded for 59.978 seconds. Start post processing.
+simpleperf I cmd_record.cpp:965] Samples recorded: 202,152. Samples lost: 0.
+12:30:20 profil fini — tu peux arrêter de jouer
+/data/local/tmp/perf.data: 1 file pulled, 0 skipped. 26.7 MB/s (84571210 bytes in 3.020s)
+12:30:35 fini

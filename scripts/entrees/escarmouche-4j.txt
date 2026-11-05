@@ -1,0 +1,24 @@
+# escarmouche-4j.txt — escarmouche contre l'IA (V4.10, 23/10) : partie courte (3 min) sur une carte à 4 places, au banc.
+# Partie : SC2_ESCARMOUCHE=LostTemple SC2_ESCARMOUCHE_RACE=zerg SC2_ESCARMOUCHE_NB_IA=2
+#   SC2_ESCARMOUCHE_RACE_IA=protoss,terran SC2_ESCARMOUCHE_IA=moyen SC2_ESCARMOUCHE_VISION=1 (chacun pour soi : les IA
+#   se battent aussi entre elles). Avec SC2_ESCARMOUCHE_FIN=1, la banque EscarmoucheDebut prouve que le MapScript
+#   augmenté compile et tourne.
+# Coordonnées client 1280×720, pixels bruts. Minicarte en bas à gauche : les quatre bases de départ de Lost Temple
+# sont en haut (107, 556), à droite (178, 622), en bas (107, 690) et à gauche (37, 630) de la minicarte (relevé sur les
+# captures du 23/10). Départs tirés au sort : une base est vide (2 IA). Chaque clic sur la minicarte est doublé (le
+# premier après des minutes sans entrée ne déplace pas la caméra). Horloge : depuis QUAND:PRET (fin du chargement).
+QUAND:PRET MAX:180 SINON:QUIT
++5:CAPTURE:depart
++173:CLIC:107,556
++174:CLIC:107,556
++177:CAPTURE:haut-3min
++179:CLIC:178,622
++180:CLIC:178,622
++183:CAPTURE:droite-3min
++185:CLIC:107,690
++186:CLIC:107,690
++189:CAPTURE:bas-3min
++191:CLIC:37,630
++192:CLIC:37,630
++195:CAPTURE:gauche-3min
++198:QUIT

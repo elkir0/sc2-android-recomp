@@ -1,0 +1,1 @@
+  mResumedActivity=ActivityRecord{2f2f2f2f u0 com.sec.android.app.launcher/com.sec.android.app.launcher.activities.LauncherActivity t4321}

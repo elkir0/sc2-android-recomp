@@ -1,0 +1,30 @@
+# bar-marsara — hub du bar de Mar Sara (TStory01), sans joueur, 1280x720. Éprouvé au banc les 21-23/10
+#   (étapes 2 et 3 de scripts/entrees/bar-lancer-mission-evt.txt, reprises telles quelles).
+# Étape 2 : la cinématique d'arrivée est passée à coups d'Échap (sans effet dans le bar une fois passée), les
+#   pipelines compilent. Étape 3 : « Mission » sur le comptoir, puis « Launch » dans la console, avec deux essais
+#   de repli (sans effet une fois la cinématique lancée). Chaque geste attend DEUX conditions depuis PRET : des
+#   tours de pompe (« +fN:WAIT », barrière : un élément « f » garde son rang) et des secondes (horloge du jeu).
+# À coller sous un segment QUAND:PRET (le hub est chargé) : 23 événements relatifs, jamais de point-virgule.
++1:ESC
++3:ESC
++5:ESC
++7:ESC
++9:ESC
++11:ESC
++13:ESC
++15:ESC
++f2000:WAIT
++19:MOVE:270,510@scene
++20:CLIC:270,510@scene
++f2700:WAIT
++27:MOVE:725,627@ui
++f2800:WAIT
++28:CLIC:725,627@ui
++f3400:WAIT
++33:MOVE:725,627@ui
++f3500:WAIT
++34:CLIC:725,627@ui
++f4100:WAIT
++39:MOVE:725,627@ui
++f4200:WAIT
++40:CLIC:725,627@ui

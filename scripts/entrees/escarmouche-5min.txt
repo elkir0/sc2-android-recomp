@@ -1,0 +1,21 @@
+# escarmouche-5min.txt — escarmouche contre l'IA (V4.10, 23/10) : 5 min de partie sur Steppes of War, au banc Mac.
+# Partie (scripts/banc-escarmouche.sh, variables de docs/VARIABLES.md) : SC2_ESCARMOUCHE=SteppesofWar
+#   SC2_ESCARMOUCHE_RACE=terran SC2_ESCARMOUCHE_RACE_IA=zerg SC2_ESCARMOUCHE_IA=facile SC2_ESCARMOUCHE_VISION=1
+#   (VISION : masque et brouillard coupés, sans quoi la base de l'IA reste noire sur les captures).
+# Coordonnées client 1280×720 (défaut Mac de SC2_ECRAN), pixels bruts. Minicarte en bas à gauche : (170, 562) = coin
+# haut-droit, (40, 690) = coin bas-gauche, les deux bases de Steppes of War : les départs sont tirés au sort à chaque
+# partie (diagnostic V4.10, R2) : les deux coins sont capturés, l'un montre la base de l'IA, l'autre celle du joueur.
+# Chaque clic sur la minicarte est DOUBLÉ : au banc du 23/10, le premier clic après des minutes sans entrée n'a pas
+# déplacé la caméra (les deux captures montraient la base du joueur), les suivants si.
+# Horloge : QUAND:PRET = fin du chargement de la carte (masque GlueUI) : les « + » comptent depuis là (temps de partie,
+# à la cadence près). Chargement non terminé en 180 s : arrêt (code 3).
+QUAND:PRET MAX:180 SINON:QUIT
++5:CAPTURE:depart
++120:CAPTURE:t2min
++294:CLIC:170,562
++295:CLIC:170,562
++300:CAPTURE:coin-hd-5min
++301:CLIC:40,690
++302:CLIC:40,690
++305:CAPTURE:coin-bg-5min
++307:QUIT

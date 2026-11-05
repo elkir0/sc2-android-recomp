@@ -1,0 +1,25 @@
+# Passe 7u — TRaynor01 : le scénario de la 7q2 (repris de la 7w2) en ÉVÉNEMENTIEL. Chaque étape clé attend l'état
+# OBSERVÉ à l'écran (runtime/sc2_input_sim.c, « quand:<déclencheur> max:<tours> ») au lieu d'une frame fixe ; les
+# événements suivants sont décalés d'autant (paires down/up conservées). Les frames ci-dessous ne sont plus que des
+# dates « au plus tôt » et des écarts relatifs.
+# 1. fermer l'aide QUAND elle est visible (bouton « Close » vert) — jusqu'à 3 000 tours d'attente (chargement long) ;
+frame 300 souris 945 583 quand:aide max:3000
+frame 305 souris 945 583 bouton g down
+frame 308 souris 945 583 bouton g up
+# 2. sélectionner Raynor (portrait du héros) QUAND la partie est active (HUD visible, plus d'aide) ;
+frame 340 souris 1250 473 quand:partie max:600
+frame 342 souris 1250 473 bouton g down
+frame 343 souris 1250 473 bouton g up
+# 3. ordre de déplacement par la minicarte QUAND Raynor est sélectionné (boutons de la carte de commande) ;
+frame 380 souris 100 640 quand:selection max:600
+frame 382 souris 100 640 bouton d down
+frame 383 souris 100 640 bouton d up
+# 4. second ordre vers l'objectif, puis 5. attaque-déplacement (écarts relatifs de la 7w2 : +280, +480).
+frame 660 souris 128 565
+frame 662 souris 128 565 bouton d down
+frame 663 souris 128 565 bouton d up
+frame 860 touche 0x41 down
+frame 861 touche 0x41 up
+frame 863 souris 70 690
+frame 864 souris 70 690 bouton g down
+frame 865 souris 70 690 bouton g up

@@ -1,0 +1,8 @@
+# victoire — l'écran de victoire demande « Continue » : capture à +3 s, puis trois clics de repli sur le
+#   bouton (le premier prend, les suivants sont sans effet). Le marqueur « n » entre accolades de la capture
+#   devient le numéro de la mission : une capture par mission (victoire-1, victoire-2…). À coller sous un
+#   segment QUAND:VICTOIRE. 4 événements relatifs, jamais de point-virgule dans un commentaire.
++3:CAPTURE:victoire-{n}
++6:CLIC:998,674@ui
++9:CLIC:998,674@ui
++12:CLIC:998,674@ui

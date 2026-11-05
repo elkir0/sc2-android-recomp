@@ -1,0 +1,2 @@
+# quitter.txt — M7, critères 7 et 10 : Cmd+Q au Present n°300 ([NSApp terminate:] → applicationShouldTerminate:).
+@p 300 QUITTER

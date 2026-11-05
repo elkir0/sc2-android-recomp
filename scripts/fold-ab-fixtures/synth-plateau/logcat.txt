@@ -1,0 +1,10 @@
+10-20 10:00:00.000 I/SC2Partout( 1000): [INPUT] frame 10 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00C60385 = (901, 198)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-20 10:00:10.000 I/SC2Partout( 1000): [FPS] 20.0 images/s sur 5.0 s (frames 0→1, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 20.0 ; phase chargement ; ms/frame : jeu 10.0, backend 0.5
+10-20 10:00:15.000 I/SC2Partout( 1000): [FPS] 20.0 images/s sur 5.0 s (frames 1→101, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 20.0 ; phase chargement ; ms/frame : jeu 30.0, backend 1.0, présentation GPU 0.2
+10-20 10:00:20.000 I/SC2Partout( 1000): [FPS] 30.0 images/s sur 5.0 s (frames 101→251, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 25.0 ; phase chargement ; ms/frame : jeu 40.0, backend 6.0, présentation GPU 0.3
+10-20 10:00:25.000 I/SC2Partout( 1000): [FPS] 40.0 images/s sur 5.0 s (frames 251→451, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 30.0 ; phase chargement ; ms/frame : jeu 50.0, backend 2.0
+10-20 10:00:30.000 I/SC2Partout( 1000): [FPS] 10.0 images/s sur 5.0 s (frames 451→501, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 25.0 ; phase chargement ; ms/frame : jeu 60.0, backend 7.0
+10-20 10:00:31.000 E/SC2Partout( 1000): Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0 in tid 1000
+10-20 10:00:31.100 I/SC2Partout( 1000): [BILAN] [VOL] synthèse vol de test
+10-20 10:00:31.200 I/SC2Partout( 1000): [BILAN] [GPU] passe 10s (synthétique) : 0,0 ms/frame
+10-20 10:00:31.300 I/SC2Partout( 1000): [BILAN] frames présentées (Present) : 501

@@ -1,0 +1,8 @@
+GraphicsQuality=1
+ShadowQuality=1
+TextureQuality=1
+ModelQuality=1
+EffectsQuality=1
+PhysicsQuality=1
+LightingQuality=1
+PortraitsQuality=1

@@ -1,0 +1,15 @@
+# Passe 7p — sonde du menu de campagne : clics (centre, bas, gauche, bas-droite) puis Échap et Entrée.
+# Format (5f) : frame <n> souris <x> <y> [bouton g|m|d down|up] | frame <n> touche <vk> down|up ; n = tours de pompe.
+frame 150 souris 640 360
+frame 152 souris 640 360 bouton g down
+frame 154 souris 640 360 bouton g up
+frame 170 souris 640 600 bouton g down
+frame 172 souris 640 600 bouton g up
+frame 190 souris 200 400 bouton g down
+frame 192 souris 200 400 bouton g up
+frame 210 souris 1100 650 bouton g down
+frame 212 souris 1100 650 bouton g up
+frame 230 touche 27 down
+frame 232 touche 27 up
+frame 260 touche 13 down
+frame 262 touche 13 up

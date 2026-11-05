@@ -1,0 +1,1 @@
+Progression de TEST pour seance-fold.sh en ADB_FAKE — dossier synthétique, aucun enjeu.

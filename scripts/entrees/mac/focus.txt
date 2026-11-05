@@ -1,0 +1,5 @@
+# focus.txt — M7, critère 3 : perte du focus au Present n°300 (chemin des notifications), retour 3 s plus tard.
+# Attendu : [ACTIVATION] hôte : inactif, WM_ACTIVATEAPP(0) livré, aucune auto-activation entre les deux, puis actif.
+@p 300 FOCUS 0
++3000 FOCUS 1
+@p +120 QUITTER

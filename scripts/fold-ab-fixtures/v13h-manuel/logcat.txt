@@ -1,0 +1,528 @@
+10-19 11:26:39.684 I/SC2Partout( 7004): [FPS] 6.7 images/s sur 5.1 s (frames 1→35, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 6.7 ; phase chargement ; ms/frame : jeu 144.1, backend 1.2, présentation GPU 0.3
+10-19 11:26:44.966 I/SC2Partout( 7004): [FPS] 7.2 images/s sur 5.3 s (frames 35→73, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 7.0 ; phase chargement ; ms/frame : jeu 138.8, backend 0.1, présentation GPU 0.1
+10-19 11:26:49.967 I/SC2Partout( 7004): [FPS] 6.8 images/s sur 5.0 s (frames 73→107, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 6.9 ; phase chargement ; ms/frame : jeu 145.6, backend 1.3, présentation GPU 0.2
+10-19 11:26:56.420 I/SC2Partout( 7004): [FPS] 2.5 images/s sur 6.5 s (frames 107→123, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 5.6 ; phase chargement ; ms/frame : jeu 403.1, backend 0.1, présentation GPU 0.1
+10-19 11:27:02.129 I/SC2Partout( 7004): [FPS] 7.5 images/s sur 5.7 s (frames 123→166, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 6.0 ; phase chargement ; ms/frame : jeu 132.5, backend 0.1, présentation GPU 0.2
+10-19 11:27:07.569 I/SC2Partout( 7004): [FPS] 5.5 images/s sur 5.4 s (frames 166→196, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 5.9 ; phase chargement ; ms/frame : jeu 180.9, backend 0.3, présentation GPU 0.1
+10-19 11:27:12.590 I/SC2Partout( 7004): [FPS] 23.9 images/s sur 5.0 s (frames 196→316, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 8.3 ; phase chargement ; ms/frame : jeu 40.3, backend 1.4, présentation GPU 0.2
+10-19 11:27:17.598 I/SC2Partout( 7004): [FPS] 31.6 images/s sur 5.0 s (frames 316→474, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 11.0 ; phase chargement ; ms/frame : jeu 31.0, backend 0.5, présentation GPU 0.2
+10-19 11:27:20.462 I/SC2Partout( 7004): [INPUT] frame 573 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00A903C4 = (964, 169)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:22.887 I/SC2Partout( 7004): [FPS] 32.0 images/s sur 5.3 s (frames 474→643, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 13.3 ; phase chargement ; ms/frame : jeu 30.5, backend 0.7, présentation GPU 0.2
+10-19 11:27:22.902 I/SC2Partout( 7004): [INPUT] frame 644 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00A90392 = (914, 169)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:26.331 I/SC2Partout( 7004): [INPUT] frame 729 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024D04E2 = (1250, 589)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:27.000 I/SC2Partout( 7004): [INPUT] frame 747 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x013B02F5 = (757, 315)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:27.910 I/SC2Partout( 7004): [FPS] 25.3 images/s sur 5.0 s (frames 643→770, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 14.4 ; phase chargement ; ms/frame : jeu 38.7, backend 0.7, présentation GPU 0.2
+10-19 11:27:28.031 I/SC2Partout( 7004): [INPUT] frame 774 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025E04DC = (1244, 606)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:28.566 I/SC2Partout( 7004): [INPUT] frame 789 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00E6041D = (1053, 230)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:30.102 I/SC2Partout( 7004): [INPUT] frame 824 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x026104D5 = (1237, 609)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:30.698 I/SC2Partout( 7004): [INPUT] frame 839 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01120376 = (886, 274)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:31.805 I/SC2Partout( 7004): [INPUT] frame 867 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025904D1 = (1233, 601)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:32.910 I/SC2Partout( 7004): [FPS] 24.6 images/s sur 5.0 s (frames 770→893, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 15.3 ; phase chargement ; ms/frame : jeu 39.9, backend 0.6, présentation GPU 0.2
+10-19 11:27:33.178 I/SC2Partout( 7004): [INPUT] frame 900 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x02A3009E = (158, 675)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:37.548 I/SC2Partout( 7004): [INPUT] frame 1000 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025004D3 = (1235, 592)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:37.932 I/SC2Partout( 7004): [FPS] 21.9 images/s sur 5.0 s (frames 893→1003, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 15.8 ; phase chargement ; ms/frame : jeu 42.9, backend 2.6, présentation GPU 0.2
+10-19 11:27:38.582 I/SC2Partout( 7004): [INPUT] frame 1017 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x011D03D6 = (982, 285)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:40.756 I/SC2Partout( 7004): [INPUT] frame 1055 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x023B04DA = (1242, 571)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:42.792 I/SC2Partout( 7004): [INPUT] frame 1092 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x010602C9 = (713, 262)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:42.934 I/SC2Partout( 7004): [FPS] 18.2 images/s sur 5.0 s (frames 1003→1094, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 16.0 ; phase chargement ; ms/frame : jeu 54.3, backend 0.4, présentation GPU 0.2
+10-19 11:27:44.527 I/SC2Partout( 7004): [INPUT] frame 1126 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024E04E1 = (1249, 590)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:46.924 I/SC2Partout( 7004): [INPUT] frame 1174 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x00D6026E = (622, 214)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:47.971 I/SC2Partout( 7004): [FPS] 19.9 images/s sur 5.0 s (frames 1094→1194, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 16.3 ; phase chargement ; ms/frame : jeu 49.2, backend 0.9, présentation GPU 0.2
+10-19 11:27:48.616 I/SC2Partout( 7004): [INPUT] frame 1206 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x025004E4 = (1252, 592)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:49.155 I/SC2Partout( 7004): [INPUT] frame 1216 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x011D025D = (605, 285)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:52.989 I/SC2Partout( 7004): [FPS] 18.7 images/s sur 5.0 s (frames 1194→1288, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 16.4 ; phase chargement ; ms/frame : jeu 52.2, backend 0.9, présentation GPU 0.2
+10-19 11:27:55.034 I/SC2Partout( 7004): [INPUT] frame 1328 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024504DE = (1246, 581)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:56.104 I/SC2Partout( 7004): [INPUT] frame 1352 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01130288 = (648, 275)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:27:58.027 I/SC2Partout( 7004): [FPS] 21.2 images/s sur 5.0 s (frames 1288→1395, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 16.7 ; phase chargement ; ms/frame : jeu 46.0, backend 0.8, présentation GPU 0.2
+10-19 11:28:03.054 I/SC2Partout( 7004): [FPS] 22.5 images/s sur 5.0 s (frames 1395→1508, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.0 ; phase chargement ; ms/frame : jeu 43.2, backend 1.1, présentation GPU 0.2
+10-19 11:28:04.757 I/SC2Partout( 7004): [INPUT] frame 1552 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01F5024C = (588, 501)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:28:05.226 I/SC2Partout( 7004): [INPUT] frame 1564 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01EA024D = (589, 490)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:28:05.382 I/SC2Partout( 7004): [INPUT] frame 1568 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x01EC024D = (589, 492)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:28:08.093 I/SC2Partout( 7004): [FPS] 25.2 images/s sur 5.0 s (frames 1508→1635, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.5 ; phase chargement ; ms/frame : jeu 38.9, backend 0.5, présentation GPU 0.2
+10-19 11:28:13.131 I/SC2Partout( 7004): [FPS] 24.2 images/s sur 5.0 s (frames 1635→1757, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 17.8 ; phase chargement ; ms/frame : jeu 40.5, backend 0.6, présentation GPU 0.2
+10-19 11:28:13.884 I/SC2Partout( 7004): [INPUT] frame 1776 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x026F035C = (860, 623)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:28:15.021 I/SC2Partout( 7004): [INPUT] frame 1801 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x023E0212 = (530, 574)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:28:18.152 I/SC2Partout( 7004): [FPS] 23.9 images/s sur 5.0 s (frames 1757→1877, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 18.1 ; phase chargement ; ms/frame : jeu 41.0, backend 0.6, présentation GPU 0.2
+10-19 11:28:20.936 I/SC2Partout( 7004): [INPUT] frame 1938 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x024904E2 = (1250, 585)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:28:22.321 I/SC2Partout( 7004): [INPUT] frame 1966 : WM_LBUTTONDOWN (0x201, wParam 0x1, lParam 0x011E0320 = (800, 286)) → wndproc du jeu 0x0099A600, rendu 0x0
+10-19 11:28:23.171 I/SC2Partout( 7004): [FPS] 20.7 images/s sur 5.0 s (frames 1877→1981, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 18.2 ; phase chargement ; ms/frame : jeu 47.2, backend 0.8, présentation GPU 0.2
+10-19 11:28:28.186 I/SC2Partout( 7004): [FPS] 18.7 images/s sur 5.0 s (frames 1981→2075, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 18.3 ; phase chargement ; ms/frame : jeu 52.2, backend 0.9, présentation GPU 0.2
+10-19 11:28:33.208 I/SC2Partout( 7004): [FPS] 20.1 images/s sur 5.0 s (frames 2075→2176, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 18.3 ; phase chargement ; ms/frame : jeu 48.6, backend 1.0, présentation GPU 0.2
+10-19 11:28:38.243 I/SC2Partout( 7004): [FPS] 21.8 images/s sur 5.0 s (frames 2176→2286, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 18.5 ; phase chargement ; ms/frame : jeu 44.8, backend 0.8, présentation GPU 0.2
+10-19 11:28:43.255 I/SC2Partout( 7004): [FPS] 22.1 images/s sur 5.0 s (frames 2286→2397, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 18.6 ; phase chargement ; ms/frame : jeu 44.2, backend 0.7, présentation GPU 0.2
+10-19 11:28:48.294 I/SC2Partout( 7004): [FPS] 22.8 images/s sur 5.0 s (frames 2397→2512, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 18.8 ; phase chargement ; ms/frame : jeu 42.5, backend 1.1, présentation GPU 0.2
+10-19 11:28:53.325 I/SC2Partout( 7004): [FPS] 24.2 images/s sur 5.0 s (frames 2512→2634, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 19.0 ; phase chargement ; ms/frame : jeu 40.4, backend 0.6, présentation GPU 0.2
+10-19 11:28:58.368 I/SC2Partout( 7004): [FPS] 21.4 images/s sur 5.0 s (frames 2634→2742, swapchain ; swapchain 2504x2256) ; moyenne depuis la 1re : 19.1 ; phase chargement ; ms/frame : jeu 45.7, backend 0.8, présentation GPU 0.2
+10-19 11:29:00.002 I/SC2Partout( 7004): [BILAN] [VIDEO-AMC] inactif : 0 vidéo(s) ouvertes, 0 en décodage matériel, 0 saut(s) dont 0 de secours
+10-19 11:29:00.127 I/SC2Partout( 7004): [BILAN] [AUDIO] Android : AAudio 44100 Hz, rafale 89, tampon 267 frames (6.1 ms), xruns AAudio 0, reconnexions 0 ; reçues 5552568 frames (125.91 s) en 2776 livraisons, jouées 5544438 (9842246 échantillons non nuls), silence 857243 frames en 9643 sous-alimentations (après amorçage), débordements 0, remplissage moyen de l'anneau 183.1 ms sur 72477 rappels
+10-19 11:29:00.127 I/SC2Partout( 7004): [ARRÊT] [thread 7047] sortie demandée par la plate-forme — traitée au Present
+10-19 11:29:00.127 I/SC2Partout( 7004): [ARRÊT] pile d'appels invitée (fantôme, la plus récente en haut) :
+10-19 11:29:00.127 I/SC2Partout( 7004): [BILAN] [PILE] pile hôte : profondeur max 2431 Kio sur 65536 Kio (3.7 %) ; sauts SC2_SAUT 106244863 ; lift à jour
+10-19 11:29:00.127 I/SC2Partout( 7004): [BILAN] jalons de boot atteints :
+10-19 11:29:00.127 I/SC2Partout( 7004): [BILAN] 1872723457 dispatchs ; 33081 fonctions liftées distinctes exécutées sur 86653 disponibles
+10-19 11:29:00.127 I/SC2Partout( 7004): [BILAN] imports appelés :
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] 318 imports distincts appelés sur 755 ; initialiseurs C/C++ : 4191 exécutés, 0 abandonnés
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [FS] 233 accès trouvés, 752 absents, 7 énumérations ; installation : /sdcard/SC2Partout/install
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] archives MPQ montées par le moteur (index StormLib) :
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] frames présentées (Present) : 2778
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [D3D9] surfaces de texture (passe 10j) : 2506 créées, 113107 reprises du cache
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [CACHE] passe 10r : blocs de constantes réutilisés sans recopie par 485299 dessins VS + 2938647 PS ; tampons statiques : 0 flux + 0 index liés depuis le cache, 0 remplacements, 0 volatils (0 dessins renvoyés à l'anneau), 0 refus plafond, 15777543168 octets de copie évités au total ; 0 entrées en cache (0.0 Mio / 256 Mio) ; cache tampons désactivé (défaut ; SC2_VK_CACHE_TAMPONS=1 pour l'activer)
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] draws RÉELS (shaders du jeu en SPIR-V) : 3539425 ; refusés : 0 sans cible/module, 0 pipeline, 0 place ; 341 modules, 327 pipelines, 9 samplers ; textures : 450, 3424 téléversements (644 Mo), 0 formats/tailles non gérés
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX] backend : BC natif ; 5501 niveaux téléversés (3 cubes) ; 3 téléversements DÉCODÉS PAR LE CPU (3 Mo)
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX]   D3DFMT 21  → natif : 31 textures, 1773 téléversements, 439.7 Mo, jusqu'à 1 niveaux
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX]   DXT5       → natif : 314 textures, 314 téléversements, 37.4 Mo, jusqu'à 9 niveaux
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX]   DXT1       → natif : 98 textures, 98 téléversements, 4.0 Mo, jusqu'à 9 niveaux
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX]   D3DFMT 20  → RGBA8 (décodage CPU) : 1 textures, 1 téléversements, 0.5 Mo, jusqu'à 8 niveaux
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX]   D3DFMT 26  → RGBA8 (décodage CPU) : 2 textures, 2 téléversements, 2.7 Mo, jusqu'à 1 niveaux
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX]   D3DFMT 51  → natif : 4 textures, 1236 téléversements, 160.0 Mo, jusqu'à 4 niveaux
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] draws D3DPT_TRIANGLEFAN (topologie 6) : 0
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] descripteurs poussés (VK_KHR_push_descriptor)
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [GPU] passe 10s (chrono GPU) : 2778 frames : 22.7 ms/frame mesurés ; passes : n°11 2048x2048 fmt 1280070990 10.4 ms (3.7/frame), n°1 1280x720 fmt 21 6.9 ms (32.9/frame), n°0 1280x720 fmt 22 0.7 ms (3.1/frame), n°2 320x180 fmt 21 0.3 ms (3.0/frame), n°62 240x240 fmt 21 0.2 ms (2.1/frame), n°60 240x240 fmt 21 0.2 ms (1.9/frame), n°5 1280x720 fmt 21 0.2 ms (1.0/frame), n°3 320x180 fmt 21 0.1 ms (2.0/frame), n°14 512x512 fmt 21 0.1 ms (0.9/frame), n°13 512x512 fmt 21 0.1 ms (0.9/frame), n°29 480x480 fmt 21 0.1 ms (0.3/frame), n°6 1280x720 fmt 21 0.0 ms (0.5/frame) ; hors passes 0.2 ; clears prof 2.8 ; copies 0.0 ; téléversements 0.1 ; relectures 0.0 ; 0 tampon tronqué
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] Vulkan : Adreno (TM) 840 (Vulkan 1.4.295, type 1) — 63 cibles, 11324 Clear couleur (11324 rectangles), 93287 Clear profondeur, 5350 draws « lumière » (0 ignorés), 1 pipelines, 2778 Present, 2982 soumissions, 231 relectures
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [VOL] passe 10r (v13) : DEUX FRAMES EN VOL ; 2982 soumissions (0 vides, pour le sémaphore de présentation), 2982 attentes de fence, 1019.1 ms cumulées à les attendre ; attendre_tout : 231 relectures, 1 destructions/réallocations, 0 listes pleines
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [VOL] passe 10s : 1.07 soumissions par Present ; forcées par une moitié d'anneau pleine (256 Mio) : 1 en dessin, 0 en téléversement ; pool de descripteurs plein : 0
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°0 1280×720 D3DFMT 22 : 2779 Clear couleur, 90054 draws, 2778 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°1 1280×720 D3DFMT 21 : 2780 Clear couleur, 1171543 draws, 0 Present, 6966 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°2 320×180 D3DFMT 21 : 2780 Clear couleur, 5558 draws, 0 Present, 5558 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°3 320×180 D3DFMT 21 : 2780 Clear couleur, 2779 draws, 0 Present, 2779 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°4 320×180 D3DFMT 21 : 1 Clear couleur, 0 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°5 1280×720 D3DFMT 21 : 1 Clear couleur, 2778 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°6 1280×720 D3DFMT 21 : 1 Clear couleur, 1408 draws, 0 Present, 1408 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°7 1280×720 D3DFMT 75 (profondeur) : 0 Clear couleur, 0 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°8 64×64 D3DFMT 22 : 101 Clear couleur, 882 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°9 64×64 D3DFMT 75 (profondeur) : 0 Clear couleur, 0 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°10 64×64 D3DFMT 22 : 101 Clear couleur, 894 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°11 2048×2048 D3DFMT 1280070990 : 0 Clear couleur, 2236473 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°12 2048×2048 D3DFMT 80 (profondeur) : 0 Clear couleur, 0 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°13 512×512 D3DFMT 21 : 0 Clear couleur, 2582 draws, 0 Present, 2582 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°14 512×512 D3DFMT 21 : 0 Clear couleur, 2582 draws, 0 Present, 0 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°15 480×480 D3DFMT 21 : 0 Clear couleur, 12 draws, 0 Present, 1047 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°16 240×240 D3DFMT 21 : 0 Clear couleur, 10 draws, 0 Present, 2345 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°17 480×480 D3DFMT 21 : 0 Clear couleur, 134 draws, 0 Present, 1380 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°18 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2421 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°19 480×480 D3DFMT 21 : 0 Clear couleur, 22 draws, 0 Present, 1109 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°20 240×240 D3DFMT 21 : 0 Clear couleur, 16 draws, 0 Present, 1714 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°21 480×480 D3DFMT 21 : 0 Clear couleur, 16 draws, 0 Present, 1121 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°22 240×240 D3DFMT 21 : 0 Clear couleur, 18 draws, 0 Present, 2361 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°23 480×480 D3DFMT 21 : 0 Clear couleur, 18 draws, 0 Present, 1148 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°24 240×240 D3DFMT 21 : 0 Clear couleur, 16 draws, 0 Present, 1668 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°25 480×480 D3DFMT 21 : 0 Clear couleur, 22 draws, 0 Present, 1100 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°26 240×240 D3DFMT 21 : 0 Clear couleur, 16 draws, 0 Present, 2575 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°27 480×480 D3DFMT 21 : 0 Clear couleur, 680 draws, 0 Present, 1389 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°28 240×240 D3DFMT 21 : 0 Clear couleur, 18 draws, 0 Present, 2575 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°29 480×480 D3DFMT 21 : 0 Clear couleur, 1660 draws, 0 Present, 2551 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°30 240×240 D3DFMT 21 : 0 Clear couleur, 12 draws, 0 Present, 1712 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°31 240×240 D3DFMT 21 : 0 Clear couleur, 40 draws, 0 Present, 2429 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°32 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2426 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°33 240×240 D3DFMT 21 : 0 Clear couleur, 20 draws, 0 Present, 2452 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°34 240×240 D3DFMT 21 : 0 Clear couleur, 194 draws, 0 Present, 2617 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°35 240×240 D3DFMT 21 : 0 Clear couleur, 342 draws, 0 Present, 2579 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°36 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2401 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°37 240×240 D3DFMT 21 : 0 Clear couleur, 22 draws, 0 Present, 1688 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°38 240×240 D3DFMT 21 : 0 Clear couleur, 26 draws, 0 Present, 1461 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°39 240×240 D3DFMT 21 : 0 Clear couleur, 12 draws, 0 Present, 2387 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°40 240×240 D3DFMT 21 : 0 Clear couleur, 40 draws, 0 Present, 2409 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°41 240×240 D3DFMT 21 : 0 Clear couleur, 20 draws, 0 Present, 2541 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°42 240×240 D3DFMT 21 : 0 Clear couleur, 18 draws, 0 Present, 1661 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°43 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2356 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°44 240×240 D3DFMT 21 : 0 Clear couleur, 10 draws, 0 Present, 2334 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°45 240×240 D3DFMT 21 : 0 Clear couleur, 30 draws, 0 Present, 2332 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°46 240×240 D3DFMT 21 : 0 Clear couleur, 16 draws, 0 Present, 2535 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°47 240×240 D3DFMT 21 : 0 Clear couleur, 12 draws, 0 Present, 2304 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°48 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2545 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°49 240×240 D3DFMT 21 : 0 Clear couleur, 538 draws, 0 Present, 1934 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°50 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2444 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°51 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2394 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°52 240×240 D3DFMT 21 : 0 Clear couleur, 12 draws, 0 Present, 1527 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°53 240×240 D3DFMT 21 : 0 Clear couleur, 344 draws, 0 Present, 2644 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°54 240×240 D3DFMT 21 : 0 Clear couleur, 10 draws, 0 Present, 2472 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°55 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 1564 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°56 240×240 D3DFMT 21 : 0 Clear couleur, 14 draws, 0 Present, 2356 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°57 240×240 D3DFMT 21 : 0 Clear couleur, 534 draws, 0 Present, 2680 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°58 240×240 D3DFMT 21 : 0 Clear couleur, 210 draws, 0 Present, 2547 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°59 240×240 D3DFMT 21 : 0 Clear couleur, 16 draws, 0 Present, 2545 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°60 240×240 D3DFMT 21 : 0 Clear couleur, 10538 draws, 0 Present, 7094 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°61 240×240 D3DFMT 21 : 0 Clear couleur, 48 draws, 0 Present, 2403 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   cible n°62 240×240 D3DFMT 21 : 0 Clear couleur, 11394 draws, 0 Present, 7507 fois échantillonnée, StretchRect 0 src / 0 dst
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] couleurs de Clear (ARGB) : 0x00000000×11122 0xFF000000×202
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] draws : 3539425 RÉELS (shaders traduits), 5350 « lumière » (sans SPIR-V 5350, sans déclaration 0, sans données 0) ; table SPIR-V embarquée : 2501 shaders
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] textures D3DX (DDS) : 305 remplies (pixels copiés), 0 NON remplies
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [D3DX] D3DXLoadSurfaceFromMemory : 2 appels, 2 copiés, 0 refusés (D3DERR_INVALIDCALL), 0 conversions non gérées (S_OK sans copie)
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX] LockRect/LockBox avec sous-rectangle (pRect/pBox respectés) : 3692
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [VIDEO-TEX] textures L8/A8L8 (D3DFMT 50/51) : 1959 LockRect, 4 UpdateTexture/UpdateSurface, 17858 liaisons aux draws, 3420 changements (texture, génération) vus au draw
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [RTT] SetRenderTarget hors backbuffer 87751 ; StretchRect 0 (copiés 0) ; ColorFill 0 ; GetRenderTargetData 202 (relus 202)
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX] copies mémoire : 2419 UpdateSurface, 0 UpdateTexture (39.3 Mo)
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] samplers des draws réels : 4232076 servis (texture ou cible), replis sur texture factice : 0 sans texture liée, 0 cube, 849068 texture sans données, 0 format non géré
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   repli : texture 2048×2048 D3DFMT 0x50 (genre 3, usage 0x2, pool 0) — sans données ×849068
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] [TEX] 27 sortes de textures créées, 48 échantillonnées par les draws (inventaire : SC2_TRACE=1)
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN] shaders distincts créés : 754 PS, 846 VS ; utilisés par des draws :
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS ac7c45d9a5ac08d5 v3.0    64 o : 1666638 draws, 328625 Set, module 163
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 28de2c9f10e7f6e9 v3.0   928 o : 1196483 draws, 226635 Set, module 162
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 33ce95f4c41ac6ac v3.0   120 o : 404369 draws, 280721 Set, module 13
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 9155ca368979fb14 v3.0    44 o : 240244 draws, 56294 Set, module 15
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS cb22846017c004f5 v3.0  1236 o : 219953 draws, 198000 Set, module 168
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS b3c1a4cbc5e403ec v3.0  1016 o : 202225 draws, 77749 Set, module 224
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS ecc73f0cdb64ab1a v3.0  1192 o : 199977 draws, 171335 Set, module 164
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 96e7042c9b95cc67 v3.0  1432 o : 167796 draws, 45930 Set, module 22
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 185325953da49937 v3.0  1520 o : 141886 draws, 49017 Set, module 198
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 896cbb1ac806402b v3.0  1292 o : 138472 draws, 2582 Set, module 14
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS b9eb13b6c8318b13 v3.0  1232 o : 127469 draws, 37735 Set, module 27
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 36c3776b27c2f05c v3.0  1708 o : 119387 draws, 2582 Set, module 86
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 9ffeebf10109d54e v3.0   212 o : 114319 draws, 53712 Set, module 110
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 08aa0cd1fb616bab v3.0  1316 o : 112669 draws, 43199 Set, module 199
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 3b2920154269c27e v3.0   972 o : 92861 draws, 72036 Set, module 145
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 30da5441a796d9ca v3.0   156 o : 79095 draws, 8383 Set, module 8
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS b150e1b755a8ee13 v3.0  1408 o : 74514 draws, 41030 Set, module 88
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS c1b4d67f473d246f v3.0  1772 o : 68630 draws, 24633 Set, module 196
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 544973d425bfe267 v3.0  1324 o : 62416 draws, 50468 Set, module 223
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 8749cd6d78005d42 v3.0    76 o : 61188 draws, 7864 Set, module 9
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 0e5d3aee52f79107 v3.0  1052 o : 60226 draws, 10237 Set, module 104
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS ed35b224fc822cb6 v3.0  1636 o : 56136 draws, 9292 Set, module 103
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 5e8ec255752d9a41 v3.0  1436 o : 56042 draws, 7582 Set, module 20
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 7bc3d24cd1c149b2 v3.0  1352 o : 53269 draws, 2582 Set, module 12
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 8089153549f1fecc v3.0   992 o : 50948 draws, 7311 Set, module 97
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 7284037017a2852b v3.0  1376 o : 50948 draws, 7311 Set, module 96
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS e8e69de69f1b21a1 v3.0   212 o : 50948 draws, 2582 Set, module 21
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS fd91449c31863256 v3.0  1684 o : 48839 draws, 18281 Set, module 24
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 85f1265a22e73a61 v3.0  1180 o : 44873 draws, 40440 Set, module 87
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS b09de6d68a6e29e5 v3.0  1272 o : 41161 draws, 2582 Set, module 98
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 9333f96b47dd75a2 v3.0  1172 o : 41161 draws, 2582 Set, module 99
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 5f4cb42621c1253e v3.0  1180 o : 38560 draws, 9497 Set, module 214
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 02401fcfcd49f191 v3.0   632 o : 38560 draws, 9497 Set, module 215
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 30f4b9f4562d48d3 v3.0  1140 o : 38031 draws, 33087 Set, module 197
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS de6bdc2b66d9b073 v3.0  1280 o : 34882 draws, 34221 Set, module 225
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 9bbf83b3a01b7125 v3.0   120 o : 33914 draws, 24420 Set, module 166
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS fdbf4749248ef4e4 v3.0   292 o : 27242 draws, 8350 Set, module 93
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 59f3daf61a4ad553 v3.0  1056 o : 25916 draws, 21191 Set, module 25
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS bd76df9edf9113fa v3.0  1092 o : 25821 draws, 5892 Set, module 125
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS d47a60b2e9643f13 v3.0   572 o : 25819 draws, 5892 Set, module 126
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 0b6ac57be325f73c v3.0  1596 o : 25287 draws, 23800 Set, module 105
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 16cbe369b40b2c38 v3.0  1324 o : 22497 draws, 4538 Set, module 52
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 8852c556bc7073a0 v3.0  1728 o : 22497 draws, 4538 Set, module 51
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 99f8066378462291 v3.0  1192 o : 21704 draws, 16044 Set, module 23
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 5c3a04f17a25c585 v3.0  1048 o : 20181 draws, 20181 Set, module 202
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 4aa567dc74b05de7 v3.0  1160 o : 20002 draws, 2583 Set, module 101
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 754bd0be05635a04 v3.0  1196 o : 19985 draws, 2582 Set, module 107
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS c6313487d29689d8 v3.0  1016 o : 19656 draws, 18936 Set, module 165
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 840b2ef19e1de53b v3.0  1388 o : 18975 draws, 18975 Set, module 120
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 4318c24be07bff82 v3.0  1648 o : 18695 draws, 3226 Set, module 118
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 854d7036ffb35b73 v3.0   792 o : 17530 draws, 14557 Set, module 169
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 6d6fcf2457897f1e v3.0   620 o : 17400 draws, 8700 Set, module 237
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 35f089f5736c7b55 v3.0   820 o : 17400 draws, 8700 Set, module 238
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 9bd24b3f6a817acd v3.0  1040 o : 17390 draws, 1921 Set, module 124
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 49a8aafba5f9f8bd v3.0  1276 o : 16266 draws, 12771 Set, module 200
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 9075afabbfe0f79f v3.0   440 o : 15980 draws, 7990 Set, module 95
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS ce6744601299aade v3.0   964 o : 12930 draws, 12929 Set, module 26
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 561b480e31f06b6a v3.0   184 o : 12299 draws, 6487 Set, module 252
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 95e76fd9ff033941 v3.0  1280 o : 11497 draws, 11497 Set, module 115
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 3d458e28ea2dd5e7 v3.0   120 o : 11346 draws, 11346 Set, module 170
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS f48e45d65a74d2ec v3.0   248 o : 11262 draws, 5631 Set, module 94
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   VS 65fbda1b451b56b9 v3.0  2776 o : 10436 draws, 6245 Set, module 216
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS ca6ee4d19a99338e v3.0   424 o : 8400 draws, 6604 Set, module 219
+10-19 11:29:00.128 I/SC2Partout( 7004): [BILAN]   PS 4df00a350b7d56cd v3.0  1088 o : 7095 draws, 7094 Set, module 201
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 16a6fec6b4e9a123 v3.0  1160 o : 6310 draws, 4823 Set, module 106
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f7ee0408b512047f v3.0   712 o : 6255 draws, 6255 Set, module 316
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 9ebf1d60ac28625d v3.0   436 o : 6255 draws, 6255 Set, module 315
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS e62e87d3385de50f v3.0  2348 o : 5949 draws, 3966 Set, module 184
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS ac7d9f3177216119 v3.0  1436 o : 5949 draws, 3966 Set, module 183
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 8a9e3ba597829a96 v3.0  2332 o : 5949 draws, 3966 Set, module 182
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS d6427d3a9146344c v3.0  1424 o : 5949 draws, 3966 Set, module 185
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS b04951b47fe0bb08 v3.0  1060 o : 5939 draws, 5367 Set, module 226
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 7a048e4662d631f8 v3.0   152 o : 5608 draws, 3875 Set, module 150
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 40cc90d5735185b2 v3.0   288 o : 5558 draws, 2779 Set, module 4
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 0ef8211ecd775d37 v3.0   412 o : 5558 draws, 2779 Set, module 5
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 5e0243037322f346 v3.0  1716 o : 5344 draws, 5344 Set, module 117
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 322630b62f8340e4 v3.0  1276 o : 5295 draws, 5214 Set, module 222
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 77c69610b2b8ca98 v3.0  1336 o : 5190 draws, 5190 Set, module 206
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 21c72a0349cf66ef v3.0  1196 o : 5111 draws, 2908 Set, module 100
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 46814c99495d7a5d v3.0  1160 o : 5094 draws, 2907 Set, module 130
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 9c60197b6d72457a v3.0  1160 o : 5094 draws, 5000 Set, module 102
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS f8715a957d2dd418 v2.0   144 o : 5048 draws, 12793 Set, module 230
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 9fc72895a81f4928 v3.0  1308 o : 4902 draws, 4178 Set, module 239
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 790fe5444853c22a v3.0  2476 o : 4627 draws, 3700 Set, module 218
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 2c7d19489bc79ef0 v3.0  1268 o : 4555 draws, 4555 Set, module 119
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 8a9b4f68133b12ae v3.0  1004 o : 4412 draws, 4411 Set, module 29
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 4555b106ab7ac3d0 v3.0  1808 o : 4272 draws, 4272 Set, module 114
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a344da94f1966a1e v3.0   424 o : 4109 draws, 4086 Set, module 217
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f051a442e344a503 v3.0  1172 o : 3966 draws, 1983 Set, module 180
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 1fa60613e1832743 v3.0  1684 o : 3966 draws, 3966 Set, module 179
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 980b5a14be6ded3d v3.0  1716 o : 3966 draws, 3966 Set, module 178
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 3bfa416469701299 v3.0  1508 o : 3814 draws, 3094 Set, module 43
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS c2d3004196b07187 v3.0  1224 o : 3734 draws, 2818 Set, module 39
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS a3888b426227e64a v3.0   228 o : 3440 draws, 1678 Set, module 253
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 416c697917d5a916 v3.0   268 o : 3440 draws, 1678 Set, module 254
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS dd953422f25cc372 v3.0  1328 o : 3384 draws, 3384 Set, module 298
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS d85016c08651ab5c v3.0  1368 o : 3384 draws, 3384 Set, module 297
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS d22b23e991b089a2 v2.0    88 o : 3363 draws, 8527 Set, module 231
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 1c2d83dba2459378 v3.0  1340 o : 3250 draws, 3250 Set, module 121
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 141b7b8a69f4c52e v3.0   364 o : 2859 draws, 2678 Set, module 136
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 881131759da187ca v3.0  1104 o : 2800 draws, 2800 Set, module 285
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 6e4f5a9e4a4415bb v3.0   112 o : 2779 draws, 2779 Set, module 6
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS de936e96f6262a87 v3.0   388 o : 2779 draws, 2779 Set, module 7
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS c448cf718e377a2d v3.0   200 o : 2779 draws, 2779 Set, module 2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 90b8bf5653bd86a2 v3.0   244 o : 2779 draws, 2779 Set, module 3
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 4b0ffc32c3ac9813 v3.0   112 o : 2778 draws, 2778 Set, module 0
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 1dbd9a9e6f95a3a0 v3.0    20 o : 2778 draws, 2778 Set, module 1
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 741484d00fe1692d v3.0  1588 o : 2720 draws, 2720 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 6761a990dd70785e v3.0   944 o : 2720 draws, 2720 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS a871f268550ac7c3 v3.0  2692 o : 2639 draws, 1890 Set, module 135
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 49e4085079bb017c v3.0   192 o : 2582 draws, 2582 Set, module 18
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 0f85a8ce82dbc808 v3.0   440 o : 2582 draws, 2582 Set, module 19
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 64c834afbdd63567 v3.0   352 o : 2582 draws, 2582 Set, module 17
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 9cc4c67515f2a0cd v3.0   176 o : 2582 draws, 2582 Set, module 16
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS b7354213af6dc6c2 v3.0   404 o : 2582 draws, 2582 Set, module 92
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 650be1433e979453 v3.0  1088 o : 2582 draws, 2582 Set, module 91
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS ce5fda882df6142c v3.0   228 o : 2582 draws, 2582 Set, module 108
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 8eda1f213f6cf45b v3.0    92 o : 2582 draws, 2582 Set, module 109
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a69c275e770dbbe4 v3.0   348 o : 2576 draws, 1835 Set, module 149
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 2c231ef44fea6aee v3.0  1460 o : 2502 draws, 834 Set, module 122
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 28301f435ca13ed8 v3.0  1128 o : 2481 draws, 2481 Set, module 294
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS cc2425ca85a1f8f9 v3.0  1200 o : 2481 draws, 2481 Set, module 296
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 4b6cbf1d5c7292ea v3.0  1492 o : 2481 draws, 2481 Set, module 295
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 228c5af87b170cd6 v3.0  1524 o : 2260 draws, 1130 Set, module 139
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 05ab989ac8d9f512 v3.0  1288 o : 2253 draws, 2253 Set, module 191
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 874a2ee79ffb4a2a v3.0  1164 o : 2217 draws, 2217 Set, module 53
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 34412a73aa7301d7 v3.0  2484 o : 2173 draws, 2173 Set, module 167
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 27f3ec9309f83c3f v3.0  1000 o : 1988 draws, 1988 Set, module 187
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS af811b8193cca08b v3.0   732 o : 1988 draws, 1988 Set, module 181
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a92a245416f31572 v3.0   400 o : 1988 draws, 1988 Set, module 188
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 1f5c2fa5c5d330c9 v3.0  1504 o : 1983 draws, 1983 Set, module 176
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS def96fd7672b7c1d v3.0  1508 o : 1983 draws, 1983 Set, module 175
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 1b993f435d92dc18 v3.0  1756 o : 1983 draws, 1983 Set, module 174
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 858fd7586ff8ee44 v3.0   216 o : 1983 draws, 1983 Set, module 186
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS e14fb14c4ea13997 v3.0  1412 o : 1983 draws, 1983 Set, module 177
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS a381e31cf2de6faa v3.0  1248 o : 1931 draws, 1924 Set, module 35
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 640a8df2524a14e3 v3.0  1524 o : 1881 draws, 1881 Set, module 116
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 2f4428addb2beb80 v3.0   336 o : 1845 draws, 1639 Set, module 258
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 73eae9a470741fdd v3.0  1228 o : 1776 draws, 1 Set, module 10
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS d8b91829ec08460d v3.0   216 o : 1776 draws, 1 Set, module 11
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a5e0662fefdcd875 v3.0   392 o : 1735 draws, 1735 Set, module 264
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS fe1eb3817fe96add v2.0    32 o : 1685 draws, 4266 Set, module 232
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 17934adf8e78885a v3.0  1244 o : 1683 draws, 1565 Set, module 34
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 5e5248d135749401 v3.0   144 o : 1678 draws, 1678 Set, module 250
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 2fcee328d6421df9 v3.0   216 o : 1678 draws, 1678 Set, module 248
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS bfb70354310b0af7 v3.0   220 o : 1678 draws, 1678 Set, module 249
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS bd49d0ae4b5aed5b v3.0    36 o : 1678 draws, 1678 Set, module 251
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 1f3d9e0b57344b42 v3.0  3724 o : 1663 draws, 1662 Set, module 245
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 38cf0497e2428e7c v3.0  1744 o : 1588 draws, 364 Set, module 123
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 2fe2bfc5b6bf0f9f v3.0  1256 o : 1560 draws, 840 Set, module 44
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 32f8fd1b97c69db2 v3.0   936 o : 1524 draws, 762 Set, module 140
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 2a36c4e220af08a6 v3.0  2392 o : 1484 draws, 1484 Set, module 154
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 5c1cabc2bab76deb v3.0  1244 o : 1426 draws, 1426 Set, module 66
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a6e30974f1827109 v3.0  1284 o : 1426 draws, 1426 Set, module 67
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS d679224a24ab985d v3.0    68 o : 1408 draws, 1408 Set, module 161
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f0858f2cfdc02c58 v3.0   408 o : 1318 draws, 1312 Set, module 221
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 01ecb2a5748bc2fe v3.0  1096 o : 1300 draws, 1300 Set, module 207
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 7c692317162a1370 v3.0  2532 o : 1247 draws, 510 Set, module 155
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 68c0da218daf0b09 v3.0   332 o : 1237 draws, 945 Set, module 157
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 267091506ac8eaf2 v3.0   544 o : 1224 draws, 1224 Set, module 159
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 79d9df9c8d31c82b v3.0  1444 o : 1224 draws, 1224 Set, module 160
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS c1255ba1eb6cfe0a v3.0  2224 o : 1224 draws, 1224 Set, module 158
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 06efaf871e78595e v3.0   364 o : 1210 draws, 1210 Set, module 189
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS ff7a2b2431581c40 v3.0   496 o : 1169 draws, 1168 Set, module 263
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 3dcf751c977ba949 v3.0   448 o : 1067 draws, 1067 Set, module 329
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 103c6b83e33bb581 v3.0  2904 o : 1067 draws, 1067 Set, module 328
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 9e4c679f1d8f17e6 v3.0  1348 o : 1050 draws, 689 Set, module 203
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 0c2cdf2c8727a69c v3.0  1420 o : 1034 draws, 1034 Set, module 240
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS e40086e330892440 v3.0  1044 o : 1024 draws, 1024 Set, module 45
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 7f53547158cd8f41 v3.0   740 o : 954 draws, 954 Set, module 244
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 8665527de56a16b7 v3.0  2632 o : 954 draws, 954 Set, module 243
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 2c63ac37ffed5bab v3.0  1040 o : 944 draws, 944 Set, module 324
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 8071372ec4496ab8 v3.0  1264 o : 944 draws, 944 Set, module 323
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 7ae78aa940fabcf9 v3.0  1264 o : 937 draws, 700 Set, module 30
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f9b223cccc71bda2 v3.0   844 o : 925 draws, 925 Set, module 325
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 8ce1f595f836a3e8 v3.0   352 o : 908 draws, 599 Set, module 301
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS d6a89bc66f23bf8c v3.0   508 o : 890 draws, 890 Set, module 327
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 9ef0ceb6944832d7 v3.0  2988 o : 890 draws, 890 Set, module 326
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a7d4e6713f4a94a3 v3.0  1296 o : 852 draws, 196 Set, module 58
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS fbfcc9380cbb32b3 v3.0  1328 o : 825 draws, 669 Set, module 28
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS e853a097958d5d77 v3.0   304 o : 818 draws, 613 Set, module 146
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 97b6faa6d4fe9771 v3.0  1428 o : 810 draws, 270 Set, module 269
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 02b0945745b1469f v3.0  1712 o : 810 draws, 270 Set, module 268
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS b05ee872de7c66f9 v3.0  2616 o : 790 draws, 790 Set, module 151
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 9cc8e2420e309724 v3.0  1424 o : 762 draws, 762 Set, module 32
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 4b05d7776e83dc33 v3.0   932 o : 762 draws, 762 Set, module 33
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS c644809a20e00a0c v3.0  1296 o : 762 draws, 762 Set, module 31
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 3075fb5460f908f7 v3.0   988 o : 736 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS ffbe9f435a38f02d v3.0  1580 o : 736 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 2a61da1305d57af6 v3.0   776 o : 736 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS bfab45c7a8a973af v3.0   364 o : 732 draws, 715 Set, module 299
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 11a130973c8db960 v3.0  1284 o : 721 draws, 451 Set, module 37
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 3522b0d0237bb364 v3.0  1060 o : 692 draws, 692 Set, module 271
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f91b723af21819e2 v3.0  1380 o : 651 draws, 217 Set, module 262
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f3f4370296409a55 v3.0  1140 o : 625 draws, 625 Set, module 132
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS a27fc4bcf63db373 v3.0  1404 o : 625 draws, 625 Set, module 131
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 920a106a985a01fa v3.0   364 o : 619 draws, 619 Set, module 291
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS e532eae2b0fb1526 v3.0   972 o : 619 draws, 619 Set, module 292
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 3d74274bc066c0bf v3.0   980 o : 619 draws, 619 Set, module 134
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS dce00dc03474b29f v3.0  1176 o : 619 draws, 619 Set, module 133
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 46c58572288ec6cd v3.0  1368 o : 605 draws, 303 Set, module 208
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS c783b9d34c88ea26 v3.0  1412 o : 594 draws, 297 Set, module 266
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS de63434ef398ade6 v3.0  2564 o : 557 draws, 557 Set, module 227
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS cf041f9af90c4229 v3.0  2428 o : 539 draws, 539 Set, module 192
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 143aee572666fcfb v3.0  2472 o : 508 draws, 254 Set, module 156
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 00403fa9c759f59c v3.0  1296 o : 502 draws, 310 Set, module 38
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 7028f7a5043ea4c1 v3.0  1308 o : 495 draws, 495 Set, module 241
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a440f388c26e6a12 v3.0   728 o : 495 draws, 495 Set, module 242
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS cd8308bc80ef14b0 v3.0   528 o : 470 draws, 470 Set, module 265
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS ec5f4d7eecb0a0a5 v3.0  1336 o : 469 draws, 468 Set, module 59
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS bc246464e5196782 v3.0   680 o : 460 draws, 345 Set, module 277
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 4f770cc1365d1adf v3.0  1548 o : 459 draws, 459 Set, module 260
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS d17459a54ef6a8bf v3.0   784 o : 452 draws, 452 Set, module 153
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 4cf80d120172ce23 v3.0  1012 o : 452 draws, 451 Set, module 40
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 7f8a5caddfc92ddf v3.0  3476 o : 452 draws, 452 Set, module 152
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 7b7fcb7f59134e0a v3.0  2548 o : 442 draws, 345 Set, module 276
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS aa6b1d04a844d716 v3.0  2828 o : 438 draws, 438 Set, module 148
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 9df93592a7bb7824 v3.0  1000 o : 422 draws, 422 Set, module 56
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS e828eb86f2bd2b33 v3.0   392 o : 422 draws, 422 Set, module 57
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 262ef18337bc4492 v3.0   404 o : 422 draws, 422 Set, module 302
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 93656520570a62d8 v3.0   352 o : 416 draws, 383 Set, module 255
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 6475019273d58f1b v3.0  3640 o : 414 draws, 414 Set, module 278
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 82366c4dd2f69bbb v3.0  1028 o : 402 draws, 402 Set, module 68
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 0440e9d29320831e v3.0  1336 o : 399 draws, 399 Set, module 85
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS fb35019d921a495f v3.0  1088 o : 387 draws, 387 Set, module 210
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f6e36c028e841c8b v3.0   452 o : 387 draws, 387 Set, module 211
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 9a2089d903d2c982 v3.0  1388 o : 387 draws, 387 Set, module 209
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS c10823953ebee4f4 v3.0  1460 o : 372 draws, 372 Set, module 60
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f337a5b1d529a37b v3.0  1276 o : 368 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS b3214b2de2dae107 v3.0   832 o : 368 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS e4b39d0030eececb v3.0  1408 o : 368 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 372caf9162cae07c v3.0   936 o : 368 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS fe68d3815df51655 v3.0  1432 o : 368 draws, 368 Set, module -2
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS fe92bbf9964685db v3.0  1328 o : 359 draws, 359 Set, module 274
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 4636f5d565915da4 v3.0   436 o : 357 draws, 357 Set, module 293
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 37c16fe8a4a33d21 v3.0  2912 o : 347 draws, 347 Set, module 220
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 9676f5ac9e457a19 v3.0  1252 o : 347 draws, 347 Set, module 204
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 967b5351c1d53882 v3.0   912 o : 347 draws, 347 Set, module 205
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 427705f2f42d9d4c v3.0   856 o : 334 draws, 334 Set, module 259
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS adc17e117a3ebffa v3.0  3588 o : 326 draws, 305 Set, module 307
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 7b5be2ac05b07b20 v3.0  1136 o : 304 draws, 304 Set, module 213
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 4b5e10fd04877d07 v3.0  2984 o : 304 draws, 304 Set, module 212
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 9aedbdcb3681597a v3.0  1276 o : 304 draws, 304 Set, module 84
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 3784bc21b996d174 v3.0   548 o : 278 draws, 139 Set, module 228
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 5d440c5c7f609c58 v3.0  1080 o : 278 draws, 139 Set, module 229
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 5c497c3acc4cbabb v3.0  1244 o : 276 draws, 53 Set, module 308
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 1299a1743902f66a v3.0  1044 o : 271 draws, 271 Set, module 78
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS cb3f5d33f7aebb3a v3.0  1580 o : 270 draws, 270 Set, module 267
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 8a0ab88f08cfdc68 v3.0   316 o : 270 draws, 270 Set, module 272
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 1a505e2de0bb8ca5 v3.0   508 o : 270 draws, 270 Set, module 270
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 265bbdf357aa5308 v3.0   396 o : 269 draws, 269 Set, module 257
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 8d71c23314716ec8 v3.0   344 o : 269 draws, 269 Set, module 273
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 5e94fd088e4bf4ed v3.0  1052 o : 265 draws, 265 Set, module 90
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS d2a35c2039346bfd v3.0  2900 o : 265 draws, 265 Set, module 89
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS bc9719aa5e8f473c v3.0  2480 o : 264 draws, 264 Set, module 190
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS a685fc8ead17b9d0 v3.0  1304 o : 254 draws, 254 Set, module 55
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   VS 7178dda033937e19 v3.0  2996 o : 252 draws, 252 Set, module 256
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS 43bed1164c1c44bc v3.0  1500 o : 242 draws, 242 Set, module 275
+10-19 11:29:00.129 I/SC2Partout( 7004): [BILAN]   PS f72035d4de272172 v3.0   392 o : 238 draws, 236 Set, module 303
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS ebe3b864a2f97e7c v3.0   392 o : 230 draws, 230 Set, module 286
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 87a8eb7ba08e16d5 v3.0   852 o : 228 draws, 228 Set, module 54
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 457c74d97f404961 v3.0  1476 o : 217 draws, 217 Set, module 261
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 6cd31d4e87ff7707 v3.0   768 o : 194 draws, 194 Set, module 290
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 465ad3ea1a4158e7 v3.0  1208 o : 194 draws, 194 Set, module 289
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS dfc8fd8eb616b87a v3.0  1612 o : 188 draws, 94 Set, module 320
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS dadc6996836d4388 v3.0   996 o : 188 draws, 94 Set, module 321
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS f195445812906107 v3.0   232 o : 184 draws, 184 Set, module 195
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS ae0f052fcf7a4543 v3.0   896 o : 184 draws, 184 Set, module 193
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 13b990cdd4044cc0 v3.0   640 o : 177 draws, 177 Set, module 194
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 9f581efec598f7d1 v3.0  1564 o : 170 draws, 170 Set, module 300
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 3e19b4982d9bcb41 v3.0  1112 o : 163 draws, 163 Set, module 138
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 08f29583fc10da56 v3.0  1436 o : 163 draws, 163 Set, module 137
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS eb48ef83bd68ff34 v3.0  1064 o : 160 draws, 160 Set, module 332
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 481ef7988bb64216 v3.0  1676 o : 160 draws, 160 Set, module 331
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 9d9ef5d470b77d8e v3.0  2808 o : 157 draws, 127 Set, module 287
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 005656d2d034e454 v3.0  1144 o : 150 draws, 150 Set, module 304
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 730014c436fecc0b v3.0  1392 o : 136 draws, 68 Set, module 233
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 7e388e1548570a1a v3.0   492 o : 136 draws, 68 Set, module 234
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 8d6ea3c5a3dbebf7 v3.0  1408 o : 134 draws, 34 Set, module 306
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 79540ba7821783b2 v3.0  1816 o : 134 draws, 34 Set, module 305
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS d1843e1b43f3371d v3.0  1340 o : 129 draws, 129 Set, module 284
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS f907d358903a6819 v3.0  1620 o : 129 draws, 129 Set, module 281
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 237474265871d142 v3.0  1596 o : 129 draws, 129 Set, module 283
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 767e2fab74c18b79 v3.0  1340 o : 129 draws, 129 Set, module 282
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 945623dc9119a491 v3.0  2700 o : 128 draws, 122 Set, module 322
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 0d0aa1ba2fbe3232 v3.0  1532 o : 120 draws, 120 Set, module 41
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS d5e64da20167c38b v3.0  1256 o : 120 draws, 120 Set, module 42
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 3186dc5c5d82496e v3.0   364 o : 117 draws, 117 Set, module 288
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   PS 1d5b0f01932da9f2 v3.0  1392 o : 96 draws, 96 Set, module 61
+10-19 11:29:00.130 I/SC2Partout( 7004): [BILAN]   VS 7908f7789bf21b14 v3.0  1512 o : 94 draws, 94 Set, module 318
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 355b3a8b9a6688b4 v3.0  1016 o : 94 draws, 94 Set, module 319
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS c1ed39867d436b52 v3.0  1380 o : 94 draws, 94 Set, module 317
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 9fd25301dc5d1968 v3.0   252 o : 90 draws, 90 Set, module 173
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 7b584ea9db58d898 v3.0  1072 o : 90 draws, 90 Set, module 171
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 921fdfc93026f86f v3.0   316 o : 90 draws, 90 Set, module 172
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS a92e99fc2c2b8ae4 v3.0  1092 o : 88 draws, 88 Set, module 311
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 7491a41b0a4fe731 v3.0  4168 o : 88 draws, 88 Set, module 310
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS aa2904c6dc423512 v3.0   248 o : 85 draws, 53 Set, module 279
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 42d3e8761d95ed0c v3.0   180 o : 85 draws, 53 Set, module 280
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS a5d51261e4afcd6c v3.0   308 o : 70 draws, 70 Set, module 247
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 7aedf194661df81e v3.0  2316 o : 70 draws, 70 Set, module 246
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 54956a643d0dcaee v3.0  1220 o : 65 draws, 64 Set, module 141
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 3fde645107a9c506 v3.0   668 o : 65 draws, 64 Set, module 142
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 56a49f90e33243d7 v3.0  2104 o : 56 draws, 56 Set, module 333
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 9474044d9ca96422 v3.0  3596 o : 55 draws, 55 Set, module 309
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 0ffc8de6c7bf6eb5 v3.0   292 o : 48 draws, 48 Set, module 236
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS fffed1abf25f2f2b v3.0  2372 o : 48 draws, 48 Set, module 235
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS bcb45659959b9595 v3.0  2288 o : 42 draws, 42 Set, module 330
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 82eea4455accf5b8 v3.0   784 o : 35 draws, 35 Set, module 36
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS b450c9d709c693b0 v3.0   468 o : 29 draws, 29 Set, module 339
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS f65d36c5edc5ec50 v3.0  3356 o : 29 draws, 29 Set, module 338
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS cdd6c963fe74e7df v3.0   376 o : 28 draws, 28 Set, module 313
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS d783de66b6ce22e4 v3.0  3620 o : 28 draws, 28 Set, module 312
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 4425e79e619b30fc v3.0   392 o : 28 draws, 28 Set, module -2
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 19cf4fa0a412a0e4 v3.0   436 o : 25 draws, 25 Set, module 340
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 742476b1083cd8ec v3.0  1384 o : 21 draws, 21 Set, module -2
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS c67cd1b900314758 v3.0   372 o : 21 draws, 21 Set, module -2
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 069fa49c69a5e53b v3.0  3716 o : 18 draws, 18 Set, module 335
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS dc6dc679fee5ff66 v3.0  2736 o : 14 draws, 14 Set, module 336
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 7e933706f109b2d5 v3.0   648 o : 14 draws, 14 Set, module 337
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 438362d60f7e64d7 v3.0   708 o : 11 draws, 11 Set, module 49
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS ed8f1e5fdcd270db v3.0  1120 o : 11 draws, 11 Set, module 48
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 6823e869ead00af0 v3.0   640 o : 7 draws, 7 Set, module 334
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 63fa97bb038df33c v3.0   836 o : 7 draws, 3 Set, module 65
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS e406a867edff816d v3.0  1476 o : 6 draws, 5 Set, module 50
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS fceeea6573daf5d7 v3.0   264 o : 5 draws, 5 Set, module 314
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 08b2009f05b1832c v3.0  1192 o : 5 draws, 4 Set, module 47
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS e9bdd5f1879b65ef v3.0   604 o : 5 draws, 3 Set, module 128
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS dd346805e7af6d53 v3.0  1136 o : 5 draws, 3 Set, module 127
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 708eb0e2bae281d0 v3.0  1504 o : 5 draws, 5 Set, module -2
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 6252a64f58213a4b v3.0  1496 o : 4 draws, 2 Set, module 74
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 9507d49d3df8fe62 v3.0  1080 o : 4 draws, 3 Set, module 77
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 5277614fc34359f1 v3.0   796 o : 3 draws, 3 Set, module 46
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS a52cf8d41a6c1999 v3.0  1440 o : 3 draws, 2 Set, module 75
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 1c3a80b9d1661bf5 v3.0  1476 o : 2 draws, 2 Set, module 81
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS eae53ddf0bc58811 v3.0  1192 o : 2 draws, 2 Set, module 72
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 9f7b92cf75bb43ef v3.0  1112 o : 2 draws, 2 Set, module 144
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 3edf6a01b739f226 v3.0   836 o : 2 draws, 2 Set, module 69
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 8db50e4a25d13929 v3.0  1368 o : 2 draws, 2 Set, module 70
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   VS 5dd53c62cd550e47 v3.0  1404 o : 2 draws, 2 Set, module 143
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 31e7c5c19ef9391e v3.0   852 o : 2 draws, 2 Set, module 113
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS f0f5f694bf28c9c3 v3.0  1428 o : 2 draws, 2 Set, module 82
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS b922aa5e2a11275b v3.0   528 o : 1 draws, 1 Set, module 79
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS 6bf7f72e6485e271 v3.0   624 o : 1 draws, 1 Set, module 129
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS f4133293464e92a0 v3.0   844 o : 1 draws, 1 Set, module 80
+10-19 11:29:00.131 I/SC2Partout( 7004): [BILAN]   PS d476ba9023284b83 v3.0  1232 o : 1 draws, 1 Set, module 64
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS bab22b5b3d6449d4 v3.0  1328 o : 1 draws, 1 Set, module 71
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS b51e2e3d4dfd91dd v3.0  1544 o : 1 draws, 1 Set, module 76
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS 6f3355bfd26c7962 v3.0  1416 o : 1 draws, 1 Set, module 62
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS 8d0cef378b4e1cae v3.0   708 o : 1 draws, 1 Set, module 147
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS 105eea8cc2ac7adb v3.0   888 o : 1 draws, 1 Set, module 63
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS 655f1e3f33b2825c v3.0  1060 o : 1 draws, 1 Set, module 83
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS 6b95796026c61a90 v3.0  1272 o : 1 draws, 1 Set, module 73
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   VS d00495c63c881716 v3.0  1588 o : 1 draws, 1 Set, module 111
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN]   PS 07f8e3271171c936 v3.0   732 o : 1 draws, 1 Set, module 112
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] méthodes COM factices appelées (84) :
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [AUDIO] FMOD Ex : 91 méthodes distinctes appelées sur 129 importées (* = implémentée) :
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [AUDIO] mixage : 5552568 frames (125.9 s à 44100 Hz), 9858504 échantillons non nuls, crête 0.849 ; sons créés 57 (échecs 0), lectures par les rappels fichier du jeu 688 (42983907 o) ; playSound 28, fins 23, rappels END 23
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [AUDIO] System maître 0x092723D0 : update 2777 (autres System : 4364, sans effet) ; setSoftwareFormat ignorés 1 ; horloge DSP 5552568 frames ; setDelay 1, départs programmés tenus 1
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [AUDIO] playDSP 4 ; frames demandées aux générateurs DSP du jeu 22071932
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [AUDIO] 3D active : set3DAttributes 430, set3DListenerAttributes (maître) 864, blocs mixés en 3D 687, rappel d'atténuation 0x009E4F10 appelé 687 fois (dernier gain 1.000)
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [DSP] 4 DSP créés ; rappels read appelés 26532 (dont effets 0)
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [DSP]   n°0 « CVoiceSynthesized » générateur read 0x009E9280 : 6633 lectures, 5517983 frames ; userdata 0x0DBFA098 [+0xD0] = 5517983
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [DSP]   n°1 « CVoiceSynthesized » générateur read 0x009E9280 : 6633 lectures, 5517983 frames ; userdata 0x0DBFA188 [+0xD0] = 5517983
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [DSP]   n°2 « CVoiceSynthesized » générateur read 0x009E9280 : 6633 lectures, 5517983 frames ; userdata 0x0DBFA288 [+0xD0] = 5517983
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [DSP]   n°3 « CVoiceSynthesized » générateur read 0x009E9280 : 6633 lectures, 5517983 frames ; userdata 0x0DBFA378 [+0xD0] = 5517983
+10-19 11:29:00.133 I/SC2Partout( 7004): [BILAN] [PILE] pile hôte : profondeur max 2431 Kio sur 65536 Kio (3.7 %) ; sauts SC2_SAUT 106244863 ; lift à jour
+10-19 11:29:00.135 I/SC2Partout( 7004): [BILAN] [FPS] phase démarrage :      0 images en     1.1 s =   0.0 images/s (de 0.0 s)
+10-19 11:29:00.135 I/SC2Partout( 7004): [BILAN] [FPS] phase titre      :      1 images en     0.0 s =  66.8 images/s (de 1.1 s)
+10-19 11:29:00.135 I/SC2Partout( 7004): [BILAN] [FPS] phase chargement :   2777 images en   145.5 s =  19.1 images/s (de 1.1 s, en cours)

@@ -1,0 +1,117 @@
+# victoire-generique.txt — victoire sans joueur pour n'importe quelle mission, au banc (20/10).
+# Coordonnées client 1280×720 (mêmes repères que traynor01-victoire-mac.txt) :
+#   (953, 588)  bouton « Close » du panneau d'aide
+#   (998, 674)  bouton « Continue » de l'écran de fin de mission
+# Déroulé : avant CHAQUE tentative du code, quatre clics « Close » sur le panneau d'aide (T-20, T-15, T-10, T-5 s) :
+# l'aide s'ouvre plus ou moins tard selon la charge de la machine (TRaynor01 : après 55 s avec deux runs en
+# parallèle) et, ouverte, elle bloque le chat. Code « whatisbestinlife » tapé à 60, 120, 180 et 240 s (Entrée, une
+# lettre tous les 0,3 s, Entrée) — la victoire est DÉTECTÉE par le module (QUAND:VICTOIRE : sauvegarde
+# …Victory.SC2Save écrite pendant le run), qui annule alors tout ce qui reste d'absolu (tentatives suivantes,
+# garde-fou compris) et joue la suite en relatif : clics « Continue », puis QUIT après la scène qui suit. Sans
+# victoire : 300:QUIT arrête le run.
+
+# tentative 1 à 60 s : aide fermée, puis w h a t i s b e s t i n l i f e
+40:CLIC:953,588
+45:CLIC:953,588
+50:CLIC:953,588
+55:CLIC:953,588
+60.0:KEY:0x0D
+60.3:KEY:0x57
+60.6:KEY:0x48
+60.9:KEY:0x41
+61.2:KEY:0x54
+61.5:KEY:0x49
+61.8:KEY:0x53
+62.1:KEY:0x42
+62.4:KEY:0x45
+62.7:KEY:0x53
+63.0:KEY:0x54
+63.3:KEY:0x49
+63.6:KEY:0x4E
+63.9:KEY:0x4C
+64.2:KEY:0x49
+64.5:KEY:0x46
+64.8:KEY:0x45
+65.4:KEY:0x0D
+
+# tentative 2 à 120 s : aide fermée, puis w h a t i s b e s t i n l i f e
+100:CLIC:953,588
+105:CLIC:953,588
+110:CLIC:953,588
+115:CLIC:953,588
+120.0:KEY:0x0D
+120.3:KEY:0x57
+120.6:KEY:0x48
+120.9:KEY:0x41
+121.2:KEY:0x54
+121.5:KEY:0x49
+121.8:KEY:0x53
+122.1:KEY:0x42
+122.4:KEY:0x45
+122.7:KEY:0x53
+123.0:KEY:0x54
+123.3:KEY:0x49
+123.6:KEY:0x4E
+123.9:KEY:0x4C
+124.2:KEY:0x49
+124.5:KEY:0x46
+124.8:KEY:0x45
+125.4:KEY:0x0D
+
+# tentative 3 à 180 s : aide fermée, puis w h a t i s b e s t i n l i f e
+160:CLIC:953,588
+165:CLIC:953,588
+170:CLIC:953,588
+175:CLIC:953,588
+180.0:KEY:0x0D
+180.3:KEY:0x57
+180.6:KEY:0x48
+180.9:KEY:0x41
+181.2:KEY:0x54
+181.5:KEY:0x49
+181.8:KEY:0x53
+182.1:KEY:0x42
+182.4:KEY:0x45
+182.7:KEY:0x53
+183.0:KEY:0x54
+183.3:KEY:0x49
+183.6:KEY:0x4E
+183.9:KEY:0x4C
+184.2:KEY:0x49
+184.5:KEY:0x46
+184.8:KEY:0x45
+185.4:KEY:0x0D
+
+# tentative 4 à 240 s : aide fermée, puis w h a t i s b e s t i n l i f e
+220:CLIC:953,588
+225:CLIC:953,588
+230:CLIC:953,588
+235:CLIC:953,588
+240.0:KEY:0x0D
+240.3:KEY:0x57
+240.6:KEY:0x48
+240.9:KEY:0x41
+241.2:KEY:0x54
+241.5:KEY:0x49
+241.8:KEY:0x53
+242.1:KEY:0x42
+242.4:KEY:0x45
+242.7:KEY:0x53
+243.0:KEY:0x54
+243.3:KEY:0x49
+243.6:KEY:0x4E
+243.9:KEY:0x4C
+244.2:KEY:0x49
+244.5:KEY:0x46
+244.8:KEY:0x45
+245.4:KEY:0x0D
+
+# garde-fou : rien détecté à 300 s → arrêt volontaire du run
+300:QUIT
+
+# à partir d'ici : RELATIF à la détection de la victoire (les absolus restants sont annulés)
+QUAND:VICTOIRE
++6:CLIC:998,674
++9:CLIC:998,674
++12:CLIC:998,674
++120:QUIT

@@ -1,0 +1,10 @@
+--------- beginning of main
+10-17 07:02:11.104  5120  5120 I ActivityManager: Start proc 5120:fr.sc2partout/u0a312 for top-activity
+10-17 07:02:11.402  5120  5151 I SC2Partout: [ANDROID] SC2 Partout - passe 7a, /sdcard/SC2Partout/install
+10-17 07:02:11.530  5120  5151 I SC2Partout: [FENETRE] INIT_WINDOW 2176x1812 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-17 07:02:11.531  5120  5151 I SC2Partout: fenêtre 2176x1812, image du jeu 1280x720 en (0.0, 152.0) ×1.7000 ; bouton client (767, 301) → adb shell input tap 1304 664 ; centre → adb shell input tap 1088 906
+10-17 07:02:13.880  5120  5150 I SC2Partout: [FENETRE] TERM_WINDOW (fenêtre perdue n°1) — 0 Present vus, 0 frames affichées, 0 tampons postés ; le rendu continue sans fenêtre
+10-17 07:02:24.017  5120  5152 I SC2Partout: [AFFICHAGE] Present n°1 : rendu sans fenêtre (aucune ANativeWindow : écran éteint/verrouillé ou activité en arrière-plan) — rien n'est relu ni posté ; suivants comptés jusqu'au retour de la fenêtre
+10-17 07:02:24.019  5120  5152 I SC2Partout: [VK] Present frame n°1 → /storage/emulated/0/Android/data/fr.sc2partout/files/frames/frame_00001.ppm : écrit, moyenne RGB 0.00 0.00 0.00
+10-17 07:03:41.226  5120  5152 I SC2Partout: [VK] Present frame n°800 → /storage/emulated/0/Android/data/fr.sc2partout/files/frames/frame_00800.ppm : écrit, moyenne RGB 40.12 51.30 86.04 (NON NOIRE)
+10-17 07:04:40.510  5120  5152 I SC2Partout: [ANDROID] affichage : 812 Present ; copie CPU : tampons postés 0 / échecs de verrou 0 / échecs de post 0 / géométries vides 0 ; fenêtres perdues 1 ; Present sans fenêtre 812 ; cibles refusées 0

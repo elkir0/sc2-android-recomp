@@ -1,0 +1,6 @@
+--------- beginning of main
+10-17 07:50:02.300  1670  1702 I SC2Partout: [FENETRE] INIT_WINDOW 0x0 — 0 Present vus, 0 frames affichées, 0 tampons postés
+10-17 07:50:14.902  1670  1703 E SC2Partout: [AFFICHAGE] fenêtre de taille 0x0 : géométrie NON posée, rien ne sera peint (cas n°1 ; suivants comptés)
+10-17 07:50:15.102  1670  1703 E SC2Partout: [AFFICHAGE] fenêtre de taille 0x0 : géométrie NON posée, rien ne sera peint (cas n°2 ; suivants comptés)
+10-17 07:50:15.302  1670  1703 E SC2Partout: [AFFICHAGE] fenêtre de taille 0x0 : géométrie NON posée, rien ne sera peint (cas n°3 ; suivants comptés)
+10-17 07:52:40.510  1670  1703 I SC2Partout: [ANDROID] affichage : 412 Present ; copie CPU : tampons postés 0 / échecs de verrou 0 / échecs de post 0 / géométries vides 412 ; fenêtres perdues 0 ; Present sans fenêtre 0 ; cibles refusées 0
